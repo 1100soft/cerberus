@@ -1,15 +1,18 @@
 # List of local repository paths and their corresponding remotes.
-# Each line must contain at least two fields separated by whitespace:
+# Each line must contain at least the absolute path to the local repository.
 #
-#   <absolute path to local repository>    <remote name>    [branch]    [log flag]
+#   <absolute path to local repository>    [remote name]    [branch]    [log flag]
 #
-# The optional branch defaults to 'wip'.  The optional log flag can be one of
-# 'log', '--log', 'debug', 'verbose', 'true' or '1' to enable verbose output.
+# The remote name is optional and defaults to 'origin' if omitted.
+# The branch is optional and defaults to the current branch of the repository if omitted.
+# The optional log flag can be one of 'log', '--log', 'debug', 'verbose', 'true' or '1' to enable verbose output.
 #
 # Lines starting with '#' are ignored.
-
+#
 # Example entries:
-# /home/username/projects/repo1     origin      wip        --log
+# /home/username/projects/repo1     origin      main        --log
 # /home/username/work/notes        upstream    backups
-/home/eh930/bioinformatics/project/pancreas_remembers/script origin wip --log
-/home/eh930/.custom origin wip
+# /home/username/justpath
+/home/eh930/bioinformatics/project/pancreas_remembers/script
+$HOME/.custom origin
+/home/eh930/project/git-autopush
