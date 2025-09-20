@@ -13,6 +13,6 @@
 # /home/username/projects/repo1     origin      main        --log
 # /home/username/work/notes        upstream    backups
 # /home/username/justpath
-$HOME/bioinformatics/project/pancreas_remembers/script
-$HOME/.custom origin
-$HOME/project/git-autopush
+/home/eh930/bioinformatics/project/pancreas_remembers/script
+/home/eh930/.custom origin
+/home/eh930/project/git-autopush
