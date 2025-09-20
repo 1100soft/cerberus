@@ -1,0 +1,6 @@
+# Ignore log files and temporary systemd unit backups
+*.log
+
+# Exclude user-specific systemd unit files (located in home directory)
+/.config/systemd/user/git-autopush-*.service
+/.config/systemd/user/git-autopush-*.timer
