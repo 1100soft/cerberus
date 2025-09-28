@@ -16,3 +16,4 @@
 /home/eh930/bioinformatics/project/pancreas_remembers/script
 /home/eh930/.custom origin
 /home/eh930/project/git-autopush
+/home/eh930/project/cloud-mount-manager
