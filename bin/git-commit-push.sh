@@ -209,6 +209,10 @@ git -C "$repo" push "$remote" "refs/heads/$branch:refs/heads/$branch"
 
 clear_debounce_if_unchanged
 
+if [[ "${AUTOPUSH_SYNC_INDEX:-true}" == true ]]; then
+  git -C "$repo" reset --mixed HEAD >/dev/null 2>&1 || true
+fi
+
 rm -f "$tmp_index"
 trap - EXIT
 log "Completed run for $repo"
