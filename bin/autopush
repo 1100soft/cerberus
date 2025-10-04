@@ -112,6 +112,22 @@ current_branch() {
   echo main
 }
 
+
+autopush_suggest_branch() {
+  local repo="$1"
+  local branch="$2"
+  if [[ -n "$branch" ]]; then
+    echo "$branch"
+    return 0
+  fi
+  local current
+  current="$(current_branch "$repo" "")"
+  if autopush_is_protected_branch "$current"; then
+    echo "$(autopush_default_branch_prefix)${current}"
+  else
+    echo "${current}"
+  fi
+}
 append_or_replace_config_line() {
   local repo_path="$1"
   local line="$2"
