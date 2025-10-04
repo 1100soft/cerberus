@@ -48,3 +48,14 @@ autopush_repo_debounce_pid_file() {
   key="$(autopush_sanitize_unit_name "$repo")"
   echo "${AUTOPUSH_DATA_DIR}/${key}.debounce.pid"
 }
+
+
+autopush_resolve_min_delay() {
+  local value
+  value="${AUTOPUSH_MIN_DELAY:-60}"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "$value"
+  else
+    echo 60
+  fi
+}
