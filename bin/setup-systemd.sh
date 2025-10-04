@@ -214,7 +214,7 @@ Description=Run git-autopush for $repo_path
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=5min
+OnUnitActiveSec=1min
 Persistent=true
 
 [Install]
