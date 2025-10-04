@@ -174,6 +174,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
   # Sanitize the repository path for unit naming
   sanitized=$(autopush_sanitize_unit_name "$repo_path")
+  if [[ "$selection_active" == true && -z "${selected_repos[$sanitized]:-}" ]]; then
+    log "Skipping $repo_path (not selected)"
+    continue
+  fi
   service_name="git-autopush-${sanitized}.service"
   timer_name="git-autopush-${sanitized}.timer"
   watch_name="git-autopush-${sanitized}-watch.service"
@@ -243,7 +247,23 @@ EOF
 
   echo "Created unit files for $repo_path ($service_name and $timer_name)"
   log "Wrote service to $service_path and timer to $timer_path"
+  processed_repos["$sanitized"]=1
+  processed_any=true
 done < "$config_file"
+
+# Confirm selected repos existed in config
+if [[ "$selection_active" == true ]]; then
+  for sanitized in "${!selected_repos[@]}"; do
+    if [[ -z "${processed_repos[$sanitized]:-}" ]]; then
+      echo "Warning: repository '${selected_repos[$sanitized]}' not found in configuration; nothing generated." >&2
+    fi
+  done
+fi
+
+if [[ "$processed_any" == false ]]; then
+  echo "No repositories processed; exiting." >&2
+  exit 1
+fi
 
 # Reload systemd and enable timers/watchers
 systemctl --user daemon-reload
@@ -255,6 +275,9 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   read -r -a fields <<< "$line"
   repo_path="${fields[0]:-}"
   sanitized=$(autopush_sanitize_unit_name "$repo_path")
+  if [[ -z "${processed_repos[$sanitized]:-}" ]]; then
+    continue
+  fi
   timer_name="git-autopush-${sanitized}.timer"
   watch_name="git-autopush-${sanitized}-watch.service"
 
