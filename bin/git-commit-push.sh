@@ -51,6 +51,30 @@ log() {
   fi
 }
 
+autopush_ensure_data_dir
+state_file="$(autopush_repo_state_file "$repo")"
+state_snapshot=""
+if [[ -f "$state_file" ]]; then
+  state_snapshot="$(cat "$state_file" 2>/dev/null || echo "")"
+fi
+min_delay="$AUTOPUSH_MIN_DELAY"
+
+clear_debounce_if_unchanged() {
+  local after
+  after="$(cat "$state_file" 2>/dev/null || echo "")"
+  if [[ -z "$after" || "$after" == "$state_snapshot" ]]; then
+    rm -f "$state_file"
+  fi
+}
+
+if [[ -n "$state_snapshot" && "$state_snapshot" =~ ^[0-9]+$ ]]; then
+  now_epoch="$(date +%s)"
+  if (( now_epoch - state_snapshot < min_delay )); then
+    log "Deferring commit; last change $(( now_epoch - state_snapshot ))s ago (<${min_delay}s)."
+    exit 0
+  fi
+fi
+
 # Prevent overlapping runs for the same repo using a per-repo lock.
 # This avoids race conditions when the timer and watcher fire together.
 lock_file="$repo/.git/.git-autopush.lock"
