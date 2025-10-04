@@ -19,6 +19,7 @@ export AUTOPUSH_DATA_DIR="${AUTOPUSH_DATA_DIR:-${_autopush_default_data_home}/au
 export AUTOPUSH_CONFIG_FILE="${AUTOPUSH_CONFIG_FILE:-${AUTOPUSH_CONFIG_DIR}/repos.txt}"
 export AUTOPUSH_SYSTEMD_DIR="${AUTOPUSH_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
 export AUTOPUSH_MIN_DELAY="${AUTOPUSH_MIN_DELAY:-60}"
+export AUTOPUSH_BRANCH_PREFIX="${AUTOPUSH_BRANCH_PREFIX:-autopush/}"
 
 # Ensure directories exist when scripts need them. Call lazily.
 autopush_ensure_config_dir() {
