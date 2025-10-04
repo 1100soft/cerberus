@@ -39,8 +39,8 @@ Commands:
       Show systemd status; add --discover to include units found via systemd.
   prune [--dry-run]
       Disable and remove git-autopush units not referenced in the config file.
-  setup [--timers]
-      Regenerate and enable systemd units for all repositories.
+  setup [--timers] [--repo path]
+      Regenerate systemd units (limit to specific repo with --repo).
   enable [--timers]
       Run setup and enable lingering so units start on boot.
   disable [--disable-linger]
