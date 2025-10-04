@@ -33,3 +33,18 @@ autopush_sanitize_unit_name() {
   local path="$1"
   echo "$path" | sed 's/[^A-Za-z0-9]/_/g'
 }
+
+
+autopush_repo_state_file() {
+  local repo="$1"
+  local key
+  key="$(autopush_sanitize_unit_name "$repo")"
+  echo "${AUTOPUSH_DATA_DIR}/${key}.last_change"
+}
+
+autopush_repo_debounce_pid_file() {
+  local repo="$1"
+  local key
+  key="$(autopush_sanitize_unit_name "$repo")"
+  echo "${AUTOPUSH_DATA_DIR}/${key}.debounce.pid"
+}
