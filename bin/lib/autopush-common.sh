@@ -82,5 +82,5 @@ autopush_is_protected_branch() {
 }
 
 autopush_default_branch_prefix() {
-  echo "autopush/"
+  echo "$AUTOPUSH_BRANCH_PREFIX"
 }
