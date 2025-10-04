@@ -61,7 +61,7 @@ if ! command -v inotifywait >/dev/null 2>&1; then
   exit 0
 fi
 
-min_delay=$(( AUTOPUSH_MIN_DELAY + 0 ))
+min_delay="$(autopush_resolve_min_delay)"
 autopush_ensure_data_dir
 state_file="$(autopush_repo_state_file "$repo")"
 pid_file="$(autopush_repo_debounce_pid_file "$repo")"
