@@ -151,6 +151,7 @@ fi
 # Capture outstanding changes; no-op when tree is clean
 if [[ -z "$(git -C "$repo" status --porcelain)" ]]; then
   log "No changes detected in $repo; exiting."
+  clear_debounce_if_unchanged
   exit 0
 fi
 
