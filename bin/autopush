@@ -265,7 +265,9 @@ HELP
       return 2
     fi
     if [[ "$suggested" != "$current_default" ]]; then
-      echo "Selecting automation branch '$suggested' because '$current_default' is protected."
+      echo "Selecting dedicated automation branch '$suggested' (derived from '$current_default')."
+    else
+      echo "Managing automation on '$suggested'."
     fi
     branch="$suggested"
   fi
