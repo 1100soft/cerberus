@@ -2,14 +2,19 @@
 #
 # setup-systemd.sh
 #
-# Reads repos.txt and generates systemd user units to automatically commit
+# Reads config/repos.txt and generates systemd user units to automatically commit
 # and push each repository listed.  This script must be run under the
 # account that owns the repositories.
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/autopush-common.sh"
+
 log_enabled=false
 create_timers=false
+declare -A selected_repos=()
+selection_active=false
 
 # Parse optional flags: --log, --no-timer/--no-timers, --enable-timer
 while [[ $# -gt 0 ]]; do
@@ -25,6 +30,20 @@ while [[ $# -gt 0 ]]; do
     --enable-timer|--timers)
       create_timers=true
       shift
+      ;;
+    --repo|--only)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --repo" >&2
+        exit 2
+      fi
+      repo_arg="$2"
+      shift 2
+      if [[ -d "$repo_arg" ]]; then
+        repo_arg="$(cd "$repo_arg" && pwd)"
+      fi
+      sanitized_arg=$(autopush_sanitize_unit_name "$repo_arg")
+      selected_repos["$sanitized_arg"]="$repo_arg"
+      selection_active=true
       ;;
     *)
       break
@@ -53,19 +72,20 @@ EOF
   exit 1
 fi
 
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-config_file="$project_dir/repos.txt"
-service_dir="$HOME/.config/systemd/user"
+bin_dir="$AUTOPUSH_BIN_DIR"
+config_file="$AUTOPUSH_CONFIG_FILE"
+service_dir="$AUTOPUSH_SYSTEMD_DIR"
 have_inotify=false
 if command -v inotifywait >/dev/null 2>&1; then
   have_inotify=true
 fi
 
-# Ensure the systemd user directory exists
+# Ensure directories exist
 mkdir -p "$service_dir"
+autopush_ensure_config_dir
 
 if [[ ! -f "$config_file" ]]; then
-  echo "Configuration file '$config_file' not found." >&2
+  echo "Configuration file '$config_file' not found. Add repositories with 'autopush add <path>'." >&2
   exit 1
 fi
 
@@ -79,8 +99,27 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   repo_path="${fields[0]:-}"
   remote_name="${fields[1]:-origin}"
   branch_name="${fields[2]:-}"
-  log_flag="${fields[3]:-}"
-  timer_flag="${fields[4]:-}"
+  field_count=${#fields[@]}
+  log_flag=""
+  timer_flag=""
+  if (( field_count >= 4 )); then
+    candidate="${fields[3]}"
+    case "$candidate" in
+      timer|on|true|1|no-timer|notimer|off|false|0)
+        if (( field_count == 4 )); then
+          timer_flag="$candidate"
+        else
+          log_flag="$candidate"
+        fi
+        ;;
+      *)
+        log_flag="$candidate"
+        ;;
+    esac
+  fi
+  if (( field_count >= 5 )); then
+    timer_flag="${fields[4]}"
+  fi
 
   if [[ -z "$repo_path" ]]; then
     echo "Skipping invalid entry: '$line'" >&2
@@ -131,7 +170,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   fi
 
   # Sanitize the repository path for unit naming
-  sanitized=$(echo "$repo_path" | sed 's/[^A-Za-z0-9]/_/g')
+  sanitized=$(autopush_sanitize_unit_name "$repo_path")
   service_name="git-autopush-${sanitized}.service"
   timer_name="git-autopush-${sanitized}.timer"
   watch_name="git-autopush-${sanitized}-watch.service"
@@ -157,7 +196,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 Environment="GIT_SSH_COMMAND=/usr/bin/ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
-ExecStart=/usr/bin/env bash "$project_dir/git-commit-push.sh" "$repo_path" "$remote_name" "$branch_name"${log_suffix}
+ExecStart=/usr/bin/env bash "$bin_dir/git-commit-push.sh" "$repo_path" "$remote_name" "$branch_name"${log_suffix}
 EOF
 
   # Create the timer unit file (optional)
@@ -189,7 +228,7 @@ Type=simple
 Restart=always
 RestartSec=2s
 Environment="GIT_SSH_COMMAND=/usr/bin/ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
-ExecStart=/usr/bin/env bash "$project_dir/watch-and-sync.sh" "$repo_path" "$remote_name" "$branch_name"${log_suffix}
+ExecStart=/usr/bin/env bash "$bin_dir/watch-and-sync.sh" "$repo_path" "$remote_name" "$branch_name"${log_suffix}
 
 [Install]
 WantedBy=default.target
@@ -212,12 +251,26 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
   read -r -a fields <<< "$line"
   repo_path="${fields[0]:-}"
-  sanitized=$(echo "$repo_path" | sed 's/[^A-Za-z0-9]/_/g')
+  sanitized=$(autopush_sanitize_unit_name "$repo_path")
   timer_name="git-autopush-${sanitized}.timer"
   watch_name="git-autopush-${sanitized}-watch.service"
 
   # Determine if we should enable the timer for this repo
-  timer_flag="${fields[4]:-}"
+  field_count=${#fields[@]}
+  timer_flag=""
+  if (( field_count >= 4 )); then
+    candidate="${fields[3]}"
+    case "$candidate" in
+      no-timer|notimer|off|false|0|timer|on|true|1)
+        if (( field_count == 4 )); then
+          timer_flag="$candidate"
+        fi
+        ;;
+    esac
+  fi
+  if (( field_count >= 5 )); then
+    timer_flag="${fields[4]}"
+  fi
   enable_timer_for_repo=$create_timers
   if [[ -n "$timer_flag" ]]; then
     case "$timer_flag" in

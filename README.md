@@ -1,76 +1,122 @@
-# Project overview
+# git-autopush
 
-This repository contains scripts and configuration files to automate commits and pushes for multiple Git repositories on a Linux system.  Each repository you wish to monitor is listed in a simple configuration file, and systemd user units are generated to run a commit‑and‑push routine at regular intervals.  The directory can itself be versioned with git and contains everything required to set up and monitor the automation.
+Bash utilities that keep one or more Git repositories synced by creating
+systemd user units that commit and push on change. The tooling now installs as
+an `autopush` command that can be run from any directory and stores its
+configuration under `~/.config/autopush` (or the XDG equivalent).
 
-## Structure
+## Installation
 
-- `repos.txt` – a plain text file listing pairs of local repository paths and remote names (with optional fields for the branch, logging flag, and timer control).  Lines beginning with `#` are comments and ignored.  Each non-empty line must contain at least two fields separated by whitespace:
-  
-  1. an absolute path to the local git repository
-  2. the remote name to push to (for example, `origin`)
-  3. *(optional)* the branch name that should receive the automated commits; defaults to `wip` if omitted
-  4. *(optional)* a logging flag (`log`, `--log`, `debug`, `verbose`, `true` or `1`) to enable verbose output from the commit script
-  5. *(optional)* timer control: `no-timer`/`off`/`false`/`0` to disable the periodic timer for this repo (watcher still used if available); `timer`/`on`/`true`/`1` to force-enable
+```bash
+./install.sh            # installs into ~/.local/share/autopush and ~/.local/bin
+```
 
-- `git‑commit‑push.sh` – a bash script that snapshots the working tree, writes a commit on the designated branch (default `wip`) and pushes it to the chosen remote without disturbing your current branch.  It accepts a repository path, remote name, optional branch name and an optional `--log` flag for verbose output.  When no Git identity is configured, it falls back to `Git Autopush <git-autopush@localhost>` so commits can always be created.
+Run the installer as your regular user; it refuses to run under sudo so that it
+targets your home directory. By default the command is written to
+`~/.local/bin/autopush`; make sure that directory is on your `PATH`. Override
+the install prefix with `./install.sh --prefix /custom/path` or set `BIN_DIR` /
+`SHARE_DIR`. The install script only copies shell files and never escalates
+privileges.
 
-- `setup‑systemd.sh` – a bash script that reads `repos.txt` and generates a dedicated `service` for each repository. If `inotifywait` is available, it also generates a long‑running watcher service that syncs immediately on file changes. Timers are optional and disabled by default; enable them globally with `--timers` or per‑repo via the 5th column. Units are installed into `~/.config/systemd/user`, the daemon is reloaded, and timers/watchers are enabled as configured.
+To remove the tooling later, run:
 
-- `status.sh` – a helper script to display the current status of all generated services and timers.  It lists each repository defined in `repos.txt` and shows whether its corresponding systemd units are active.
- 
-- `watch-and-sync.sh` – a small helper invoked by the watcher services. It uses `inotifywait` to monitor the repo recursively (excluding `.git/`) and triggers `git-commit-push.sh` when files change.
+```bash
+./uninstall.sh         # removes ~/.local/share/autopush and the wrapper
+```
 
-- `.gitignore` – excludes logs and transient systemd unit files from version control.
+Pass `--purge-config` if you also want to delete `~/.config/autopush`.
 
-### Usage
+### Cleaning existing setups
 
-1. Edit `repos.txt` and add one line per repository you want to manage.  For example:
+If you were using an older copy of these scripts and already have git-autopush
+systemd units in place, reinstalling will reuse the same unit names, so you
+won't end up with duplicates. To tidy up units that no longer correspond to the
+current configuration, run:
 
-   ```
-   # local path                       remote     branch     log        timer
-   /home/username/projects/repo1      origin     wip        --log      no-timer
-   /home/username/work/notes          upstream   backups
-   ```
+```bash
+autopush prune --dry-run   # inspect what would be removed
+autopush prune             # disable/remove unmanaged units
+```
 
-2. Run `setup‑systemd.sh` to generate and enable the systemd units:
+This scans systemd directly (like `autopush status --discover`) and removes
+only units that are missing from `repos.txt`.
 
-   ```bash
-   ./setup-systemd.sh                 # timers are disabled by default; add --timers to enable
-   ./setup-systemd.sh --timers        # enable timers globally (in addition to watchers)
-   ```
+## Quick start
 
-   This script must be run with your user account.  It will place service and timer units in `~/.config/systemd/user` and enable them so they start automatically on boot.  If `inotifywait` is present, a watcher service is also enabled per repo to sync immediately on file changes.  To allow timers/watchers to run when you are not logged in, enable lingering for your user with `loginctl enable‑linger $USER`.
+1. Install the command and ensure it is on your `PATH`.
+2. Run `autopush add .` inside a Git repository that should auto-commit and
+   push. The tool records the repository inside your private config file and
+   regenerates the systemd units so the watcher starts immediately.
+3. Check `autopush status` to see the health of the timer, watcher and service
+   units for all configured repositories.
 
-3. Check the status of the units at any time with:
+`autopush add` accepts optional flags:
 
-   ```bash
-   ./status.sh
-   ```
+- `--remote <name>` – choose a remote (defaults to `origin`, then the first remote)
+- `--branch <name>` – override the branch used for automation (defaults to the
+  current branch)
+- `--log` – enable verbose logging for runs of `git-commit-push.sh`
+- `--timer` / `--no-timer` – force-enable or disable the periodic timer for just
+  that repository. Watch services are created automatically when
+  `inotifywait` is available.
 
-4. The `git‑commit‑push.sh` script can also be invoked manually to commit and push a specific repository:
+Run `autopush help` to view all available commands:
 
-   ```bash
-   ./git-commit-push.sh /home/username/projects/repo1 origin wip
-   ```
+- `autopush list` – print the raw configuration file
+- `autopush remove [path]` – stop managing a repository and tear down its units
+- `autopush setup [--timers]` – rebuild units for everything in the config
+- `autopush status [--discover]` – show unit health; add `--discover` to include systemd-managed entries
+- `autopush prune [--dry-run]` – remove systemd units that are no longer in the config
+- `autopush enable [--timers]` – rebuild units and enable lingering so they run
+  after reboot
+- `autopush disable [--disable-linger]` – disable timers/watchers for everything
+  currently configured
+- `autopush config-path` – print the location of the config file
 
-### Autostart on Boot
+## Configuration file
 
-- Enable autostart (generates units, enables watchers/timers as configured, and enables lingering):
+All repositories are stored in `${XDG_CONFIG_HOME:-$HOME/.config}/autopush/repos.txt`.
+Each non-empty line uses whitespace-separated fields:
 
-  ```bash
-  ./enable-startup.sh         # add --timers to also enable timers globally
-  ```
+1. absolute repository path
+2. remote name (default `origin`)
+3. branch name (defaults to the repository's current branch)
+4. optional logging flag – one of `log`, `--log`, `debug`, `verbose`, `true`, `1`
+5. optional timer flag – `timer`/`on`/`true`/`1` to force-enable timers, or
+   `no-timer`/`off`/`false`/`0` to disable them
 
-- Disable autostart (disables watchers/timers; optionally disable lingering):
+Use `autopush add`/`remove` to edit this file safely; comments (lines beginning
+with `#`) and blank lines are preserved.
 
-  ```bash
-  ./disable-startup.sh        # add --disable-linger to also disable lingering
-  ```
+## Systemd integration
 
-### Notes
+`autopush setup` (run automatically by `autopush add`) generates a trio of
+systemd user units per repository:
 
-- The commit message used by the automation includes a timestamp.  No commit is made when there are no staged changes.
-- Automated commits are always written to the configured branch (default `wip`) so that work-in-progress history can be squashed later.
-- Pass `--log` to `git-commit-push.sh` (or add the logging flag in `repos.txt`) to emit detailed diagnostics about staging, commit creation and pushes; omit it for quiet operation.
-- For immediate syncs, install `inotify-tools` (provides `inotifywait`). The setup script will generate and enable a watcher service that reacts to changes instantly. Without it, the timer still runs periodically as a fallback.
-- Systemd unit names are derived from the repository paths by replacing non‑alphanumeric characters with underscores.  This ensures unique and valid unit names.
+- `git-autopush-<repo>.service` – runs `git-commit-push.sh`
+- `git-autopush-<repo>.timer` – optional periodic timer (5 minutes) when enabled
+- `git-autopush-<repo>-watch.service` – file watcher using `inotifywait` for
+  near-instant pushes
+
+The scripts place unit files under `~/.config/systemd/user` and enable them for
+your account. To keep services alive after logout, run `autopush enable`, which
+activates the units and enables lingering (`loginctl enable-linger $USER`).
+
+The helper scripts remain available in the install directory:
+`setup-systemd.sh`, `enable-startup.sh`, `disable-startup.sh`, `status.sh`,
+`watch-and-sync.sh`, and `git-commit-push.sh`. They look up their configuration
+via the hidden config directory, so they can also be invoked manually if
+needed.
+
+## Notes
+
+- `git-commit-push.sh` avoids creating commits when there are no changes. When
+  it runs it stages everything in a temporary index, writes a new commit on the
+  configured branch and pushes it to the chosen remote.
+- The watcher requires `inotifywait` (from `inotify-tools`). If it is absent the
+  timer continues to provide a periodic safety net.
+- Automated commits default the author to the repository's configured
+  credentials. Fallbacks (`Git Autopush <git-autopush@localhost>`) are used when
+  nothing is configured.
+- The configuration directory is version-control friendly if you want to back it
+  up separately, but it is never modified unless you run an `autopush` command.

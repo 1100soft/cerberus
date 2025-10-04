@@ -7,6 +7,8 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/autopush-common.sh"
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <repo-path> [remote-name] [branch-name] [--log]" >&2
@@ -51,7 +53,9 @@ if ! command -v inotifywait >/dev/null 2>&1; then
   exit 0
 fi
 
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "${script_dir}/.." && pwd)"
+bin_dir="$project_root/bin"
 
 log "Watching $repo for changes; syncing to $remote/$branch"
 
@@ -59,6 +63,9 @@ log "Watching $repo for changes; syncing to $remote/$branch"
 # script itself uses a lock, so bursts are safely coalesced.
 inotifywait -m -r -e close_write,create,delete,move --exclude '(^|/)\.git($|/)' "$repo" | \
 while read -r _; do
-  /usr/bin/env bash "$project_dir/git-commit-push.sh" "$repo" "$remote" "$branch" $([[ "$log_enabled" == true ]] && echo --log || true)
+  commit_args=("$repo" "$remote" "$branch")
+  if [[ "$log_enabled" == true ]]; then
+    commit_args+=("--log")
+  fi
+  /usr/bin/env bash "$AUTOPUSH_BIN_DIR/git-commit-push.sh" "${commit_args[@]}"
 done
-

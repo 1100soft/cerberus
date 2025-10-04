@@ -7,7 +7,10 @@
 
 set -euo pipefail
 
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/autopush-common.sh"
+
+bin_dir="$AUTOPUSH_BIN_DIR"
 
 log_enabled=false
 timers_flag=""  # empty = respect per-repo/defaults; "--timers" to enable timers globally
@@ -49,7 +52,7 @@ if [[ "$log_enabled" == true ]]; then
 fi
 
 # Regenerate units and enable per configuration
-"$project_dir/setup-systemd.sh" $log_arg $timers_flag
+"$bin_dir/setup-systemd.sh" $log_arg $timers_flag
 
 # Try to enable lingering so user services start at boot without login
 if ! loginctl enable-linger "$USER" >/dev/null 2>&1; then
@@ -60,4 +63,3 @@ else
 fi
 
 echo "Autostart setup complete."
-
