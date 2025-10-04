@@ -76,8 +76,7 @@ You can still choose any branch explicitly with `autopush add --branch <name>` s
 `autopush add` accepts optional flags:
 
 - `--remote <name>` – choose a remote (defaults to `origin`, then the first remote)
-- `--branch <name>` – override the branch used for automation (defaults to the
-  current branch)
+- `--branch <name>` – override the branch used for automation (defaults to `autopush/<current-branch>`).
 - `--log` – enable verbose logging for runs of `git-commit-push.sh`
 - `--timer` / `--no-timer` – force-enable or disable the periodic timer for just
   that repository. Watch services are created automatically when
