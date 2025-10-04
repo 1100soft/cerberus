@@ -24,7 +24,7 @@ To remove the tooling later, run:
 ./uninstall.sh         # removes ~/.local/share/autopush and the wrapper
 ```
 
-Pass `--purge-config` if you also want to delete `~/.config/autopush`.
+Pass `--purge-config` if you also want to delete `~/.config/autopush` and `~/.local/share/autopush`.
 
 ### Cleaning existing setups
 
