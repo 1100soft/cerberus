@@ -45,6 +45,11 @@ if [[ -z "$branch" ]]; then
   fi
 fi
 
+if autopush_is_protected_branch "$branch" && [[ "${AUTOPUSH_ALLOW_PROTECTED_BRANCHES:-false}" != true ]]; then
+  echo "Refusing to auto-push to protected branch '$branch'. Set --branch to a dedicated branch or export AUTOPUSH_ALLOW_PROTECTED_BRANCHES=true if you accept the risk." >&2
+  exit 2
+fi
+
 log() {
   if [[ "$log_enabled" == true ]]; then
     printf '[git-autopush] %s\n' "$*"
