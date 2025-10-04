@@ -41,6 +41,14 @@ autopush prune             # disable/remove unmanaged units
 This scans systemd directly (like `autopush status --discover`) and removes
 only units that are missing from `repos.txt`.
 
+### Debounce window
+
+To avoid a flurry of tiny commits, watchers batch changes for at least
+`AUTOPUSH_MIN_DELAY` seconds (default 60). Each file change refreshes the timer,
+so commits happen once the repository has been quiet for that window. Override
+the delay by exporting `AUTOPUSH_MIN_DELAY=<seconds>` before invoking the
+installer or watcher services.
+
 ## Quick start
 
 1. Install the command and ensure it is on your `PATH`.
