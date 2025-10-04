@@ -121,8 +121,10 @@ ensure_worker_running() {
   if [[ -f "$pid_file" ]]; then
     local pid
     pid="$(cat "$pid_file" 2>/dev/null || echo "")"
-    if [[ -n "$pid" && kill -0 "$pid" >/dev/null 2>&1 ]]; then
-      return
+    if [[ -n "$pid" ]]; then
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        return
+      fi
     fi
     rm -f "$pid_file"
   fi
