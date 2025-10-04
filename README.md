@@ -46,7 +46,8 @@ only units that are missing from `repos.txt`.
 1. Install the command and ensure it is on your `PATH`.
 2. Run `autopush add .` inside a Git repository that should auto-commit and
    push. The tool records the repository inside your private config file and
-   regenerates the systemd units so the watcher starts immediately.
+   regenerates the systemd units for that repository so the watcher starts
+   immediately (existing entries are left untouched).
 3. Check `autopush status` to see the health of the timer, watcher and service
    units for all configured repositories.
 
