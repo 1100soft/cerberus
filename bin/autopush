@@ -247,7 +247,11 @@ HELP
   local repo_path
   repo_path="$(resolve_repo_path "$target")" || return 1
   remote="$(choose_remote "$repo_path" "$remote")" || return 1
-  branch="$(current_branch "$repo_path" "$branch")"
+  if autopush_is_protected_branch "$branch"; then
+    echo "Refusing to auto-push directly to protected branch '$branch'. Use --branch to pick a dedicated branch." >&2
+    return 2
+  fi
+  branch="$(autopush_suggest_branch "$repo_path" "$branch")"
 
   local fields=()
   fields+=("$repo_path")
