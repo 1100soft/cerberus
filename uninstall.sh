@@ -90,11 +90,18 @@ fi
 
 if [[ "$PURGE_CONFIG" == true ]]; then
   CONFIG_DIR="${AUTOPUSH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/autopush}"
+  DATA_DIR="${AUTOPUSH_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/autopush}"
   if [[ -d "$CONFIG_DIR" ]]; then
     rm -rf "$CONFIG_DIR"
     echo "Purged config directory: $CONFIG_DIR"
   elif [[ "$FORCE" == false ]]; then
     echo "Config directory not found at $CONFIG_DIR" >&2
+  fi
+  if [[ -d "$DATA_DIR" ]]; then
+    rm -rf "$DATA_DIR"
+    echo "Purged data directory: $DATA_DIR"
+  elif [[ "$FORCE" == false ]]; then
+    echo "Data directory not found at $DATA_DIR" >&2
   fi
 fi
 
