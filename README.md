@@ -43,6 +43,12 @@ only units that are missing from `repos.txt`.
 
 ### Debounce window
 
+To avoid a flurry of tiny commits, watchers batch changes for at least
+`AUTOPUSH_MIN_DELAY` seconds (default 60). Each file change refreshes the timer,
+so commits happen once the repository has been quiet for that window. Override
+the delay by exporting `AUTOPUSH_MIN_DELAY=<seconds>` before invoking the
+installer or watcher services.
+
 ### Branch safety
 
 By default git-autopush refuses to operate directly on protected branches such as `main`, `master`, `develop`, `release`, or `trunk`. When you run `autopush add`, if the current branch is protected the tool automatically records `autopush/<branch>` as the automation branch and lets you know.
@@ -53,12 +59,6 @@ Adjust behaviour with environment variables before running the installer or the 
 - `AUTOPUSH_ALLOW_PROTECTED_BRANCHES=true` – bypass the safety guard (use cautiously; best reserved for CI or special cases).
 
 You can still choose any branch explicitly with `autopush add --branch <name>` so long as it is not on the protected list.
-
-To avoid a flurry of tiny commits, watchers batch changes for at least
-`AUTOPUSH_MIN_DELAY` seconds (default 60). Each file change refreshes the timer,
-so commits happen once the repository has been quiet for that window. Override
-the delay by exporting `AUTOPUSH_MIN_DELAY=<seconds>` before invoking the
-installer or watcher services.
 
 ## Quick start
 
