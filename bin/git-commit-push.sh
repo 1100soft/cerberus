@@ -207,6 +207,8 @@ fi
 log "Pushing $new_commit to $remote/$branch"
 git -C "$repo" push "$remote" "refs/heads/$branch:refs/heads/$branch"
 
+clear_debounce_if_unchanged
+
 rm -f "$tmp_index"
 trap - EXIT
 log "Completed run for $repo"
