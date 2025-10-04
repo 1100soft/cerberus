@@ -247,7 +247,7 @@ HELP
   line="${fields[*]}"
 
   append_or_replace_config_line "$repo_path" "$line"
-  "$AUTOPUSH_BIN_DIR/setup-systemd.sh"
+  "$AUTOPUSH_BIN_DIR/setup-systemd.sh" --repo "$repo_path"
 }
 
 autopush_cmd_remove() {
