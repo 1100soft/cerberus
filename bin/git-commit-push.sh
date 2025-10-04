@@ -58,6 +58,7 @@ if [[ -f "$state_file" ]]; then
   state_snapshot="$(cat "$state_file" 2>/dev/null || echo "")"
 fi
 min_delay="$AUTOPUSH_MIN_DELAY"
+min_delay=$(( min_delay + 0 ))
 
 clear_debounce_if_unchanged() {
   local after
