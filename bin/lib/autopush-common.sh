@@ -59,3 +59,27 @@ autopush_resolve_min_delay() {
     echo 60
   fi
 }
+
+
+autopush_protected_branch_list() {
+  if [[ -n "${AUTOPUSH_PROTECTED_BRANCHES:-}" ]]; then
+    echo "${AUTOPUSH_PROTECTED_BRANCHES}"
+  else
+    echo "main master develop release trunk"  # space separated list
+  fi
+}
+
+autopush_is_protected_branch() {
+  local branch="$1"
+  local protected
+  for protected in $(autopush_protected_branch_list); do
+    if [[ "$branch" == "$protected" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+autopush_default_branch_prefix() {
+  echo "autopush/"
+}
