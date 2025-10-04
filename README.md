@@ -57,6 +57,7 @@ Adjust behaviour with environment variables before running the installer or the 
 
 - `AUTOPUSH_PROTECTED_BRANCHES` – space-separated list of branch names to treat as protected (defaults to `main master develop release trunk`).
 - `AUTOPUSH_ALLOW_PROTECTED_BRANCHES=true` – bypass the safety guard (use cautiously; best reserved for CI or special cases).
+- `AUTOPUSH_BRANCH_PREFIX` – change the prefix used when generating dedicated automation branches (defaults to `autopush/`).
 
 You can still choose any branch explicitly with `autopush add --branch <name>` so long as it is not on the protected list.
 
