@@ -247,11 +247,31 @@ HELP
   local repo_path
   repo_path="$(resolve_repo_path "$target")" || return 1
   remote="$(choose_remote "$repo_path" "$remote")" || return 1
-  if autopush_is_protected_branch "$branch"; then
-    echo "Refusing to auto-push directly to protected branch '$branch'. Use --branch to pick a dedicated branch." >&2
+  local current_default
+  current_default="$(current_branch "$repo_path" "")"
+
+  if [[ -n "$branch" ]]; then
+    if autopush_is_protected_branch "$branch" && [[ "${AUTOPUSH_ALLOW_PROTECTED_BRANCHES:-false}" != true ]]; then
+      echo "Refusing to auto-push directly to protected branch '$branch'. Use --branch to pick a dedicated branch." >&2
+      return 2
+    fi
+  else
+    local suggested
+    suggested="$(autopush_suggest_branch "$repo_path" "")"
+    if autopush_is_protected_branch "$suggested" && [[ "${AUTOPUSH_ALLOW_PROTECTED_BRANCHES:-false}" != true ]]; then
+      echo "Refusing to auto-push directly to protected branch '$suggested'. Use --branch to pick a dedicated branch." >&2
+      return 2
+    fi
+    if [[ "$suggested" != "$current_default" ]]; then
+      echo "Selecting automation branch '$suggested' because '$current_default' is protected."
+    fi
+    branch="$suggested"
+  fi
+
+  if [[ -z "$branch" ]]; then
+    echo "Could not determine automation branch; please provide --branch." >&2
     return 2
   fi
-  branch="$(autopush_suggest_branch "$repo_path" "$branch")"
 
   local fields=()
   fields+=("$repo_path")
