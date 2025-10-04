@@ -261,8 +261,13 @@ if [[ "$selection_active" == true ]]; then
 fi
 
 if [[ "$processed_any" == false ]]; then
-  echo "No repositories processed; exiting." >&2
-  exit 1
+  if [[ "$selection_active" == true ]]; then
+    echo "No repositories processed for selected --repo targets." >&2
+    exit 1
+  else
+    echo "No repositories required updates." >&2
+    exit 0
+  fi
 fi
 
 # Reload systemd and enable timers/watchers
