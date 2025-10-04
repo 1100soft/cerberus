@@ -122,10 +122,12 @@ autopush_suggest_branch() {
   fi
   local current
   current="$(current_branch "$repo" "")"
-  if autopush_is_protected_branch "$current"; then
-    echo "$(autopush_default_branch_prefix)${current}"
+  local prefix
+  prefix="$(autopush_default_branch_prefix)"
+  if [[ "$current" == ${prefix}* ]]; then
+    echo "$current"
   else
-    echo "${current}"
+    echo "${prefix}${current}"
   fi
 }
 append_or_replace_config_line() {
