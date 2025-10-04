@@ -89,6 +89,9 @@ if [[ ! -f "$config_file" ]]; then
   exit 1
 fi
 
+declare -A processed_repos=()
+processed_any=false
+
 while IFS= read -r line || [[ -n "$line" ]]; do
   # Skip comments and empty lines
   [[ -z "$line" ]] && continue
