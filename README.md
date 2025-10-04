@@ -103,7 +103,7 @@ with `#`) and blank lines are preserved.
 systemd user units per repository:
 
 - `git-autopush-<repo>.service` – runs `git-commit-push.sh`
-- `git-autopush-<repo>.timer` – optional periodic timer (5 minutes) when enabled
+- `git-autopush-<repo>.timer` – optional periodic timer (1 minute) when enabled
 - `git-autopush-<repo>-watch.service` – file watcher using `inotifywait` for
   near-instant pushes
 
