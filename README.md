@@ -66,7 +66,9 @@ installer or watcher services.
 2. Run `autopush add .` inside a Git repository that should auto-commit and
    push. The tool records the repository inside your private config file and
    regenerates the systemd units for that repository so the watcher starts
-   immediately (existing entries are left untouched).
+   immediately (existing entries are left untouched). The automation branch
+   defaults to `autopush/<current-branch>` so it stays isolated from your
+   manually managed branches.
 3. Check `autopush status` to see the health of the timer, watcher and service
    units for all configured repositories.
 
