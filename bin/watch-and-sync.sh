@@ -61,7 +61,7 @@ if ! command -v inotifywait >/dev/null 2>&1; then
   exit 0
 fi
 
-min_delay=${AUTOPUSH_MIN_DELAY}
+min_delay=$(( AUTOPUSH_MIN_DELAY + 0 ))
 autopush_ensure_data_dir
 state_file="$(autopush_repo_state_file "$repo")"
 pid_file="$(autopush_repo_debounce_pid_file "$repo")"
@@ -142,7 +142,8 @@ log "Watching $repo for changes; batching commits every ${min_delay}s of inactiv
 # If there are already pending changes when the watcher starts, ensure they are
 # flushed after the debounce window.
 if [[ -n "$(git -C "$repo" status --porcelain || true)" ]]; then
-  printf '%s\n' $(( $(date +%s) - min_delay )) > "$state_file"
+  initial_now=$(date +%s)
+  printf '%s\n' $(( initial_now - min_delay )) > "$state_file"
   ensure_worker_running
 fi
 
