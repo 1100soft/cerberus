@@ -65,7 +65,7 @@ Run `autopush help` to view all available commands:
 
 - `autopush list` – print the raw configuration file
 - `autopush remove [path]` – stop managing a repository and tear down its units
-- `autopush setup [--timers]` – rebuild units for everything in the config
+- `autopush setup [--timers] [--repo path]` – rebuild units for everything (or limit to one repo)
 - `autopush status [--discover]` – show unit health; add `--discover` to include systemd-managed entries
 - `autopush prune [--dry-run]` – remove systemd units that are no longer in the config
 - `autopush enable [--timers]` – rebuild units and enable lingering so they run
