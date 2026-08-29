@@ -1,0 +1,513 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve the real path of this script to handle symlinks (installation
+# typically places a symlink into ~/.local/bin).
+_autopush_resolve_self() {
+  local src="$1"
+  while [[ -L "$src" ]]; do
+    local dir
+    dir="$(cd "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="${dir}/${src}"
+  done
+  cd "$(dirname "$src")" >/dev/null 2>&1
+  pwd
+}
+
+autopush_script_dir="$(_autopush_resolve_self "${BASH_SOURCE[0]}")"
+source "$autopush_script_dir/lib/autopush-common.sh"
+
+autopush_log() {
+  if [[ "${AUTOPUSH_VERBOSE:-false}" == true ]]; then
+    printf '[autopush] %s\n' "$*"
+  fi
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: autopush <command> [options]
+
+Commands:
+  add [path] [--remote name] [--branch name] [--log] [--timer|--no-timer]
+      Register a repository (default path: current dir) and start its watcher.
+  remove [path]
+      Remove a repository from git-autopush and stop its units.
+  list
+      Show configured repositories.
+  status [--discover]
+      Show systemd status; add --discover to include units found via systemd.
+  prune [--dry-run]
+      Disable and remove git-autopush units not referenced in the config file.
+  setup [--timers] [--repo path]
+      Regenerate systemd units (limit to specific repo with --repo).
+  enable [--timers]
+      Run setup and enable lingering so units start on boot.
+  disable [--disable-linger]
+      Disable watchers/timers for configured repositories.
+  config-path
+      Print the location of the configuration file.
+  help
+      Show this message.
+USAGE
+}
+
+ensure_config_file() {
+  autopush_ensure_config_dir
+  if [[ ! -f "$AUTOPUSH_CONFIG_FILE" ]]; then
+    touch "$AUTOPUSH_CONFIG_FILE"
+  fi
+}
+
+resolve_repo_path() {
+  local input="$1"
+  if git -C "$input" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$input" rev-parse --show-toplevel
+    return 0
+  fi
+  if [[ -d "$input" ]]; then
+    echo "fatal: '$input' is not a git repository" >&2
+  else
+    echo "fatal: path '$input' does not exist" >&2
+  fi
+  return 1
+}
+
+choose_remote() {
+  local repo="$1"
+  local preferred="$2"
+  if [[ -n "$preferred" ]]; then
+    if git -C "$repo" remote | grep -Fxq "$preferred"; then
+      echo "$preferred"
+      return 0
+    fi
+    echo "fatal: remote '$preferred' not found in '$repo'" >&2
+    return 1
+  fi
+  if git -C "$repo" remote | grep -Fxq origin; then
+    echo origin
+    return 0
+  fi
+  local first_remote
+  first_remote="$(git -C "$repo" remote | head -n1 || true)"
+  if [[ -n "$first_remote" ]]; then
+    echo "$first_remote"
+    return 0
+  fi
+  echo "fatal: repository '$repo' has no remotes configured" >&2
+  return 1
+}
+
+current_branch() {
+  local repo="$1"
+  local preferred="$2"
+  if [[ -n "$preferred" ]]; then
+    echo "$preferred"
+    return 0
+  fi
+  if git -C "$repo" rev-parse --abbrev-ref HEAD >/dev/null 2>&1; then
+    git -C "$repo" rev-parse --abbrev-ref HEAD
+    return 0
+  fi
+  echo main
+}
+
+
+autopush_suggest_branch() {
+  local repo="$1"
+  local branch="$2"
+  if [[ -n "$branch" ]]; then
+    echo "$branch"
+    return 0
+  fi
+  local current
+  current="$(current_branch "$repo" "")"
+  local prefix
+  prefix="$(autopush_default_branch_prefix)"
+  if [[ "$current" == ${prefix}* ]]; then
+    echo "$current"
+  else
+    echo "${prefix}${current}"
+  fi
+}
+append_or_replace_config_line() {
+  local repo_path="$1"
+  local line="$2"
+  ensure_config_file
+  local tmp
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' RETURN
+  local found=false
+  while IFS= read -r existing || [[ -n "$existing" ]]; do
+    if [[ -z "$existing" || "$existing" =~ ^[[:space:]]*# ]]; then
+      printf '%s\n' "$existing" >>"$tmp"
+      continue
+    fi
+    read -r existing_repo _ <<<"$existing"
+    if [[ "$existing_repo" == "$repo_path" ]]; then
+      found=true
+      continue
+    fi
+    printf '%s\n' "$existing" >>"$tmp"
+  done <"$AUTOPUSH_CONFIG_FILE"
+  printf '%s\n' "$line" >>"$tmp"
+  mv "$tmp" "$AUTOPUSH_CONFIG_FILE"
+  trap - RETURN
+  if [[ "$found" == true ]]; then
+    echo "Updated configuration for $repo_path"
+  else
+    echo "Added $repo_path"
+  fi
+}
+
+remove_config_line() {
+  local repo_path="$1"
+  ensure_config_file
+  local tmp
+  tmp="$(mktemp)"
+  trap 'rm -f "$tmp"' RETURN
+  local removed=false
+  while IFS= read -r existing || [[ -n "$existing" ]]; do
+    if [[ -z "$existing" || "$existing" =~ ^[[:space:]]*# ]]; then
+      printf '%s\n' "$existing" >>"$tmp"
+      continue
+    fi
+    read -r existing_repo _ <<<"$existing"
+    if [[ "$existing_repo" == "$repo_path" ]]; then
+      removed=true
+      continue
+    fi
+    printf '%s\n' "$existing" >>"$tmp"
+  done <"$AUTOPUSH_CONFIG_FILE"
+  if [[ "$removed" == false ]]; then
+    rm -f "$tmp"
+    trap - RETURN
+    echo "Repository '$repo_path' is not configured." >&2
+    return 1
+  fi
+  mv "$tmp" "$AUTOPUSH_CONFIG_FILE"
+  trap - RETURN
+  echo "Removed $repo_path"
+}
+
+autopush_cmd_add() {
+  local target=""
+  local remote=""
+  local branch=""
+  local log_enabled=false
+  local timer_flag=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --remote)
+        [[ $# -lt 2 ]] && { echo "Missing value for --remote" >&2; return 2; }
+        remote="$2"
+        shift 2
+        ;;
+      --branch)
+        [[ $# -lt 2 ]] && { echo "Missing value for --branch" >&2; return 2; }
+        branch="$2"
+        shift 2
+        ;;
+      --log)
+        log_enabled=true
+        shift
+        ;;
+      --timer|--enable-timer)
+        timer_flag="timer"
+        shift
+        ;;
+      --no-timer|--disable-timer)
+        timer_flag="no-timer"
+        shift
+        ;;
+      --help|-h)
+        cat <<'HELP'
+Usage: autopush add [path] [--remote name] [--branch name] [--log] [--timer|--no-timer]
+
+Registers the repository and regenerates systemd units so watchers start immediately.
+If no path is provided, the current directory is used.
+HELP
+        return 0
+        ;;
+      -*)
+        echo "Unknown option for add: $1" >&2
+        return 2
+        ;;
+      *)
+        if [[ -n "$target" ]]; then
+          echo "Only one repository path may be provided." >&2
+          return 2
+        fi
+        target="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [[ -z "$target" ]] && target="."
+  local repo_path
+  repo_path="$(resolve_repo_path "$target")" || return 1
+  remote="$(choose_remote "$repo_path" "$remote")" || return 1
+  local current_default
+  current_default="$(current_branch "$repo_path" "")"
+
+  if [[ -n "$branch" ]]; then
+    if autopush_is_protected_branch "$branch" && [[ "${AUTOPUSH_ALLOW_PROTECTED_BRANCHES:-false}" != true ]]; then
+      echo "Refusing to auto-push directly to protected branch '$branch'. Use --branch to pick a dedicated branch." >&2
+      return 2
+    fi
+  else
+    local suggested
+    suggested="$(autopush_suggest_branch "$repo_path" "")"
+    if autopush_is_protected_branch "$suggested" && [[ "${AUTOPUSH_ALLOW_PROTECTED_BRANCHES:-false}" != true ]]; then
+      echo "Refusing to auto-push directly to protected branch '$suggested'. Use --branch to pick a dedicated branch." >&2
+      return 2
+    fi
+    if [[ "$suggested" != "$current_default" ]]; then
+      echo "Selecting dedicated automation branch '$suggested' (derived from '$current_default')."
+    else
+      echo "Managing automation on '$suggested'."
+    fi
+    branch="$suggested"
+  fi
+
+  if [[ -z "$branch" ]]; then
+    echo "Could not determine automation branch; please provide --branch." >&2
+    return 2
+  fi
+
+  local fields=()
+  fields+=("$repo_path")
+  fields+=("$remote")
+  fields+=("$branch")
+  if [[ "$log_enabled" == true ]]; then
+    fields+=("log")
+  fi
+  if [[ -n "$timer_flag" ]]; then
+    fields+=("$timer_flag")
+  fi
+  local line
+  line="${fields[*]}"
+
+  append_or_replace_config_line "$repo_path" "$line"
+  "$AUTOPUSH_BIN_DIR/setup-systemd.sh" --repo "$repo_path"
+}
+
+autopush_cmd_remove() {
+  local target=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h)
+        cat <<'HELP'
+Usage: autopush remove [path]
+
+Removes the repository from the configuration and stops its watcher/timer.
+If no path is provided, the current directory is assumed.
+HELP
+        return 0
+        ;;
+      -*)
+        echo "Unknown option for remove: $1" >&2
+        return 2
+        ;;
+      *)
+        if [[ -n "$target" ]]; then
+          echo "Only one repository path may be provided." >&2
+          return 2
+        fi
+        target="$1"
+        shift
+        ;;
+    esac
+  done
+  [[ -z "$target" ]] && target="."
+  local repo_path
+  repo_path="$(resolve_repo_path "$target")" || return 1
+  remove_config_line "$repo_path" || return 1
+
+  local sanitized
+  sanitized="$(autopush_sanitize_unit_name "$repo_path")"
+  local service="git-autopush-${sanitized}.service"
+  local timer="git-autopush-${sanitized}.timer"
+  local watch="git-autopush-${sanitized}-watch.service"
+
+  systemctl --user disable --now "$timer" >/dev/null 2>&1 || true
+  systemctl --user disable --now "$watch" >/dev/null 2>&1 || true
+  systemctl --user disable --now "$service" >/dev/null 2>&1 || true
+  rm -f "$AUTOPUSH_SYSTEMD_DIR/$service" "$AUTOPUSH_SYSTEMD_DIR/$timer" "$AUTOPUSH_SYSTEMD_DIR/$watch"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  echo "Stopped systemd units for $repo_path"
+}
+
+autopush_cmd_list() {
+  ensure_config_file
+  if [[ ! -s "$AUTOPUSH_CONFIG_FILE" ]]; then
+    echo "No repositories configured. Use 'autopush add <path>' to add one."
+    return 0
+  fi
+  cat "$AUTOPUSH_CONFIG_FILE"
+}
+
+autopush_cmd_prune() {
+  local dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
+      -h|--help)
+        cat <<'HELP'
+Usage: autopush prune [--dry-run]
+
+Disables and removes git-autopush systemd units that are not present in the
+current configuration. With --dry-run it only prints what would be removed.
+HELP
+        return 0
+        ;;
+      -*)
+        echo "Unknown option for prune: $1" >&2
+        return 2
+        ;;
+      *)
+        echo "Unexpected argument: $1" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  declare -A configured=()
+  if [[ -f "$AUTOPUSH_CONFIG_FILE" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" ]] && continue
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      repo_path="$(echo "$line" | awk '{print $1}')"
+      sanitized="$(autopush_sanitize_unit_name "$repo_path")"
+      configured["$sanitized"]=1
+    done < "$AUTOPUSH_CONFIG_FILE"
+  fi
+
+  declare -A to_remove=()
+  while IFS= read -r unit_name || [[ -n "$unit_name" ]]; do
+    [[ -z "$unit_name" ]] && continue
+    case "$unit_name" in
+      git-autopush-*-watch.service)
+        sanitized="${unit_name#git-autopush-}"
+        sanitized="${sanitized%-watch.service}"
+        ;;
+      git-autopush-*.service)
+        sanitized="${unit_name#git-autopush-}"
+        sanitized="${sanitized%.service}"
+        ;;
+      git-autopush-*.timer)
+        sanitized="${unit_name#git-autopush-}"
+        sanitized="${sanitized%.timer}"
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    if [[ -z "${configured[$sanitized]:-}" ]]; then
+      to_remove["$sanitized"]=1
+    fi
+  done < <(systemctl --user list-unit-files --no-legend --no-pager 'git-autopush-*' 2>/dev/null | awk '{print $1}')
+
+  if [[ ${#to_remove[@]} -eq 0 ]]; then
+    echo "No unmanaged git-autopush units found."
+    return 0
+  fi
+
+  for sanitized in "${!to_remove[@]}"; do
+    service="git-autopush-${sanitized}.service"
+    timer="git-autopush-${sanitized}.timer"
+    watch="git-autopush-${sanitized}-watch.service"
+
+    echo "Cleaning units for key: $sanitized"
+    if [[ "$dry_run" == true ]]; then
+      printf '  would disable %s\n' "$service"
+      printf '  would disable %s\n' "$timer"
+      printf '  would disable %s\n' "$watch"
+      printf '  would remove files under %s\n' "$AUTOPUSH_SYSTEMD_DIR"
+      continue
+    fi
+
+    systemctl --user disable --now "$service" >/dev/null 2>&1 || true
+    systemctl --user disable --now "$timer" >/dev/null 2>&1 || true
+    systemctl --user disable --now "$watch" >/dev/null 2>&1 || true
+    rm -f "$AUTOPUSH_SYSTEMD_DIR/$service" "$AUTOPUSH_SYSTEMD_DIR/$timer" "$AUTOPUSH_SYSTEMD_DIR/$watch"
+  done
+
+  if [[ "$dry_run" == false ]]; then
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    echo "Prune complete."
+  fi
+}
+
+autopush_cmd_status() {
+  "$AUTOPUSH_BIN_DIR/status.sh" "$@"
+}
+
+autopush_cmd_setup() {
+  "$AUTOPUSH_BIN_DIR/setup-systemd.sh" "$@"
+}
+
+autopush_cmd_enable() {
+  "$AUTOPUSH_BIN_DIR/enable-startup.sh" "$@"
+}
+
+autopush_cmd_disable() {
+  "$AUTOPUSH_BIN_DIR/disable-startup.sh" "$@"
+}
+
+autopush_cmd_config_path() {
+  ensure_config_file
+  echo "$AUTOPUSH_CONFIG_FILE"
+}
+
+if [[ $# -lt 1 ]]; then
+  usage >&2
+  exit 1
+fi
+
+command="$1"
+shift
+
+case "$command" in
+  add)
+    autopush_cmd_add "$@"
+    ;;
+  remove)
+    autopush_cmd_remove "$@"
+    ;;
+  list)
+    autopush_cmd_list "$@"
+    ;;
+  prune)
+    autopush_cmd_prune "$@"
+    ;;
+  status)
+    autopush_cmd_status "$@"
+    ;;
+  setup)
+    autopush_cmd_setup "$@"
+    ;;
+  enable)
+    autopush_cmd_enable "$@"
+    ;;
+  disable)
+    autopush_cmd_disable "$@"
+    ;;
+  config-path)
+    autopush_cmd_config_path "$@"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $command" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

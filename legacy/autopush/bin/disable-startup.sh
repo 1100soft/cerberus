@@ -2,13 +2,15 @@
 #
 # disable-startup.sh
 #
-# Disables watcher services and timers for all repos listed in repos.txt.
+# Disables watcher services and timers for all repos listed in config/repos.txt.
 # Optionally disables lingering.
 
 set -euo pipefail
 
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-config_file="$project_dir/repos.txt"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/autopush-common.sh"
+
+config_file="$AUTOPUSH_CONFIG_FILE"
 
 disable_linger=false
 log_enabled=false
@@ -51,7 +53,7 @@ log() {
 }
 
 if [[ ! -f "$config_file" ]]; then
-  echo "Configuration file '$config_file' not found." >&2
+  echo "Configuration file '$config_file' not found. Nothing to disable." >&2
   exit 1
 fi
 
@@ -63,17 +65,17 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   repo_path="${fields[0]:-}"
   [[ -z "$repo_path" ]] && continue
 
-  sanitized=$(echo "$repo_path" | sed 's/[^A-Za-z0-9]/_/g')
+  sanitized=$(autopush_sanitize_unit_name "$repo_path")
   timer_name="git-autopush-${sanitized}.timer"
   watch_name="git-autopush-${sanitized}-watch.service"
 
-  if systemctl --user is-enabled "$watch_name" >/dev/null 2>&1 || [[ -f "$HOME/.config/systemd/user/$watch_name" ]]; then
+  if systemctl --user is-enabled "$watch_name" >/dev/null 2>&1 || [[ -f "$AUTOPUSH_SYSTEMD_DIR/$watch_name" ]]; then
     systemctl --user disable --now "$watch_name" >/dev/null 2>&1 || true
     echo "Disabled watcher $watch_name"
     log "Disabled watcher $watch_name"
   fi
 
-  if systemctl --user is-enabled "$timer_name" >/dev/null 2>&1 || [[ -f "$HOME/.config/systemd/user/$timer_name" ]]; then
+  if systemctl --user is-enabled "$timer_name" >/dev/null 2>&1 || [[ -f "$AUTOPUSH_SYSTEMD_DIR/$timer_name" ]]; then
     systemctl --user disable --now "$timer_name" >/dev/null 2>&1 || true
     echo "Disabled timer $timer_name"
     log "Disabled timer $timer_name"
@@ -90,4 +92,3 @@ if [[ "$disable_linger" == true ]]; then
 fi
 
 echo "Autostart disabled for listed repositories."
-

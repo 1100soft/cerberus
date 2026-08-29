@@ -4,3 +4,16 @@
 # Exclude user-specific systemd unit files (located in home directory)
 /.config/systemd/user/git-autopush-*.service
 /.config/systemd/user/git-autopush-*.timer
+
+/private/*
+
+# GitCerberus build output and local state
+/desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/target/
+/node_modules/
+/dist/
+/src-tauri/target/
+*.db
+*.db-shm
+*.db-wal

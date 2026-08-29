@@ -1,76 +1,95 @@
-# Project overview
+# GitCerberus
 
-This repository contains scripts and configuration files to automate commits and pushes for multiple Git repositories on a Linux system.  Each repository you wish to monitor is listed in a simple configuration file, and systemd user units are generated to run a commit‑and‑push routine at regular intervals.  The directory can itself be versioned with git and contains everything required to set up and monitor the automation.
+GitCerberus is a repository-first desktop workspace manager for developers who use multiple Git identities. It keeps the repository, Git author, editor environment, browser session, and automation context together so changing projects is one deliberate action.
 
-## Structure
+This repository is transitioning from the original Linux `git-autopush` scripts to the cross-platform Tauri application described in `private/project_spec.docx`. The former implementation is consolidated under `legacy/autopush/` as reference material for the future automation engine; it is not part of the desktop application.
 
-- `repos.txt` – a plain text file listing pairs of local repository paths and remote names (with optional fields for the branch, logging flag, and timer control).  Lines beginning with `#` are comments and ignored.  Each non-empty line must contain at least two fields separated by whitespace:
-  
-  1. an absolute path to the local git repository
-  2. the remote name to push to (for example, `origin`)
-  3. *(optional)* the branch name that should receive the automated commits; defaults to `wip` if omitted
-  4. *(optional)* a logging flag (`log`, `--log`, `debug`, `verbose`, `true` or `1`) to enable verbose output from the commit script
-  5. *(optional)* timer control: `no-timer`/`off`/`false`/`0` to disable the periodic timer for this repo (watcher still used if available); `timer`/`on`/`true`/`1` to force-enable
+## Layout
 
-- `git‑commit‑push.sh` – a bash script that snapshots the working tree, writes a commit on the designated branch (default `wip`) and pushes it to the chosen remote without disturbing your current branch.  It accepts a repository path, remote name, optional branch name and an optional `--log` flag for verbose output.  When no Git identity is configured, it falls back to `Git Autopush <git-autopush@localhost>` so commits can always be created.
+```text
+desktop/              Tauri 2 + React application
+  src/                Dashboard UI and typed command client
+  src-tauri/          Rust backend, tray, Git, SQLite
+  migrations/         Forward-only SQLite migrations
+website/              Product site (static)
+docs/                 Roadmap and notes
+legacy/autopush/      Former shell implementation (reference only)
+```
 
-- `setup‑systemd.sh` – a bash script that reads `repos.txt` and generates a dedicated `service` for each repository. If `inotifywait` is available, it also generates a long‑running watcher service that syncs immediately on file changes. Timers are optional and disabled by default; enable them globally with `--timers` or per‑repo via the 5th column. Units are installed into `~/.config/systemd/user`, the daemon is reloaded, and timers/watchers are enabled as configured.
+## Website
 
-- `status.sh` – a helper script to display the current status of all generated services and timers.  It lists each repository defined in `repos.txt` and shows whether its corresponding systemd units are active.
- 
-- `watch-and-sync.sh` – a small helper invoked by the watcher services. It uses `inotifywait` to monitor the repo recursively (excluding `.git/`) and triggers `git-commit-push.sh` when files change.
+The public site lives in `website/` and is the product destination linked from 1100 Software’s Products section. It uses the same framed tab layout (Home and Contact today; more sections can be added the same way) and Quicksand, with GitCerberus’s accent color. Open it locally with:
 
-- `.gitignore` – excludes logs and transient systemd unit files from version control.
+```bash
+python3 -m http.server -d website 4173
+```
 
-### Usage
+Then visit `http://localhost:4173`. The app logo on the site is a placeholder.
 
-1. Edit `repos.txt` and add one line per repository you want to manage.  For example:
+## Current slice
 
-   ```
-   # local path                       remote     branch     log        timer
-   /home/username/projects/repo1      origin     wip        --log      no-timer
-   /home/username/work/notes          upstream   backups
-   ```
+The initial implementation includes:
 
-2. Run `setup‑systemd.sh` to generate and enable the systemd units:
+- A React/TypeScript repository dashboard with responsive search and Git-state filters.
+- Repository cards showing identity, branch, dirty counts, ahead/behind state, tags, last commit, and identity mismatches.
+- Persistent drag ordering through a Tauri command.
+- A resident tray lifecycle: closing hides the dashboard; tray actions restore it or quit.
+- Persistent UI zoom with Ctrl/Cmd + mouse wheel, `+`, `-`, and `0` reset.
+- Local repository import and refresh.
+- Native filesystem folder selection when importing a repository.
+- GitHub OAuth device flow, OS-keychain token storage, and repository-to-identity assignment.
+- Dense 42px repository rows with hover/focus details and keyboard-first actions.
+- A versioned SQLite schema covering devices, repositories, identities, tags, snapshots, identity bindings, and automation rules/runs.
+- A typed Rust Git service with explicit working directories, non-interactive execution, structured errors, canonical remote handling, and per-repository mutation locks.
+- Fetch, fast-forward-only pull, push, stage, unstage, and commit command foundations.
+- VS Code and hosted-remote launch actions.
+- A browser-only demonstration mode for UI development; real filesystem/Git operations activate inside Tauri.
 
-   ```bash
-   ./setup-systemd.sh                 # timers are disabled by default; add --timers to enable
-   ./setup-systemd.sh --timers        # enable timers globally (in addition to watchers)
-   ```
+Identity creation, device-specific editor/browser bindings, tray lifecycle, notifications, and the interval automation runner are the next end-to-end increment. The database already reserves their stable data model.
 
-   This script must be run with your user account.  It will place service and timer units in `~/.config/systemd/user` and enable them so they start automatically on boot.  If `inotifywait` is present, a watcher service is also enabled per repo to sync immediately on file changes.  To allow timers/watchers to run when you are not logged in, enable lingering for your user with `loginctl enable‑linger $USER`.
+## Development
 
-3. Check the status of the units at any time with:
+Prerequisites: Node.js 20+, Rust stable, the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/), and Git. On Ubuntu/Debian, install the native desktop headers before the first Tauri build:
 
-   ```bash
-   ./status.sh
-   ```
+```bash
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+  libayatana-appindicator3-dev librsvg2-dev
+```
 
-4. The `git‑commit‑push.sh` script can also be invoked manually to commit and push a specific repository:
+```bash
+cd desktop
+npm install
+npm run dev          # browser demo with representative local data
+npm run build        # type-check and production UI build
+npm run tauri dev    # complete desktop application
+```
 
-   ```bash
-   ./git-commit-push.sh /home/username/projects/repo1 origin wip
-   ```
+Rust tests run with:
 
-### Autostart on Boot
+```bash
+cd desktop/src-tauri
+cargo test
+```
 
-- Enable autostart (generates units, enables watchers/timers as configured, and enables lingering):
+Application data is stored in the OS-specific Tauri application-data directory as `gitcerberus.db`. Secrets do not belong in this database; only future credential-store references will be persisted.
 
-  ```bash
-  ./enable-startup.sh         # add --timers to also enable timers globally
-  ```
+### GitHub identities
 
-- Disable autostart (disables watchers/timers; optionally disable lingering):
+You do **not** register your own GitHub OAuth App. GitHub also cannot sign an
+app in with only a username: a token has to be issued through the product OAuth
+app (browser device flow), GitHub CLI, or a personal access token.
 
-  ```bash
-  ./disable-startup.sh        # add --disable-linger to also disable lingering
-  ```
+- **Sign in with GitHub** uses GitCerberus’s client ID (`GITCERBERUS_GITHUB_CLIENT_ID`
+  at build or runtime). Enable Device Flow on that one app. The client ID is
+  public; tokens stay in the OS credential store.
+- **GitHub CLI** reuses `gh auth login` on this machine.
+- **Personal access token** needs `read:user` and `user:email`.
 
-### Notes
+SQLite stores only a `keyring:github:<identity-id>` reference, never the token.
 
-- The commit message used by the automation includes a timestamp.  No commit is made when there are no staged changes.
-- Automated commits are always written to the configured branch (default `wip`) so that work-in-progress history can be squashed later.
-- Pass `--log` to `git-commit-push.sh` (or add the logging flag in `repos.txt`) to emit detailed diagnostics about staging, commit creation and pushes; omit it for quiet operation.
-- For immediate syncs, install `inotify-tools` (provides `inotifywait`). The setup script will generate and enable a watcher service that reacts to changes instantly. Without it, the timer still runs periodically as a fallback.
-- Systemd unit names are derived from the repository paths by replacing non‑alphanumeric characters with underscores.  This ensures unique and valid unit names.
+Repository navigation uses Up/Down, action selection uses Left/Right, and Enter
+runs the chosen action. Direct shortcuts are `E` (VS Code), `G` (hosted page),
+`F` (fetch), and `P` (push). Ctrl/Cmd+0 resets UI zoom.
+
+The core deliberately does not assume GitHub, does not mutate global Git configuration, and does not infer identity from whichever account happens to be active elsewhere.

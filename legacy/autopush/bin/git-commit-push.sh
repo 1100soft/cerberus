@@ -8,6 +8,9 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/autopush-common.sh"
+
 
 # Validate arguments
 if [[ $# -lt 1 ]]; then
@@ -42,11 +45,40 @@ if [[ -z "$branch" ]]; then
   fi
 fi
 
+if autopush_is_protected_branch "$branch" && [[ "${AUTOPUSH_ALLOW_PROTECTED_BRANCHES:-false}" != true ]]; then
+  echo "Refusing to auto-push to protected branch '$branch'. Set --branch to a dedicated branch or export AUTOPUSH_ALLOW_PROTECTED_BRANCHES=true if you accept the risk." >&2
+  exit 2
+fi
+
 log() {
   if [[ "$log_enabled" == true ]]; then
     printf '[git-autopush] %s\n' "$*"
   fi
 }
+
+autopush_ensure_data_dir
+state_file="$(autopush_repo_state_file "$repo")"
+state_snapshot=""
+if [[ -f "$state_file" ]]; then
+  state_snapshot="$(cat "$state_file" 2>/dev/null || echo "")"
+fi
+min_delay="$(autopush_resolve_min_delay)"
+
+clear_debounce_if_unchanged() {
+  local after
+  after="$(cat "$state_file" 2>/dev/null || echo "")"
+  if [[ -z "$after" || "$after" == "$state_snapshot" ]]; then
+    rm -f "$state_file"
+  fi
+}
+
+if [[ -n "$state_snapshot" && "$state_snapshot" =~ ^[0-9]+$ ]]; then
+  now_epoch="$(date +%s)"
+  if (( now_epoch - state_snapshot < min_delay )); then
+    log "Deferring commit; last change $(( now_epoch - state_snapshot ))s ago (<${min_delay}s)."
+    exit 0
+  fi
+fi
 
 # Prevent overlapping runs for the same repo using a per-repo lock.
 # This avoids race conditions when the timer and watcher fire together.
@@ -124,6 +156,7 @@ fi
 # Capture outstanding changes; no-op when tree is clean
 if [[ -z "$(git -C "$repo" status --porcelain)" ]]; then
   log "No changes detected in $repo; exiting."
+  clear_debounce_if_unchanged
   exit 0
 fi
 
@@ -178,6 +211,12 @@ fi
 
 log "Pushing $new_commit to $remote/$branch"
 git -C "$repo" push "$remote" "refs/heads/$branch:refs/heads/$branch"
+
+clear_debounce_if_unchanged
+
+if [[ "${AUTOPUSH_SYNC_INDEX:-true}" == true ]]; then
+  git -C "$repo" reset --mixed HEAD >/dev/null 2>&1 || true
+fi
 
 rm -f "$tmp_index"
 trap - EXIT
