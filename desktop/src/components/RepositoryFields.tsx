@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { FolderSearch } from "lucide-react";
 import { api } from "../lib/api";
 import type { Identity } from "../types";
@@ -38,7 +39,7 @@ export function RepositoryFields({ value, identities, onChange, browseTitle }: P
 
   return <div className="config-grid">
     <label>Display name<input value={value.displayName} onChange={(e) => onChange({ ...value, displayName: e.target.value })} required /></label>
-    <label>Host type<select value={value.hostType} onChange={(e) => onChange({ ...value, hostType: e.target.value })}>{hosts.map((host) => <option key={host} value={host}>{host}</option>)}</select></label>
+    <label>Host type<Select label="Host type" value={value.hostType} onChange={(hostType) => onChange({ ...value, hostType })} options={hosts.map((host) => ({value:host,label:host}))} /></label>
     <label className="full">Local path
       <span className="path-field">
         <input value={value.localPath} onChange={(e) => onChange({ ...value, localPath: e.target.value })} required />
@@ -49,10 +50,7 @@ export function RepositoryFields({ value, identities, onChange, browseTitle }: P
       <input value={value.canonicalRemote} onChange={(e) => onChange({ ...value, canonicalRemote: e.target.value, hostType: detectHost(e.target.value) })} placeholder="https://github.com/owner/repo.git" />
     </label>
     <label>Default branch<input value={value.defaultBranch} onChange={(e) => onChange({ ...value, defaultBranch: e.target.value })} placeholder="main" /></label>
-    <label>Identity<select value={value.identityId} onChange={(e) => onChange({ ...value, identityId: e.target.value })}>
-      <option value="">Unassigned</option>
-      {identities.map((identity) => <option key={identity.id} value={identity.id}>{identity.label}</option>)}
-    </select></label>
+    <label>Identity<Select label="Identity" value={value.identityId} onChange={(identityId) => onChange({ ...value, identityId })} options={[{value:"",label:"Unassigned"}, ...identities.map((identity) => ({value:identity.id,label:identity.label}))]} /></label>
     <label className="full">Tags<input value={value.tags} onChange={(e) => onChange({ ...value, tags: e.target.value })} placeholder="backend, production" /></label>
   </div>;
 }

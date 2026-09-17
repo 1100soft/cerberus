@@ -9,6 +9,8 @@ pub struct Identity {
     pub git_email: String,
     pub color: Option<String>,
     pub provider_username: Option<String>,
+    #[serde(default)]
+    pub connected: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,6 +38,8 @@ pub struct Repository {
     pub id: String,
     pub display_name: String,
     pub local_path: String,
+    #[serde(default)]
+    pub local_present: bool,
     pub canonical_remote: Option<String>,
     pub host_type: String,
     pub default_branch: Option<String>,
@@ -71,4 +75,14 @@ pub struct RepositoryUpdate {
     pub default_branch: Option<String>,
     pub identity_id: Option<String>,
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    pub hash: String,
+    pub author: String,
+    pub email: String,
+    pub committed_at: String,
+    pub summary: String,
 }

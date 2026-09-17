@@ -49,7 +49,10 @@ pub fn github_cli_token() -> Result<String, String> {
         .output()
         .map_err(|_| "GitHub CLI (gh) is not installed or could not be started".to_string())?;
     if !output.status.success() {
-        return Err("GitHub CLI is not signed in. Run `gh auth login` in a terminal, then try again.".into());
+        return Err(
+            "GitHub CLI is not signed in. Run `gh auth login` in a terminal, then try again."
+                .into(),
+        );
     }
     let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if token.is_empty() {
@@ -60,17 +63,61 @@ pub fn github_cli_token() -> Result<String, String> {
 
 pub fn begin(client_id: &str) -> Result<GithubDeviceFlow, String> {
     let client_id = resolve_client_id(Some(client_id))?;
-    let mut flow: GithubDeviceFlow = client()?
+    let response = client()?
         .post(DEVICE_CODE_URL)
         .header("Accept", "application/json")
-        .form(&[("client_id", client_id.as_str()), ("scope", "read:user user:email")])
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("scope", "read:user user:email repo"),
+        ])
         .send()
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("GitHub device authorization failed: {e}"))?
-        .json()
-        .map_err(|e| format!("Invalid GitHub device authorization response: {e}"))?;
-    flow.client_id = client_id;
-    Ok(flow)
+        .map_err(|e| format!("GitHub device authorization failed: {e}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|e| format!("Could not read GitHub device authorization response: {e}"))?;
+
+    parse_device_flow_response(&body, status.is_success(), client_id)
+}
+
+#[derive(Deserialize)]
+struct DeviceFlowResponse {
+    device_code: Option<String>,
+    user_code: Option<String>,
+    verification_uri: Option<String>,
+    expires_in: Option<u64>,
+    interval: Option<u64>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+fn parse_device_flow_response(
+    body: &str,
+    status_success: bool,
+    client_id: String,
+) -> Result<GithubDeviceFlow, String> {
+    let response: DeviceFlowResponse = serde_json::from_str(body)
+        .map_err(|error| format!("Invalid GitHub device authorization response: {error}"))?;
+
+    if let Some(error) = response.error {
+        return Err(response.error_description.unwrap_or(error));
+    }
+    if !status_success {
+        return Err("GitHub rejected the device authorization request".into());
+    }
+
+    Ok(GithubDeviceFlow {
+        device_code: response
+            .device_code
+            .ok_or("GitHub returned no device code")?,
+        user_code: response.user_code.ok_or("GitHub returned no user code")?,
+        verification_uri: response
+            .verification_uri
+            .ok_or("GitHub returned no verification URL")?,
+        expires_in: response.expires_in.unwrap_or(900),
+        interval: response.interval.unwrap_or(5),
+        client_id,
+    })
 }
 
 #[derive(Deserialize)]
@@ -90,6 +137,30 @@ struct GithubEmail {
     email: String,
     primary: bool,
     verified: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_device_flow_response;
+
+    #[test]
+    fn parses_githubs_snake_case_device_response() {
+        let body = r#"{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://github.com/login/device","expires_in":899,"interval":5}"#;
+        let flow = parse_device_flow_response(body, true, "client".into()).unwrap();
+
+        assert_eq!(flow.device_code, "device");
+        assert_eq!(flow.user_code, "ABCD-EFGH");
+        assert_eq!(flow.client_id, "client");
+    }
+
+    #[test]
+    fn reports_githubs_device_flow_error() {
+        let body =
+            r#"{"error":"device_flow_disabled","error_description":"Device Flow must be enabled"}"#;
+        let error = parse_device_flow_response(body, true, "client".into()).unwrap_err();
+
+        assert_eq!(error, "Device Flow must be enabled");
+    }
 }
 
 pub fn complete(
@@ -125,6 +196,25 @@ pub fn complete(
         .access_token
         .ok_or("GitHub returned no access token")?;
     identity_from_token(db, &access_token).map(Some)
+}
+
+fn github_entry(id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new("dev.gitcerberus.app", &format!("github:{id}"))
+        .map_err(|e| format!("Could not open the GitHub credential entry: {e}"))
+}
+
+pub fn github_connected(id: &str) -> bool {
+    github_entry(id)
+        .and_then(|entry| entry.get_password().map_err(|e| e.to_string()))
+        .is_ok()
+}
+
+pub fn disconnect_github_identity(id: &str) -> Result<(), String> {
+    let entry = github_entry(id)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(format!("Could not remove the GitHub token from the system credential store: {error}")),
+    }
 }
 
 pub fn identity_from_token(db: &Database, access_token: &str) -> Result<Identity, String> {

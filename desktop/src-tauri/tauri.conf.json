@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "GitCerberus", "width": 1280, "height": 820, "minWidth": 900, "minHeight": 620 }],
+    "windows": [{ "title": "GitCerberus", "width": 1720, "height": 1080, "minWidth": 900, "minHeight": 620 }],
     "security": { "csp": null }
   },
   "bundle": { "active": true, "targets": "all" }

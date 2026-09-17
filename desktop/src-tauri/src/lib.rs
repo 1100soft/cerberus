@@ -1,5 +1,10 @@
+mod codex;
+mod cursor;
+mod cursor_editor;
+mod setup_terminal;
 mod db;
 mod git;
+mod github;
 mod models;
 mod oauth;
 
@@ -21,6 +26,10 @@ use tauri::{
 struct AppState {
     db: Arc<Database>,
     git: GitService,
+    codex: Arc<codex::CodexService>,
+    cursor: Arc<cursor::CursorService>,
+    setup_terminal: Arc<setup_terminal::SetupTerminal>,
+    data_dir: std::path::PathBuf,
 }
 
 fn scan(git: &GitService, mut repository: Repository) -> Result<Repository, String> {
@@ -104,14 +113,130 @@ fn sync_origin_urls(state: &AppState) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn link_repository_folder(expected_remote: String, path: String, repository_id: Option<String>, state: State<'_, AppState>) -> Result<ImportResult, String> {
+    let db = state.db.clone();
+    let git = state.git.clone();
+    tauri::async_runtime::spawn_blocking(move || github::link_existing(&db, &git, &expected_remote, Path::new(&path), repository_id.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn github_repositories(state: State<'_, AppState>) -> Result<github::Catalog, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || github::catalog(&db)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn clone_github_repository(identity_id: String, full_name: String, parent: String, state: State<'_, AppState>) -> Result<ImportResult, String> {
+    let db = state.db.clone();
+    let git = state.git.clone();
+    tauri::async_runtime::spawn_blocking(move || github::clone_repository(&db, &git, &identity_id, &full_name, Path::new(&parent))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn open_in_cursor(repository_id: String, state: State<AppState>) -> Result<(), String> {
+    let path = state.db.repository_path(&repository_id)?;
+    Command::new("cursor").arg(&path).spawn().map(|_| ()).map_err(|e| format!("Could not launch Cursor: {e}. Install the cursor shell command and make it available on PATH."))
+}
+
+#[tauri::command]
 fn list_repositories(state: State<AppState>) -> Result<Vec<Repository>, String> {
     sync_origin_urls(&state)?;
     state.db.list()
 }
 
 #[tauri::command]
+async fn configure_codex(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.configure(Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn install_provider(provider: String, approved: bool, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
+    let terminal = state.setup_terminal.clone(); let root = state.data_dir.clone();
+    let codex = state.codex.clone(); let cursor = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let executable = terminal.install(&root, &provider, approved, output)?;
+        if provider == "codex" { codex.configure(&executable) } else { cursor.configure(&executable) }
+    }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+fn cancel_provider_install(state: State<'_, AppState>) { state.setup_terminal.cancel(); }
+
+#[tauri::command]
+async fn configure_cursor(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let service = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || service.configure(Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn cursor_threads(repository_id: String, cursor: Option<String>, archived: bool, state: State<'_, AppState>) -> Result<codex::ThreadPage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let editor = cursor_editor::threads(&path, archived);
+        match service.threads(&path, cursor.clone(), archived) {
+            Ok(mut page) => { if cursor.is_none() { if let Ok(editor) = editor { page.data.extend(editor.data); } } Ok(page) }
+            Err(error) => editor.map(|page| if cursor.is_none() { page } else { codex::ThreadPage { data: vec![], next_cursor: None } }).map_err(|editor_error| format!("{error}\n{editor_error}")),
+        }
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn cursor_messages(repository_id: String, thread_id: String, state: State<'_, AppState>) -> Result<codex::MessagePage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || if let Some(id) = thread_id.strip_prefix("editor:") { cursor_editor::messages(&path, id) } else { service.messages(&path, thread_id) }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_account(state: State<'_, AppState>) -> Result<Value, String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.request("account/read", serde_json::json!({"refreshToken":false}))).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_login(state: State<'_, AppState>) -> Result<String, String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let login = service.request("account/login/start", serde_json::json!({"type":"chatgpt"}))?;
+        let url = login["authUrl"].as_str().ok_or("Codex did not return a sign-in URL")?;
+        let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
+        if parsed.scheme() != "https" || !matches!(parsed.host_str(), Some("auth.openai.com" | "auth0.openai.com" | "chatgpt.com")) {
+            return Err("Codex returned an unexpected sign-in URL".into());
+        }
+        open_url::that(url.to_owned()).map_err(|e| e.to_string())?;
+        Ok(login["loginId"].as_str().ok_or("Codex did not return a login ID")?.to_owned())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_cancel_login(login_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.request("account/login/cancel", serde_json::json!({"loginId":login_id})).map(|_| ())).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_threads(repository_id: String, cursor: Option<String>, archived: bool, state: State<'_, AppState>) -> Result<codex::ThreadPage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.threads(&path, cursor, archived)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_messages(repository_id: String, thread_id: String, cursor: Option<String>, state: State<'_, AppState>) -> Result<codex::MessagePage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.messages(&path, thread_id, cursor)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn list_identities(state: State<AppState>) -> Result<Vec<Identity>, String> {
-    state.db.identities()
+    let mut identities = state.db.identities()?;
+    for identity in &mut identities {
+        identity.connected = oauth::github_connected(&identity.id);
+    }
+    Ok(identities)
+}
+
+#[tauri::command]
+fn disconnect_github_identity(identity_id: String) -> Result<(), String> {
+    oauth::disconnect_github_identity(&identity_id)
 }
 
 #[tauri::command]
@@ -187,6 +312,18 @@ fn refresh_repository(repository_id: String, state: State<AppState>) -> Result<R
     }
     state.db.save_snapshot(&repository_id, &repository)?;
     Ok(repository)
+}
+
+#[tauri::command]
+fn list_branches(repository_id: String, state: State<AppState>) -> Result<Vec<String>, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    state.git.branches(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn commit_history(repository_id: String, branch: Option<String>, skip: u32, state: State<AppState>) -> Result<Vec<models::Commit>, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    state.git.history(&path, branch.as_deref(), skip).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -324,6 +461,12 @@ fn permitted_github_url(url: &str) -> bool {
     if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
         return false;
     }
+    if parsed.query().is_none() && parsed.fragment().is_none() && parsed.username().is_empty() && parsed.password().is_none() {
+        let parts: Vec<_> = parsed.path().trim_matches('/').split('/').collect();
+        if parts.len() == 2 && parts.iter().all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))) {
+            return true;
+        }
+    }
     matches!(
         parsed.path(),
         "/login/device" | "/login/device/" | "/settings/tokens" | "/settings/tokens/" | "/settings/tokens/new"
@@ -369,6 +512,10 @@ pub fn run() {
             app.manage(AppState {
                 db: Arc::new(db),
                 git: GitService::default(),
+                setup_terminal: Arc::new(setup_terminal::SetupTerminal::default()),
+                data_dir: data.clone(),
+                cursor: Arc::new(cursor::CursorService::new(data.join("cursor-executable.txt"))),
+                codex: Arc::new(codex::CodexService::new(data.join("codex-executable.txt"))),
             });
 
             let open = MenuItem::with_id(app, "open", "Open GitCerberus", true, None::<&str>)?;
@@ -412,8 +559,26 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            install_provider,
+            cancel_provider_install,
+            configure_cursor,
+            cursor_threads,
+            cursor_messages,
+            configure_codex,
+            codex_account,
+            codex_login,
+            codex_cancel_login,
+            codex_threads,
+            codex_messages,
             list_repositories,
+            github_repositories,
+            link_repository_folder,
+            clone_github_repository,
+            open_in_cursor,
+            list_branches,
+            commit_history,
             list_identities,
+            disconnect_github_identity,
             begin_github_oauth,
             complete_github_oauth,
             complete_github_token,

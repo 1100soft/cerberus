@@ -1,13 +1,14 @@
-import { Copy, ExternalLink, FolderOpen, ArrowDownToLine, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
+import { CloudDownload, Copy, ExternalLink, FolderOpen, ArrowDownToLine, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isLocal } from "../lib/repositories";
 import type { Repository } from "../types";
-
-function VSCodeIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.6 2.4 9.5 9.8 5 6.4 2.4 8v8L5 17.6l4.5-3.4 8.1 7.4 4-1.9V4.3l-4-1.9ZM5.2 14.3v-4.6L7.8 12l-2.6 2.3Zm12.3 2.1-5.4-4.4 5.4-4.4v8.8Z"/></svg>;
-}
+import { CursorIcon, VSCodeIcon } from "./Icons";
 
 export type ContextAction =
   | "configure"
+  | "cursor"
+  | "clone"
+  | "locate"
   | "editor"
   | "hosted"
   | "folder"
@@ -28,6 +29,7 @@ type Props = {
 };
 
 export function RepositoryContextMenu({ repository, x, y, busy, onAction, onClose }: Props) {
+  const local = isLocal(repository);
   const menu = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
 
@@ -35,9 +37,10 @@ export function RepositoryContextMenu({ repository, x, y, busy, onAction, onClos
     const node = menu.current;
     if (!node) return;
     const { width, height } = node.getBoundingClientRect();
+    const zoom = Number.parseFloat(getComputedStyle(document.body).zoom) || 1;
     setPos({
-      left: Math.min(x, window.innerWidth - width - 8),
-      top: Math.min(y, window.innerHeight - height - 8)
+      left: Math.max(8, Math.min(x, window.innerWidth - width - 8)) / zoom,
+      top: Math.max(8, Math.min(y, window.innerHeight - height - 8)) / zoom
     });
   }, [x, y]);
 
@@ -58,18 +61,21 @@ export function RepositoryContextMenu({ repository, x, y, busy, onAction, onClos
 
   return <div ref={menu} className="context-menu" style={{ left: pos.left, top: pos.top }} role="menu">
     <p>{repository.displayName}</p>
-    <button role="menuitem" onClick={() => onAction("configure")}><Settings2 />Configure repository</button>
+    <button role="menuitem" onClick={() => onAction("configure")} disabled={!local}><Settings2 />Configure repository</button>
     <hr />
-    <button role="menuitem" disabled={busy} onClick={() => onAction("editor")}><VSCodeIcon />Open in VS Code</button>
+    {!local && <button role="menuitem" disabled={busy} onClick={() => onAction("locate")}><FolderOpen />Link existing folder</button>}
+    {!local && repository.github && <button role="menuitem" disabled={busy} onClick={() => onAction("clone")}><CloudDownload />Clone from GitHub</button>}
+    <button role="menuitem" disabled={busy || !local} onClick={() => onAction("editor")}><VSCodeIcon />Open in VS Code</button>
+    <button role="menuitem" disabled={busy || !local} onClick={() => onAction("cursor")}><CursorIcon />Open in Cursor</button>
     <button role="menuitem" disabled={busy || !repository.canonicalRemote} onClick={() => onAction("hosted")}><ExternalLink />Open hosted repository</button>
-    <button role="menuitem" disabled={busy} onClick={() => onAction("folder")}><FolderOpen />Open local folder</button>
-    <button role="menuitem" onClick={() => onAction("copy-path")}><Copy />Copy local path</button>
+    <button role="menuitem" disabled={busy || !local} onClick={() => onAction("folder")}><FolderOpen />Open local folder</button>
+    <button role="menuitem" disabled={!local} onClick={() => onAction("copy-path")}><Copy />Copy local path</button>
     <hr />
-    <button role="menuitem" disabled={busy} onClick={() => onAction("fetch")}><RefreshCw />Fetch</button>
-    <button role="menuitem" disabled={busy} onClick={() => onAction("pull")}><ArrowDownToLine />Pull (fast-forward)</button>
-    <button role="menuitem" disabled={busy} onClick={() => onAction("push")}><Upload />Push</button>
-    <button role="menuitem" disabled={busy} onClick={() => onAction("refresh")}><RefreshCw />Refresh status</button>
+    <button role="menuitem" disabled={busy || !local} onClick={() => onAction("fetch")}><RefreshCw />Fetch</button>
+    <button role="menuitem" disabled={busy || !local} onClick={() => onAction("pull")}><ArrowDownToLine />Pull (fast-forward)</button>
+    <button role="menuitem" disabled={busy || !local} onClick={() => onAction("push")}><Upload />Push</button>
+    <button role="menuitem" disabled={busy || !local} onClick={() => onAction("refresh")}><RefreshCw />Refresh status</button>
     <hr />
-    <button role="menuitem" className="danger" onClick={() => onAction("remove")}><Trash2 />Remove from workspace</button>
+    <button role="menuitem" className="danger" disabled={repository.id.startsWith("github:")} onClick={() => onAction("remove")}><Trash2 />Remove from workspace</button>
   </div>;
 }
