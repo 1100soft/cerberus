@@ -17,6 +17,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
@@ -29,6 +30,7 @@ url = "2"
 thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+github-copilot-sdk = "1.0.14"
 
 # Build DBus from source on Linux. This keeps `npm run tauri dev` working on
 # development machines that have the normal Tauri GUI libraries but not the

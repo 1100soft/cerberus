@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { formToUpdate, RepositoryFields, type RepositoryFormValue } from "./RepositoryFields";
-import type { Identity, Repository, RepositoryUpdate } from "../types";
+import { identitiesWithRepositoryAccess } from "../lib/repositories";
+import type { GithubRepository, Identity, Repository, RepositoryUpdate } from "../types";
 
 type Props = {
   repository?: Repository;
   identities: Identity[];
+  catalog?: GithubRepository[];
   onClose: () => void;
   onSave: (update: RepositoryUpdate) => Promise<void>;
   onRemove?: () => Promise<void>;
@@ -23,12 +25,13 @@ function fromRepo(repo?: Repository): RepositoryFormValue {
   };
 }
 
-export function RepositoryConfigDialog({ repository: repo, identities, onClose, onSave, onRemove }: Props) {
+export function RepositoryConfigDialog({ repository: repo, identities, catalog, onClose, onSave, onRemove }: Props) {
   const creating = !repo;
   const [value, setValue] = useState(() => fromRepo(repo));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const changes = repo ? repo.stagedCount + repo.modifiedCount + repo.untrackedCount : 0;
+  const assignable = identitiesWithRepositoryAccess(identities, { ...repo, canonicalRemote: value.canonicalRemote, github: repo?.github, accessibleIdentityIds: repo?.accessibleIdentityIds, identity: repo?.identity }, catalog);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -48,7 +51,7 @@ export function RepositoryConfigDialog({ repository: repo, identities, onClose, 
         <button type="button" onClick={onClose}><X /></button>
       </header>
       {creating && <p className="panel-copy">GitCerberus will initialize a Git repository at this path, remember it in your workspace, and optionally add a remote.</p>}
-      <RepositoryFields value={value} identities={identities} onChange={setValue} browseTitle={creating ? "Choose a folder for the new repository" : "Choose folder"} />
+      <RepositoryFields value={value} identities={assignable} onChange={setValue} browseTitle={creating ? "Choose a folder for the new repository" : "Choose folder"} />
       {repo && <section className="config-status">
         <h3>Live Git status</h3>
         <dl>

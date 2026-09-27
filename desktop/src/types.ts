@@ -5,6 +5,7 @@ export type Identity = {
   gitEmail: string;
   color?: string;
   providerUsername?: string;
+  connected?: boolean;
 };
 
 export type GithubDeviceFlow = {
@@ -16,6 +17,8 @@ export type Repository = {
   id: string;
   displayName: string;
   localPath: string;
+  localPresent?: boolean;
+  github?: GithubRepository;
   canonicalRemote?: string;
   hostType: string;
   defaultBranch?: string;
@@ -32,6 +35,7 @@ export type Repository = {
   identityMismatch: boolean;
   tags: string[];
   manualOrder: number;
+  accessibleIdentityIds?: string[];
 };
 
 export type GithubAuthStatus = {
@@ -50,3 +54,17 @@ export type RepositoryUpdate = {
   identityId?: string | null;
   tags: string[];
 };
+
+export type Commit = { hash: string; author: string; email: string; committedAt: string; summary: string };
+
+export type CodexAccount = { account: { type: string; email?: string; planType?: string } | null };
+export type CodexThread = { id: string; name?: string; preview: string; cwd: string; updatedAt: number; working?: boolean; gitInfo?: { branch?: string } };
+export type CodexThreadPage = { data: CodexThread[]; nextCursor?: string | null };
+export type FileEdit = {path:string; kind:string; diff?:string; source?:string};
+export type AgentStep={id?:string;kind:string;title:string;text:string;status?:string};
+export type CodexMessage = { id: string; role: string; text: string; edits?:FileEdit[]; steps?:AgentStep[] };
+
+export type CodexMessagePage = { data: CodexMessage[]; nextCursor?: string | null };
+
+export type GithubRepository = { id: number; name: string; fullName: string; owner: string; private: boolean; htmlUrl: string; updatedAt?: string; pushedAt?: string; defaultBranch?: string; identityId: string };
+export type GithubCatalog = { repositories: GithubRepository[]; warnings: string[]; failedIdentityIds?: string[] };

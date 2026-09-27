@@ -1,0 +1,85 @@
+name: Publish Debian package
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-debian-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Debian package
+        working-directory: desktop
+        run: npm run tauri -- build --bundles deb
+
+      - name: Prepare and validate Debian package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' packages < <(find desktop/src-tauri/target/release/bundle/deb \
+            -maxdepth 1 -type f -name 'gitcerberus_*.deb' -print0)
+          test "${#packages[@]}" -eq 1
+
+          package="${packages[0]}"
+          test "$(dpkg-deb --field "$package" Package)" = gitcerberus
+          version="$(dpkg-deb --field "$package" Version)"
+          test "v${version}" = "${GITHUB_REF_NAME}"
+          architecture="$(dpkg-deb --field "$package" Architecture)"
+          [[ "$architecture" =~ ^(amd64|arm64|all)$ ]]
+
+          mkdir -p apt-packages
+          cp "$package" "apt-packages/gitcerberus_${version}_${architecture}.deb"
+          dpkg-deb --info "apt-packages/gitcerberus_${version}_${architecture}.deb" >/dev/null
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apt-packages
+          path: apt-packages/*.deb
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Request publication
+        env:
+          GH_TOKEN: ${{ secrets.APT_DISPATCH_TOKEN }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+        run: |
+          gh api --method POST repos/1100soft/1100/dispatches \
+            -f event_type=apt-package \
+            -F client_payload[source_repository]="${SOURCE_REPOSITORY}" \
+            -F client_payload[run_id]="${SOURCE_RUN_ID}" \
+            -F client_payload[artifact]=apt-packages

@@ -52,6 +52,14 @@ impl Database {
         Ok(id)
     }
 
+    pub fn restore_clone_location(&self, id: &str, path: &Path) -> Result<(), String> {
+        self.connection.lock().map_err(|e| e.to_string())?.execute(
+            "UPDATE repository_devices SET local_path=?1, availability='available' WHERE repository_id=?2 AND device_id=?3",
+            params![path.to_string_lossy(), id, self.device_id],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn repository_path(&self, id: &str) -> Result<PathBuf, String> {
         self.connection
             .lock()
@@ -77,6 +85,7 @@ impl Database {
                     git_email: row.get(3)?,
                     color: Some("#8b7cf6".into()),
                     provider_username: row.get(4)?,
+                    connected: false,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -109,6 +118,7 @@ impl Database {
             git_email: email.into(),
             color: Some("#8b7cf6".into()),
             provider_username: Some(login.into()),
+            connected: true,
         })
     }
 
@@ -258,6 +268,7 @@ impl Database {
                         id: row.get(0)?,
                         display_name: row.get(1)?,
                         local_path: row.get(2)?,
+                        local_present: Path::new(&row.get::<_, String>(2)?).join(".git").exists(),
                         canonical_remote: row.get(3)?,
                         host_type: row.get(4)?,
                         default_branch: row.get(5)?,
@@ -278,6 +289,7 @@ impl Database {
                             git_email: row.get(19).unwrap_or_default(),
                             color: None,
                             provider_username: row.get(20).ok(),
+                            connected: false,
                         }),
                         identity_mismatch: false,
                         tags: Vec::new(),

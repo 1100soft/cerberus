@@ -1,20 +1,35 @@
+import { IdentityCard } from './IdentityCard';
+import { ExternalIdentityCards, externalLogin } from './ExternalIdentityCards';
+import { ChatgptIdentityCards, ChatgptSettings } from './ChatgptIdentities';
+import { IdentitySignIn } from './IdentitySignIn';
+import { ProviderIdentityBadge } from './ProviderIdentityBadge';
+import { CopilotQuota, type CopilotQuotaResponse } from './CopilotQuota';
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, ExternalLink, Github, Link2, ShieldCheck, X } from "lucide-react";
-import { api } from "../lib/api";
-import type { GithubAuthStatus, GithubDeviceFlow, Identity, Repository } from "../types";
+import { Check, HelpCircle, Copy, ExternalLink, Github, Link2, PlugZap, ShieldCheck, Unplug, X } from "lucide-react";
+import { api, inTauri } from "../lib/api";
+import { invoke } from '@tauri-apps/api/core';
+import type { GithubAuthStatus, GithubDeviceFlow, Identity } from "../types";
 
-const TOKEN_URL = "https://github.com/settings/tokens/new?scopes=read:user,user:email&description=GitCerberus";
+type Props = { identities: Identity[]; inferredOwner?: string; pendingRepositoryId?: string; startGithubLogin?: boolean; startExternalLogin?: 'cursor'|'claude'; onClose: () => void; onChanged: () => Promise<void>; };
+function GithubUsage({identity}:{identity:Identity}){
+  const [usage,setUsage]=useState<CopilotQuotaResponse>();
+  const [error,setError]=useState('');
+  useEffect(()=>{if(identity.connected===false || !inTauri())return;let live=true;void invoke<CopilotQuotaResponse>('copilot_repository_snapshot',{identityId:identity.id,repository:''}).then(result=>{if(live){setUsage(result);setError('');}}).catch(reason=>{if(live)setError(String(reason));});return()=>{live=false;};},[identity.id,identity.connected]);
+  return <div className="identity-usage"><CopilotQuota usage={usage}/>{error && <small role="status">{error}</small>}<button type="button" className="identity-usage-link" title={`Opens your browser. Check that @${identity.providerUsername||identity.label} is the signed-in account.`} onClick={()=>void api.openExternalUrl('https://github.com/settings/copilot')}>Open Copilot usage</button></div>;
+}
 
-type Props = { identities: Identity[]; repositories: Repository[]; inferredOwner?: string; pendingRepositoryId?: string; onClose: () => void; onChanged: () => Promise<void>; };
-
-export function IdentitiesPanel({ identities, repositories, inferredOwner, pendingRepositoryId, onClose, onChanged }: Props) {
-  const [step, setStep] = useState(inferredOwner ? 1 : 0);
+export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId, startGithubLogin, startExternalLogin, onClose, onChanged }: Props) {
+  const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<GithubAuthStatus>({ browserSignIn: false, githubCli: false });
   const [statusReady, setStatusReady] = useState(false);
   const [flow, setFlow] = useState<GithubDeviceFlow>();
-  const [token, setToken] = useState("");
+  const [codeCopied, setCodeCopied] = useState(false);
   const [message, setMessage] = useState("");
+  const [busyId, setBusyId] = useState<string>();
+  const helpDialog = useRef<HTMLElement>(null);
   const autoStarted = useRef(false);
+  const authAttempt = useRef(0);
+  const reconnecting = useRef<Identity>();
 
   useEffect(() => {
     api.githubAuthStatus().then((next) => { setStatus(next); setStatusReady(true); }).catch(() => setStatusReady(true));
@@ -22,115 +37,139 @@ export function IdentitiesPanel({ identities, repositories, inferredOwner, pendi
 
   async function connected(identity: Identity, extra = "") {
     if (pendingRepositoryId) await api.assignIdentity(pendingRepositoryId, identity.id);
-    setMessage(`Signed in as @${identity.providerUsername}${pendingRepositoryId ? ". This repository is now linked to that account." : extra}`);
+    const expected = reconnecting.current;
+    const switched = expected?.providerUsername && identity.providerUsername && expected.providerUsername.toLowerCase() !== identity.providerUsername.toLowerCase();
+    setMessage(switched
+      ? `Signed in as @${identity.providerUsername}. @${expected.providerUsername} is still disconnected; reconnect that account separately if you still need it.`
+      : `Signed in as @${identity.providerUsername}${pendingRepositoryId ? ". This repository is now linked to that account." : extra}`);
+    reconnecting.current = undefined;
     setFlow(undefined);
-    setToken("");
     await onChanged();
-    setStep(2);
   }
 
   async function connectBrowser() {
+    const attempt = ++authAttempt.current;
     try {
       const next = await api.beginGithubOAuth();
+      if (authAttempt.current !== attempt) return;
       setFlow(next);
+      setCodeCopied(false);
       await api.openExternalUrl(next.verificationUri);
-      setMessage("GitHub should now be open. Approve GitCerberus, then come back and select I’ve authorized GitHub.");
-    } catch (e) { setMessage(String(e)); }
+      const target = reconnecting.current;
+      setMessage(target
+        ? `GitHub should now be open. Approve GitCerberus as ${target.providerUsername ? `@${target.providerUsername}` : target.label} to restore access.`
+        : "GitHub should now be open. Approve GitCerberus there; this screen will finish signing you in automatically.");
+      const deadline = Date.now() + next.expiresIn * 1000;
+      const interval = Math.max(next.interval, 5) * 1000;
+      while (authAttempt.current === attempt && Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, interval));
+        if (authAttempt.current !== attempt) return;
+        const identity = await api.completeGithubOAuth(next.clientId ?? "", next.deviceCode);
+        if (authAttempt.current !== attempt) return;
+        if (identity) {
+          await connected(identity, ". Next, match your repositories to this account.");
+          authAttempt.current++;
+          return;
+        }
+      }
+      if (authAttempt.current === attempt) {
+        setFlow(undefined);
+        reconnecting.current = undefined;
+        setMessage("The GitHub authorization expired. Select Sign in with GitHub to try again.");
+      }
+    } catch (e) {
+      if (authAttempt.current === attempt) {
+        setFlow(undefined);
+        reconnecting.current = undefined;
+        setMessage(String(e));
+      }
+    }
   }
 
-  async function completeBrowser() {
+  useEffect(() => () => { authAttempt.current++; }, []);
+
+  async function disconnect(identity: Identity) {
+    const name = identity.providerUsername ? `@${identity.providerUsername}` : identity.label;
+    if (!window.confirm(`Disconnect ${name}? GitHub access is removed from this computer. Assigned repositories stay associated until you reconnect.`)) return;
+    setBusyId(identity.id);
+    try {
+      await api.disconnectGithubIdentity(identity.id);
+      setMessage(`Disconnected ${name}. Reconnect to list private repositories and clone with this account.`);
+      await onChanged();
+    } catch (error) { setMessage(String(error)); }
+    finally { setBusyId(undefined); }
+  }
+
+  function reconnect(identity: Identity) {
+    if (!status.browserSignIn) {
+      setMessage("GitHub sign-in is unavailable because this build has no product OAuth client ID.");
+      return;
+    }
+    reconnecting.current = identity;
+    void connectBrowser();
+  }
+
+  async function copyDeviceCode() {
     if (!flow) return;
     try {
-      const identity = await api.completeGithubOAuth(flow.clientId ?? "", flow.deviceCode);
-      if (!identity) setMessage("GitHub is still waiting. Finish the prompt in the browser, then try again.");
-      else await connected(identity, ". Next, match your repositories to this account.");
-    } catch (e) { setMessage(String(e)); }
-  }
-
-  async function connectCli() {
-    try { await connected(await api.importGithubCliIdentity(), " using your GitHub CLI session."); }
-    catch (e) { setMessage(String(e)); }
-  }
-
-  async function connectToken() {
-    try { await connected(await api.completeGithubToken(token.trim())); }
-    catch (e) { setMessage(String(e)); }
+      await navigator.clipboard.writeText(flow.userCode);
+      setCodeCopied(true);
+    } catch (e) { setMessage(`Could not copy the code: ${String(e)}`); }
   }
 
   useEffect(() => {
-    if (!inferredOwner || !statusReady || autoStarted.current) return;
+    if (!(inferredOwner || startGithubLogin) || !statusReady || autoStarted.current) return;
     autoStarted.current = true;
-    setStep(1);
-    setMessage(`This repository looks like it belongs to GitHub user “${inferredOwner}”. Sign in with that account so commits and the hosted page stay together.`);
+    if(inferredOwner)setMessage(`This repository looks like it belongs to GitHub user “${inferredOwner}”. Sign in with that account so commits and the hosted page stay together.`);
     if (status.browserSignIn) void connectBrowser();
-  }, [inferredOwner, statusReady, status.browserSignIn]);
+  }, [inferredOwner, startGithubLogin, statusReady, status.browserSignIn]);
 
-  const steps = ["How it works", "Sign in", "Match repos"];
+  useEffect(() => {
+    if (!showHelp) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowHelp(false);
+      if (event.key === "Tab") { event.preventDefault(); helpDialog.current?.querySelector<HTMLButtonElement>("button")?.focus(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); previousFocus?.focus(); };
+  }, [showHelp]);
 
-  return <div className="panel-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-    <section className="identities-panel">
-      <header>
-        <div><p>Identity routing</p><h2>Who should this code belong to?</h2></div>
-        <button onClick={onClose}><X /></button>
-      </header>
-      <ol className="wizard-steps">
-        {steps.map((label, index) => <li key={label}><button type="button" className={step === index ? "active" : step > index ? "done" : ""} onClick={() => setStep(index)}><span>{index + 1}</span>{label}</button></li>)}
-      </ol>
-
-      {step === 0 && <>
-        <p className="panel-copy">If you use more than one GitHub account—say work and personal—Git needs to know which one a repository belongs to. GitCerberus remembers that choice so you do not accidentally commit, push, or open the wrong profile.</p>
+  return <section className="identities-page">
+    <header>
+      <div><p>Workspace</p><h1>Your identities</h1></div>
+      <div className="header-actions">
+        <button type="button" onClick={() => setShowHelp(true)}><HelpCircle size={17} />How it works</button>
+        <IdentitySignIn onExternalLogin={externalLogin} github={{onClick: () => { void connectBrowser(); }, disabled: !statusReady || !status.browserSignIn || !!flow, message: !statusReady ? 'Checking sign-in availability…' : !status.browserSignIn ? 'GitHub sign-in is unavailable because this build has no product OAuth client ID.' : undefined}} />
+      </div>
+    </header>
+    <div className="identity-list"><ChatgptIdentityCards/><ExternalIdentityCards startLogin={startExternalLogin}/>
+      {identities.map((identity) => {
+        const connectedAccount = identity.connected !== false;
+        return <IdentityCard key={identity.id} icon={<ProviderIdentityBadge provider="github" id={identity.id} label={identity.label}/>} label={identity.label} detail={`${identity.providerUsername ? `@${identity.providerUsername} · ` : ""}${identity.gitEmail}`} initialsId={identity.id} connected={connectedAccount} busy={busyId === identity.id || !!flow} onConnect={()=>reconnect(identity)} onDisconnect={()=>void disconnect(identity)}><GithubUsage identity={identity}/></IdentityCard>;
+      })}
+    </div>
+    <ChatgptSettings/>
+    {flow && <div className="device-code">
+      <span>Enter this code on GitHub</span>
+      <div className="device-code-controls">
+        <input value={flow.userCode} readOnly aria-label="GitHub device code" />
+        <button type="button" className={codeCopied ? "copied" : ""} onClick={copyDeviceCode} title={codeCopied ? "Copied to clipboard." : "Copy the code."} aria-label="Copy GitHub device code"><Copy /></button>
+      </div>
+      <span className="device-code-status">Waiting for GitHub authorization…</span>
+      <a href={flow.verificationUri} target="_blank" rel="noreferrer">Open GitHub <ExternalLink /></a>
+    </div>}
+    {message && <p className="oauth-message" role="status">{message}</p>}
+    {pendingRepositoryId && <button type="button" className="identity-back" onClick={onClose}>Back to repositories</button>}
+    {showHelp && <div className="panel-backdrop dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowHelp(false); }}>
+      <section ref={helpDialog} className="repo-config" role="dialog" aria-modal="true" aria-labelledby="identity-help-title">
+        <header><h2 id="identity-help-title">How identities work</h2><button type="button" autoFocus aria-label="Close help" onClick={() => setShowHelp(false)}><X /></button></header>
         <div className="wizard-cards">
-          <article><ShieldCheck /><h3>An identity is a person-at-work</h3><p>It is a Git author name, email, and GitHub login kept together. Assign one identity to each repository.</p></article>
-          <article><Github /><h3>Sign in once per account</h3><p>GitHub does not allow apps to log in with only a username. You approve GitCerberus in the browser, reuse GitHub CLI, or paste a token. You do not create your own OAuth app.</p></article>
-          <article><Link2 /><h3>Then match your folders</h3><p>Work repos get the work identity. Personal repos get the personal one. You can change this later from any repository’s configuration.</p></article>
+          <article><ShieldCheck /><h3>Keep your accounts together</h3><p>GitHub identities control Git access and authorship. ChatGPT supplies Codex access. Cursor and Claude identities use their local CLI sign-ins for editor delegation.</p></article>
+          <article><Github /><h3>Sign in once per account</h3><p>Choose Add identity, then Sign in with GitHub. Approve GitCerberus in your browser, including repository access to list and clone private repositories. Disconnect an account to remove its token from this computer, or Reconnect if private repositories are missing. Repeat for each account you use. Tokens are stored in this computer’s password manager.</p></article>
+          <article><Link2 /><h3>Match your repositories</h3><p>Open a repository’s action tray to assign its GitHub, ChatGPT, Cursor, and Claude accounts. GitHub controls Git access and Copilot information for that repository.</p></article>
         </div>
-        {inferredOwner && <p className="oauth-message">The folder you just added looks like it is owned by <b>{inferredOwner}</b> on GitHub. The next step signs that account in.</p>}
-      </>}
-
-      {step === 1 && <>
-        <p className="panel-copy">Sign in with each GitHub account you actually use. Repeat this step for work and personal logins. GitCerberus stores the token in this computer’s password manager.</p>
-        <div className="sign-in-actions">
-          <button type="button" className="primary" disabled={!status.browserSignIn} onClick={connectBrowser}><Github />Sign in with GitHub</button>
-          <button type="button" disabled={!status.githubCli} onClick={connectCli}>Use GitHub CLI session</button>
-        </div>
-        {!status.browserSignIn && <p className="oauth-message">One-click browser sign-in will appear once GitCerberus is built with its product OAuth client ID. Until then, use GitHub CLI or a personal access token—you still do not register an OAuth app.</p>}
-        {!status.githubCli && <p className="oauth-message">GitHub CLI is optional. If you already run <code>gh auth login</code> on this machine, that session can be reused here.</p>}
-        {flow && <div className="device-code">
-          <span>If GitHub asks for a code, enter</span>
-          <strong>{flow.userCode}</strong>
-          <button onClick={completeBrowser}>I’ve authorized GitHub</button>
-          <a href={flow.verificationUri} target="_blank">Open GitHub <ExternalLink /></a>
-        </div>}
-        <label className="token-field">Personal access token
-          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_… or github_pat_…" autoComplete="off" />
-        </label>
-        <div className="sign-in-actions">
-          <button type="button" disabled={!token.trim()} onClick={connectToken}>Connect with token</button>
-          <button type="button" onClick={() => void api.openExternalUrl(TOKEN_URL)}>Create a token on GitHub</button>
-        </div>
-        {message && <p className="oauth-message">{message}</p>}
-        <div className="identity-list">
-          {!identities.length && <p className="panel-copy">No accounts connected yet.</p>}
-          {identities.map((identity) => <div key={identity.id}><Github /><span><b>{identity.label}</b><small>@{identity.providerUsername} · {identity.gitEmail}</small></span><Check className="connected" /></div>)}
-        </div>
-      </>}
-
-      {step === 2 && <>
-        <p className="panel-copy">Choose which signed-in account each repository should use. Unassigned repositories will not know which Git author or GitHub profile to apply. You can also set this later by double-clicking a repository.</p>
-        {!identities.length && <p className="oauth-message">Sign in on the previous step before matching repositories.</p>}
-        <div className="association-list">{repositories.map((repo) => <label key={repo.id}>
-          <span>{repo.displayName}<small>{repo.canonicalRemote ?? repo.localPath}</small></span>
-          <select value={repo.identity?.id ?? ""} onChange={async (e) => { await api.assignIdentity(repo.id, e.target.value); await onChanged(); }}>
-            <option value="">Unassigned</option>
-            {identities.map((identity) => <option key={identity.id} value={identity.id}>{identity.label}</option>)}
-          </select>
-        </label>)}</div>
-      </>}
-
-      <footer className="wizard-nav">
-        <button type="button" disabled={step === 0} onClick={() => setStep((value) => value - 1)}><ChevronLeft size={16} />Back</button>
-        {step < 2 ? <button type="button" className="primary" onClick={() => setStep((value) => value + 1)}>Continue<ChevronRight size={16} /></button> : <button type="button" className="primary" onClick={onClose}>Done</button>}
-      </footer>
-    </section>
-  </div>;
+      </section>
+    </div>}
+  </section>;
 }
