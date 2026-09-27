@@ -1,12 +1,24 @@
+import { IdentityCard } from './IdentityCard';
+import { ExternalIdentityCards, externalLogin } from './ExternalIdentityCards';
+import { ChatgptIdentityCards, ChatgptSettings } from './ChatgptIdentities';
+import { IdentitySignIn } from './IdentitySignIn';
+import { ProviderIdentityBadge } from './ProviderIdentityBadge';
+import { CopilotQuota, type CopilotQuotaResponse } from './CopilotQuota';
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, HelpCircle, Plus, Copy, ExternalLink, Github, Link2, PlugZap, ShieldCheck, Unplug, X } from "lucide-react";
-import { api } from "../lib/api";
+import { Check, HelpCircle, Copy, ExternalLink, Github, Link2, PlugZap, ShieldCheck, Unplug, X } from "lucide-react";
+import { api, inTauri } from "../lib/api";
+import { invoke } from '@tauri-apps/api/core';
 import type { GithubAuthStatus, GithubDeviceFlow, Identity } from "../types";
 
-type Props = { identities: Identity[]; inferredOwner?: string; pendingRepositoryId?: string; onClose: () => void; onChanged: () => Promise<void>; };
+type Props = { identities: Identity[]; inferredOwner?: string; pendingRepositoryId?: string; startGithubLogin?: boolean; startExternalLogin?: 'cursor'|'claude'; onClose: () => void; onChanged: () => Promise<void>; };
+function GithubUsage({identity}:{identity:Identity}){
+  const [usage,setUsage]=useState<CopilotQuotaResponse>();
+  const [error,setError]=useState('');
+  useEffect(()=>{if(identity.connected===false || !inTauri())return;let live=true;void invoke<CopilotQuotaResponse>('copilot_repository_snapshot',{identityId:identity.id,repository:''}).then(result=>{if(live){setUsage(result);setError('');}}).catch(reason=>{if(live)setError(String(reason));});return()=>{live=false;};},[identity.id,identity.connected]);
+  return <div className="identity-usage"><CopilotQuota usage={usage}/>{error && <small role="status">{error}</small>}<button type="button" className="identity-usage-link" title={`Opens your browser. Check that @${identity.providerUsername||identity.label} is the signed-in account.`} onClick={()=>void api.openExternalUrl('https://github.com/settings/copilot')}>Open Copilot usage</button></div>;
+}
 
-export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId, onClose, onChanged }: Props) {
-  const [showSignIn, setShowSignIn] = useState(false);
+export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId, startGithubLogin, startExternalLogin, onClose, onChanged }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<GithubAuthStatus>({ browserSignIn: false, githubCli: false });
   const [statusReady, setStatusReady] = useState(false);
@@ -14,7 +26,6 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
   const [codeCopied, setCodeCopied] = useState(false);
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string>();
-  const addMenu = useRef<HTMLDivElement>(null);
   const helpDialog = useRef<HTMLElement>(null);
   const autoStarted = useRef(false);
   const authAttempt = useRef(0);
@@ -34,7 +45,6 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
     reconnecting.current = undefined;
     setFlow(undefined);
     await onChanged();
-    setShowSignIn(false);
   }
 
   async function connectBrowser() {
@@ -108,12 +118,11 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
   }
 
   useEffect(() => {
-    if (!inferredOwner || !statusReady || autoStarted.current) return;
+    if (!(inferredOwner || startGithubLogin) || !statusReady || autoStarted.current) return;
     autoStarted.current = true;
-    setShowSignIn(true);
-    setMessage(`This repository looks like it belongs to GitHub user “${inferredOwner}”. Sign in with that account so commits and the hosted page stay together.`);
+    if(inferredOwner)setMessage(`This repository looks like it belongs to GitHub user “${inferredOwner}”. Sign in with that account so commits and the hosted page stay together.`);
     if (status.browserSignIn) void connectBrowser();
-  }, [inferredOwner, statusReady, status.browserSignIn]);
+  }, [inferredOwner, startGithubLogin, statusReady, status.browserSignIn]);
 
   useEffect(() => {
     if (!showHelp) return;
@@ -126,44 +135,21 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
     return () => { window.removeEventListener("keydown", onKey); previousFocus?.focus(); };
   }, [showHelp]);
 
-  useEffect(() => {
-    if (!showSignIn) return;
-    const dismiss = (event: MouseEvent) => { if (!addMenu.current?.contains(event.target as Node)) setShowSignIn(false); };
-    document.addEventListener("mousedown", dismiss);
-    return () => document.removeEventListener("mousedown", dismiss);
-  }, [showSignIn]);
-
   return <section className="identities-page">
     <header>
       <div><p>Workspace</p><h1>Your identities</h1></div>
       <div className="header-actions">
         <button type="button" onClick={() => setShowHelp(true)}><HelpCircle size={17} />How it works</button>
-        <div className="add-identity" ref={addMenu}>
-          <button type="button" className="import" aria-expanded={showSignIn} aria-controls="identity-sign-in" onClick={() => setShowSignIn(!showSignIn)}><Plus size={17} />Add identity<ChevronDown size={15} /></button>
-          {showSignIn && <div id="identity-sign-in" className="identity-sign-in" onKeyDown={(event) => { if (event.key === "Escape") setShowSignIn(false); }}>
-            <button type="button" disabled={!statusReady || !status.browserSignIn || !!flow} onClick={connectBrowser}><Github size={18} />Sign in with GitHub</button>
-            {!statusReady ? <p className="panel-copy">Checking sign-in availability…</p> : !status.browserSignIn && <p className="panel-copy">GitHub sign-in is unavailable because this build has no product OAuth client ID.</p>}
-          </div>}
-        </div>
+        <IdentitySignIn onExternalLogin={externalLogin} github={{onClick: () => { void connectBrowser(); }, disabled: !statusReady || !status.browserSignIn || !!flow, message: !statusReady ? 'Checking sign-in availability…' : !status.browserSignIn ? 'GitHub sign-in is unavailable because this build has no product OAuth client ID.' : undefined}} />
       </div>
     </header>
-    <p className="panel-copy">Repositories accessible to your connected GitHub accounts appear automatically. Use Assign account on a repository’s action tray to match it to an identity.</p>
-    <div className="identity-list">
-      {!identities.length && <div className="identity-empty"><ShieldCheck /><span><b>No identities yet</b><small>Add an identity to connect your GitHub account.</small></span></div>}
+    <div className="identity-list"><ChatgptIdentityCards/><ExternalIdentityCards startLogin={startExternalLogin}/>
       {identities.map((identity) => {
         const connectedAccount = identity.connected !== false;
-        return <div key={identity.id}>
-          <Github style={{ color: identity.color }} />
-          <span><b>{identity.label}</b><small>{identity.providerUsername ? `@${identity.providerUsername} · ` : ""}{identity.gitEmail}</small></span>
-          <div className="identity-actions">
-            <span className={connectedAccount ? "connected" : "disconnected"}>{connectedAccount ? <><Check size={16} />Connected</> : "Disconnected"}</span>
-            {connectedAccount
-              ? <button type="button" disabled={busyId === identity.id || !!flow} onClick={() => void disconnect(identity)}><Unplug size={15} />{busyId === identity.id ? "Disconnecting…" : "Disconnect"}</button>
-              : <button type="button" disabled={!!flow || busyId === identity.id} onClick={() => reconnect(identity)}><PlugZap size={15} />Reconnect</button>}
-          </div>
-        </div>;
+        return <IdentityCard key={identity.id} icon={<ProviderIdentityBadge provider="github" id={identity.id} label={identity.label}/>} label={identity.label} detail={`${identity.providerUsername ? `@${identity.providerUsername} · ` : ""}${identity.gitEmail}`} initialsId={identity.id} connected={connectedAccount} busy={busyId === identity.id || !!flow} onConnect={()=>reconnect(identity)} onDisconnect={()=>void disconnect(identity)}><GithubUsage identity={identity}/></IdentityCard>;
       })}
     </div>
+    <ChatgptSettings/>
     {flow && <div className="device-code">
       <span>Enter this code on GitHub</span>
       <div className="device-code-controls">
@@ -179,9 +165,9 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
       <section ref={helpDialog} className="repo-config" role="dialog" aria-modal="true" aria-labelledby="identity-help-title">
         <header><h2 id="identity-help-title">How identities work</h2><button type="button" autoFocus aria-label="Close help" onClick={() => setShowHelp(false)}><X /></button></header>
         <div className="wizard-cards">
-          <article><ShieldCheck /><h3>Keep your accounts together</h3><p>An identity combines your Git author name, email, and GitHub login.</p></article>
+          <article><ShieldCheck /><h3>Keep your accounts together</h3><p>GitHub identities control Git access and authorship. ChatGPT supplies Codex access. Cursor and Claude identities use their local CLI sign-ins for editor delegation.</p></article>
           <article><Github /><h3>Sign in once per account</h3><p>Choose Add identity, then Sign in with GitHub. Approve GitCerberus in your browser, including repository access to list and clone private repositories. Disconnect an account to remove its token from this computer, or Reconnect if private repositories are missing. Repeat for each account you use. Tokens are stored in this computer’s password manager.</p></article>
-          <article><Link2 /><h3>Match your repositories</h3><p>Open a repository’s action tray and press Assign account to choose a connected GitHub identity. Use your work identity for work repositories and your personal identity for personal ones.</p></article>
+          <article><Link2 /><h3>Match your repositories</h3><p>Open a repository’s action tray to assign its GitHub, ChatGPT, Cursor, and Claude accounts. GitHub controls Git access and Copilot information for that repository.</p></article>
         </div>
       </section>
     </div>}

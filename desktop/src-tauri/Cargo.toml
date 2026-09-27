@@ -30,6 +30,7 @@ url = "2"
 thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+github-copilot-sdk = "1.0.14"
 
 # Build DBus from source on Linux. This keeps `npm run tauri dev` working on
 # development machines that have the normal Tauri GUI libraries but not the

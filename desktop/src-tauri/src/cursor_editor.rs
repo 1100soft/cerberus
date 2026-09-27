@@ -1,5 +1,5 @@
 //! Compatibility reader for Cursor editor's local history. Never writes its databases.
-use crate::codex::{Message, MessagePage, ThreadPage, ThreadSummary};
+use crate::codex::{FileEdit, Message, MessagePage, ThreadPage, ThreadSummary};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -76,6 +76,7 @@ fn headers(root: &Path, path: &Path, archived: bool) -> Result<Vec<ThreadSummary
                 cwd: path.to_string_lossy().into_owned(),
                 updated_at: updated.or(created).unwrap_or(0) / 1000,
                 git_info: None,
+                working: false,
             });
         }
     }
@@ -132,6 +133,20 @@ fn messages_at(root: &Path, path: &Path, id: &str) -> Result<MessagePage, String
         next_cursor: None,
     })
 }
+fn flush_edits(data: &mut Vec<Message>, start: usize, edits: &mut Vec<FileEdit>) {
+    if edits.is_empty() { return; }
+    let edits = std::mem::take(edits);
+    if let Some(message) = data[start..].iter_mut().rev().find(|message| message.role == "assistant") { message.edits = edits; }
+    else { data.push(Message {id:format!("edits-{start}"),role:"assistant".into(),text:String::new(),edits}); }
+}
+fn bubble_edit(value: &Value) -> Option<FileEdit> {
+    let tool = &value["toolFormerData"];
+    if tool["name"] != "edit_file_v2" || tool["status"] != "completed" { return None; }
+    let decode = |value: &Value| -> Value { value.as_str().and_then(|text| serde_json::from_str(text).ok()).unwrap_or_else(|| value.clone()) };
+    let params = decode(&tool["params"]); let result = decode(&tool["result"]);
+    result["afterContentId"].as_str()?;
+    Some(FileEdit {path:params["relativeWorkspacePath"].as_str()?.into(),kind:if result["beforeContentId"].is_string() {"update"} else {"add"}.into(),diff:None})
+}
 fn stored_messages(db: &Connection, id: &str) -> Result<Vec<Message>, String> {
     let raw: Option<String> = db
         .query_row(
@@ -167,6 +182,8 @@ fn stored_messages(db: &Connection, id: &str) -> Result<Vec<Message>, String> {
         }
     }
     let mut data = Vec::new();
+    let mut edits = Vec::new();
+    let mut turn_start = 0;
     for header in &conversation {
         let Some(bubble) = header["bubbleId"].as_str() else {
             continue;
@@ -191,6 +208,10 @@ fn stored_messages(db: &Connection, id: &str) -> Result<Vec<Message>, String> {
             Some(2) => "assistant",
             _ => continue,
         };
+        if role == "user" && !crate::cursor::is_system_notification(value["text"].as_str().unwrap_or("")) {
+            flush_edits(&mut data, turn_start, &mut edits); turn_start = data.len();
+        }
+        if role == "assistant" { if let Some(edit) = bubble_edit(&value) { if !edits.iter().any(|prior: &FileEdit| prior.path == edit.path) { edits.push(edit); } } }
         if let Some(text) = value["text"].as_str().filter(|text| !text.is_empty()) {
             if role == "user" && crate::cursor::is_system_notification(text) {
                 continue;
@@ -198,10 +219,11 @@ fn stored_messages(db: &Connection, id: &str) -> Result<Vec<Message>, String> {
             data.push(Message {
                 id: bubble.into(),
                 role: role.into(),
-                text: text.into(),
+                text: text.into(), edits:Vec::new(),
             });
         }
     }
+    flush_edits(&mut data, turn_start, &mut edits);
     Ok(data)
 }
 #[cfg(test)]
@@ -226,6 +248,14 @@ mod tests {
             page.data.len(),
             count
         );
+    }
+    #[test]
+    fn editor_edits_require_a_completed_write_and_belong_to_turn() {
+        let value = serde_json::json!({"toolFormerData":{"name":"edit_file_v2","status":"completed","params":"{\"relativeWorkspacePath\":\"src/a.ts\"}","result":{"beforeContentId":"old","afterContentId":"new"}}});
+        let edit = bubble_edit(&value).unwrap(); assert_eq!(edit.path,"src/a.ts"); assert_eq!(edit.kind,"update");
+        let mut failed = value; failed["toolFormerData"]["status"] = "error".into(); assert!(bubble_edit(&failed).is_none());
+        let mut data = vec![Message {id:"final".into(),role:"assistant".into(),text:"Done".into(),edits:vec![]}];
+        flush_edits(&mut data,0,&mut vec![edit]); assert_eq!(data[0].edits.len(),1);
     }
     #[test]
     fn editor_messages_are_repository_scoped() {

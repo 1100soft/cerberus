@@ -208,6 +208,9 @@ pub fn github_connected(id: &str) -> bool {
         .and_then(|entry| entry.get_password().map_err(|e| e.to_string()))
         .is_ok()
 }
+pub fn github_token(id: &str) -> Result<String,String> {
+    github_entry(id)?.get_password().map_err(|e| format!("GitHub token unavailable: {e}"))
+}
 
 pub fn disconnect_github_identity(id: &str) -> Result<(), String> {
     let entry = github_entry(id)?;

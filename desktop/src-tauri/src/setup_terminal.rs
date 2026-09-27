@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::{
-    io::{BufRead, BufReader},
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
@@ -36,8 +36,14 @@ impl SetupTerminal {
         if !approved {
             return Err("Installation requires approval".into());
         }
-        if !matches!(provider, "codex" | "cursor") {
+        if !matches!(provider, "codex" | "cursor" | "cursor-agent") {
             return Err("Unknown provider".into());
+        }
+        if let Ok(Some(path)) = crate::provider_paths::resolve(root, provider) {
+            let _ = output.send(SetupOutput {
+                text: "Using the existing installation.\n".into(),
+            });
+            return Ok(path);
         }
         if self.running.swap(true, Ordering::SeqCst) {
             return Err("An installation is already running".into());
@@ -46,6 +52,66 @@ impl SetupTerminal {
         self.cancel.store(false, Ordering::SeqCst);
         let directory = root.join("providers").join(provider);
         std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+        if provider == "cursor-agent" {
+            let url = if cfg!(windows) {
+                "https://cursor.com/install?win32=true"
+            } else {
+                "https://cursor.com/install"
+            };
+            let _ = output.send(SetupOutput {
+                text: format!("Downloading official Cursor installer from {url}\n"),
+            });
+            let response = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(45))
+                .build()
+                .map_err(|e| e.to_string())?
+                .get(url)
+                .send()
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| e.to_string())?;
+            let script = directory.join(if cfg!(windows) {
+                "install.ps1"
+            } else {
+                "install.sh"
+            });
+            std::fs::write(&script, response.bytes().map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+            if self.cancel.load(Ordering::SeqCst) {
+                return Err("Installation stopped".into());
+            }
+            #[cfg(windows)]
+            let mut command = {
+                let mut c = Command::new("powershell.exe");
+                c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
+                c
+            };
+            #[cfg(not(windows))]
+            let mut command = Command::new("bash");
+            command.arg(&script).env("NO_COLOR", "1");
+            #[cfg(not(windows))]
+            {
+                let curl_home = directory.join("curl");
+                std::fs::create_dir_all(&curl_home).map_err(|e| e.to_string())?;
+                let previous = std::env::var_os("CURL_HOME")
+                    .or_else(|| std::env::var_os("HOME"))
+                    .map(PathBuf::from)
+                    .map(|p| p.join(".curlrc"));
+                let mut configuration = String::new();
+                if let Some(path) = previous.filter(|p| p.is_file()) {
+                    let escaped = path
+                        .to_string_lossy()
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"");
+                    configuration.push_str(&format!("config = \"{escaped}\"\n"));
+                }
+                configuration.push_str("connect-timeout = 15\nspeed-limit = 1\nspeed-time = 45\nmax-time = 480\nretry = 2\nretry-delay = 2\nretry-max-time = 120\n");
+                std::fs::write(curl_home.join(".curlrc"), configuration)
+                    .map_err(|e| e.to_string())?;
+                command.env("CURL_HOME", curl_home);
+            }
+            self.run(command, &output)?;
+            return crate::provider_paths::resolve(root, "cursor-agent")?.ok_or("Installer finished but Cursor Agent could not be found. Choose its path in Advanced settings.".into());
+        }
         if provider == "codex" {
             #[cfg(windows)]
             let mut command = {
@@ -138,10 +204,19 @@ impl SetupTerminal {
         .map(|pipe| {
             let output = output.clone();
             std::thread::spawn(move || {
-                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                    let _ = output.send(SetupOutput {
-                        text: format!("{line}\n"),
-                    });
+                let mut pipe = pipe;
+                let mut buffer = [0u8; 4096];
+                let mut decoder = crate::terminal_text::TerminalText::default();
+                loop {
+                    match pipe.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(count) => {
+                            let text = decoder.push(&buffer[..count]);
+                            if !text.is_empty() {
+                                let _ = output.send(SetupOutput { text });
+                            }
+                        }
+                    }
                 }
             })
         })
@@ -151,7 +226,12 @@ impl SetupTerminal {
             if self.cancel.load(Ordering::SeqCst) || Instant::now() > deadline {
                 stop_process_tree(&mut child);
                 let _ = child.wait();
-                return Err("Installation stopped. You can retry.".into());
+                return Err(if self.cancel.load(Ordering::SeqCst) {
+                    "Installation stopped."
+                } else {
+                    "Installation timed out after 10 minutes. Check the connection and retry."
+                }
+                .into());
             }
             match child.try_wait() {
                 Ok(Some(status)) => {
@@ -174,7 +254,7 @@ impl SetupTerminal {
         }
     }
 }
-fn stop_process_tree(child: &mut std::process::Child) {
+pub(crate) fn stop_process_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
         let _ = Command::new("kill")
@@ -213,12 +293,40 @@ mod tests {
         assert!(service.run(wait, &Channel::new(|_| Ok(()))).is_err());
         assert!(start.elapsed() < Duration::from_secs(3));
     }
+    #[cfg(unix)]
+    #[test]
+    fn streams_carriage_return_progress_before_process_exits() {
+        let service = SetupTerminal::default();
+        let (send, receive) = std::sync::mpsc::channel();
+        let output = Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Json(body) = body {
+                let _ = send.send(body);
+            }
+            Ok(())
+        });
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                let mut command = Command::new("sh");
+                command.args(["-c", "printf '\\033[2K42%%\\r'; sleep 2"]);
+                service.run(command, &output)
+            });
+            receive.recv_timeout(Duration::from_secs(1)).unwrap(); // command announcement
+            let progress = receive.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert!(progress.contains("42%"));
+            assert!(!progress.contains("[2K"));
+            service.cancel();
+            assert!(worker.join().unwrap().is_err());
+        });
+    }
     #[test]
     fn requires_approval_and_known_provider() {
         let service = SetupTerminal::default();
         let root = tempfile::tempdir().unwrap();
         assert!(service
             .install(root.path(), "codex", false, Channel::new(|_| Ok(())))
+            .is_err());
+        assert!(service
+            .install(root.path(), "cursor-agent", false, Channel::new(|_| Ok(())))
             .is_err());
         assert!(service
             .install(root.path(), "shell", true, Channel::new(|_| Ok(())))

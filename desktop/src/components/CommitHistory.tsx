@@ -1,3 +1,4 @@
+import { matchesShortcut } from '../lib/shortcuts';
 import { useEffect, useId, useRef, useState } from "react";
 import { GitBranch, GitCommitHorizontal, RefreshCw } from "lucide-react";
 import { api } from "../lib/api";
@@ -38,15 +39,14 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     api.branches(repository.id).then((items) => {
       if (!active) return;
       setBranches(items); setBranchError("");
-      setBranch((current) => current === (repository.branch ?? "") || items.includes(current) ? current : repository.branch ?? "");
     }).catch((error) => { if (active) setBranchError(String(error)); });
     return () => { active = false; };
-  }, [repository?.id, repository?.branch, revision]);
+  }, [repository?.id, revision]);
 
   useEffect(() => {
     if (!shortcutsEnabled || !repository) return;
     const onKey = (event: KeyboardEvent) => {
-      if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+      if (event.defaultPrevented || !(['branch.previous', 'branch.next', 'commit.previous', 'commit.next'] as const).some(command => matchesShortcut(event, command))) return;
       const target = event.target as HTMLElement;
       if (target.closest("input, textarea, select, [contenteditable=true], [role=dialog], .codex-panel")) return;
       event.preventDefault();
@@ -66,7 +66,6 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   }, [branch]);
 
   useEffect(() => {
-    if (selectedCommit >= 0) panel.current?.querySelector<HTMLButtonElement>(`[data-commit-index="${selectedCommit}"]`)?.focus({ preventScroll: true });
     panel.current?.querySelector(`[data-commit-index="${selectedCommit}"]`)?.scrollIntoView({ block: "nearest" });
   }, [selectedCommit]);
 
@@ -91,7 +90,6 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
           event.preventDefault();
           const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
           setBranch(tabs[next]);
-          document.getElementById(`${panelId}-tab-${next}`)?.focus();
         }}><GitBranch size={13} />{name || "Detached HEAD"}</button>)}
       </div>
       <p className="history-shortcuts">Shift + ← / → branches · Shift + ↑ / ↓ commits</p>

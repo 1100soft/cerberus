@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import ts from 'typescript';
+let source=await readFile(new URL('../src/lib/chatgptAccounts.ts',import.meta.url),'utf8');
+source=source.replace(/^import .*;\n/gm,'');
+const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {assignedChatgpt}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const settings={defaultAccount:'first',initialized:true,repositories:{explicit:'second',disabled:null}};
+assert.equal(assignedChatgpt(settings,'existing'),'first');
+assert.equal(assignedChatgpt(settings,'future'),'first');
+assert.equal(assignedChatgpt(settings,'explicit'),'second');
+assert.equal(assignedChatgpt(settings,'disabled'),null);
+settings.defaultAccount='second';
+assert.equal(assignedChatgpt(settings,'existing'),'second');
+assert.equal(assignedChatgpt(settings,'disabled'),null);
+console.log('ChatGPT defaults apply to existing and future repositories, preserving explicit overrides and opt-outs');

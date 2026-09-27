@@ -157,7 +157,7 @@ fn messages(value: &Value) -> Vec<Message> {
                 output.push(Message {
                     id: format!("{}:user", string(&item["uuid"])),
                     role: "user".into(),
-                    text: text.into(),
+                    text: text.into(), edits:Vec::new(),
                 });
             }
             for (index, step) in turn["steps"].as_array().into_iter().flatten().enumerate() {
@@ -175,7 +175,7 @@ fn messages(value: &Value) -> Vec<Message> {
                     output.push(Message {
                         id: format!("{}:assistant:{index}", string(&item["uuid"])),
                         role: "assistant".into(),
-                        text: text.into(),
+                        text: text.into(), edits:Vec::new(),
                     });
                 }
             }
@@ -202,7 +202,7 @@ fn messages(value: &Value) -> Vec<Message> {
             output.push(Message {
                 id: string(&item["uuid"]),
                 role: role.into(),
-                text,
+                text, edits:Vec::new(),
             });
         }
     }
@@ -213,13 +213,9 @@ impl CursorService {
     pub fn new(executable_file: PathBuf) -> Self {
         Self { executable_file }
     }
-    fn executable(&self) -> std::ffi::OsString {
-        std::fs::read_to_string(&self.executable_file)
-            .ok()
-            .filter(|p| !p.trim().is_empty())
-            .map(|p| p.trim().into())
-            .or_else(|| std::env::var_os("GITCERBERUS_CURSOR_PATH"))
-            .unwrap_or_else(|| "cursor-sdk-bridge".into())
+    fn executable(&self) -> Result<std::ffi::OsString, String> {
+        crate::provider_paths::resolve_from_file(&self.executable_file, "cursor")?
+            .map(|path| path.into_os_string()).ok_or("Cursor SDK bridge is not installed".into())
     }
     pub fn configure(&self, path: &Path) -> Result<(), String> {
         let path = path.canonicalize().map_err(|e| e.to_string())?;
@@ -233,7 +229,7 @@ impl CursorService {
         cursor: Option<String>,
         archived: bool,
     ) -> Result<ThreadPage, String> {
-        let bridge = Bridge::start(&self.executable(), path)?;
+        let bridge = Bridge::start(&self.executable()?, path)?;
         let result = bridge.call("SdkAgentService/ListAgents", json!({"options":{"runtime":"RUNTIME_LOCAL","cwd":path,"limit":30,"cursor":cursor.unwrap_or_default(),"includeArchived":archived}}))?;
         let mut data: Vec<_> = result["items"]
             .as_array()
@@ -253,6 +249,8 @@ impl CursorService {
                     .map(|d| d.timestamp())
                     .unwrap_or(0),
                 git_info: None,
+                working: v["status"].as_str().is_some_and(|status| status.eq_ignore_ascii_case("running"))
+                    || v["status"]["type"].as_str().is_some_and(|status| status.eq_ignore_ascii_case("running")),
             })
             .collect();
         data.sort_by_key(|v| std::cmp::Reverse(v.updated_at));
@@ -264,11 +262,21 @@ impl CursorService {
                 .map(str::to_owned),
         })
     }
+    pub fn archive_thread(&self, path: &Path, id: &str, archived: bool) -> Result<(), String> {
+        if id.starts_with("editor:") { return Err("Cursor editor conversations do not expose archive controls to this app".into()); }
+        let bridge = Bridge::start(&self.executable()?, path)?;
+        let agent = bridge.call("SdkAgentService/GetAgent", json!({"agentId":id,"options":{"cwd":path}}))?;
+        if !same_directory(&agent, path) && !same_directory(&agent["agent"], path) {
+            return Err("This Cursor conversation belongs to another repository".into());
+        }
+        bridge.call(if archived {"SdkAgentService/ArchiveAgent"} else {"SdkAgentService/UnarchiveAgent"}, json!({"agentId":id,"options":{"cwd":path}}))?;
+        Ok(())
+    }
     pub fn messages(&self, path: &Path, id: String) -> Result<MessagePage, String> {
         if id.starts_with("bc-") {
             return Err("Only local Cursor conversations are supported".into());
         }
-        let bridge = Bridge::start(&self.executable(), path)?;
+        let bridge = Bridge::start(&self.executable()?, path)?;
         let agent = bridge.call(
             "SdkAgentService/GetAgent",
             json!({"agentId":id,"options":{"cwd":path}}),

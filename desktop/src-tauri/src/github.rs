@@ -20,6 +20,7 @@ pub struct GithubRepository {
     pub html_url: String,
     pub default_branch: Option<String>,
     pub updated_at: Option<String>,
+    pub pushed_at: Option<String>,
     pub identity_id: String,
 }
 #[derive(Serialize, Default)]
@@ -44,6 +45,8 @@ struct Remote {
     default_branch: Option<String>,
     #[serde(default)]
     updated_at: Option<String>,
+    #[serde(default)]
+    pushed_at: Option<String>,
 }
 impl Remote {
     fn catalog(self, identity_id: &str) -> GithubRepository {
@@ -56,6 +59,7 @@ impl Remote {
             html_url: self.html_url,
             default_branch: self.default_branch,
             updated_at: self.updated_at,
+            pushed_at: self.pushed_at,
             identity_id: identity_id.into(),
         }
     }
@@ -165,10 +169,21 @@ pub fn catalog(db: &Database) -> Result<Catalog, String> {
         if let Some(repo) = resolved {
             output.repositories.push(repo);
         } else {
-            output.warnings.push(format!("Visibility unverified for {name}. Refresh or reconnect an account with access to this repository."));
+            output.warnings.push(format!("Visibility unverified for {name}. Connect an account with access to this repository."));
         }
     }
     Ok(output)
+}
+pub fn ensure_identity_access(identity_id: &str, remote: Option<&str>) -> Result<(), String> {
+    if identity_id.trim().is_empty() {
+        return Ok(());
+    }
+    let Some(name) = remote.and_then(github_name) else {
+        return Ok(());
+    };
+    let secret = token(identity_id)?;
+    get(&client()?, &secret, &format!("/repos/{name}"))?;
+    Ok(())
 }
 fn github_name(remote: &str) -> Option<String> {
     let canonical = crate::git::canonical_remote(remote);
@@ -489,6 +504,7 @@ mod tests {
                     html_url: "https://github.com/org/repo".into(),
                     default_branch: Some("main".into()),
                     updated_at: Some("2026-09-17T00:00:00Z".into()),
+                    pushed_at: Some("2026-09-16T00:00:00Z".into()),
                 })
                 .collect())
         })

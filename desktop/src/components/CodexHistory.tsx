@@ -1,273 +1,337 @@
-import { memo, startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { IdentitySignIn } from './IdentitySignIn';
+import { VSCodeIcon, CursorIcon, ClaudeIcon } from './Icons';
+import { OpenAILogo } from './OpenAILogo';
+import { Github } from 'lucide-react';
+import { ConversationSearch } from './ConversationSearch';
+import { EditReview } from './EditReview';
+import { completeMessages, textMatches, type ConversationHit } from '../lib/conversationSearch';
+import { matchesShortcut, shortcuts, type ShortcutCommand } from '../lib/shortcuts';
+import { AgentActivity } from './AgentActivity';
+import { foldIntermediateMessages } from '../lib/conversationDisplay';
+import { ConversationContextMenu } from './ConversationContextMenu';
+import { api } from '../lib/api';
+import { useAgentChats, renameAgentChat, archiveAgentChat, type AgentChat } from '../lib/agentChats';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { cursorDisplayText } from "../lib/conversationText";
-import { MessageSquare, RefreshCw } from "lucide-react";
-import { SetupTerminal } from "./SetupTerminal";
-import { api } from "../lib/api";
-import type { CodexAccount, CodexMessage, CodexThread, Repository } from "../types";
+import { loadOlderMessages, loadOlderThreads, peekList, peekMessages, refreshMessages, refreshThreadList, subscribe, warmRepository, listKey, messageKey, providerName, type Thread } from "../lib/conversationCache";
+import { MessageSquare, RefreshCw, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle } from "lucide-react";
+import { useProviderPreferences } from "../lib/providerPreferences";
+import type { CodexMessage, FileEdit, Repository } from "../types";
 
-export function CodexHistory({ repository, unlinkedName }: { repository?: Repository; unlinkedName?: string }) {
-  const [showSetup, setShowSetup] = useState<Provider | "choose" | null>(null);
-  const [settings, setSettings] = useState<Partial<Record<Provider, boolean>>>(() => {
-    try { const saved = JSON.parse(localStorage.getItem("gitcerberus.providers") || "{}"); return Object.fromEntries(providers.filter(p => typeof saved[p] === "boolean").map(p => [p, saved[p]])); } catch { return {}; }
-  });
+export function CodexHistory({ repository, unlinkedName, onSetup }: { repository?: Repository; unlinkedName?: string; onSetup: (provider: import("./ProviderSetup").Provider) => void }) {
+  const [settings, setEnabled] = useProviderPreferences();
   const enabled = providers.filter(provider => settings[provider] === true);
-  const enable = (provider: Provider) => setSettings(current => ({ ...current, [provider]: true }));
-  useEffect(() => { localStorage.setItem("gitcerberus.providers", JSON.stringify(settings)); }, [settings]);
-  const [choosing, setChoosing] = useState(false);
-  const [account, setAccount] = useState<CodexAccount>();
-  const [error, setError] = useState("");
-  const [checking, setChecking] = useState(false);
   const [revision, setRevision] = useState(0);
-  const [loginId, setLoginId] = useState<string>();
-  const [starting, setStarting] = useState(false);
-  const mounted = useRef(true);
-  const pendingLogin = useRef<string>();
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      if (pendingLogin.current) void api.codexCancelLogin(pendingLogin.current).catch(() => {});
-    };
-  }, []);
-
-  useEffect(() => {
-    if (showSetup !== "codex") { setChecking(false); return; }
-    let active = true;
-    setChecking(true); setError("");
-    api.codexAccount().then((next) => { if (active) { setAccount(next); enable("codex"); setShowSetup(null); } })
-      .catch((error) => { if (active) { setError(String(error)); setAccount(undefined); } })
-      .finally(() => { if (active) setChecking(false); });
-    return () => { active = false; };
-  }, [revision, showSetup]);
-
-  useEffect(() => {
-    if (!loginId) return;
-    let active = true;
-    let timer: number;
-    const deadline = Date.now() + 180000;
-    async function poll() {
-      try {
-        const next = await api.codexAccount();
-        if (!active) return;
-        setAccount(next);
-        if (next.account) { pendingLogin.current = undefined; setLoginId(undefined); enable("codex"); setShowSetup(null); setRevision((value) => value + 1); return; }
-        if (Date.now() >= deadline) {
-          await api.codexCancelLogin(loginId!);
-          if (!active) return;
-          pendingLogin.current = undefined; setLoginId(undefined); setError("Sign-in timed out. Try connecting again."); return;
-        }
-        timer = window.setTimeout(poll, 3000);
-      } catch (error) { if (active) { setError(String(error)); setLoginId(undefined); } }
-    }
-    timer = window.setTimeout(poll, 1500);
-    return () => { active = false; window.clearTimeout(timer); };
-  }, [loginId]);
-
-  async function finishCodexSetup() {
-    setAccount(await api.codexAccount());
-    enable("codex"); setShowSetup(null); setRevision(value => value + 1);
-  }
-
-  async function login() {
-    setStarting(true); setError("");
-    try {
-      const id = await api.codexLogin();
-      if (!mounted.current) { await api.codexCancelLogin(id); return; }
-      pendingLogin.current = id; setLoginId(id);
-    } catch (error) { if (mounted.current) setError(String(error)); }
-    finally { if (mounted.current) setStarting(false); }
-  }
-
   return <section className="codex-panel" aria-label="Agent conversations">
-    <header><div><p>OpenAI · Codex</p><h2><MessageSquare size={18} />Conversations{(repository?.displayName || unlinkedName) ? ` · ${repository?.displayName || unlinkedName}` : ""}</h2></div><div className="codex-actions">
-      <button type="button" aria-expanded={!!showSetup} onClick={() => setShowSetup(showSetup ? null : "choose")}>{showSetup ? "Close setup" : "Add provider"}</button>
-      {showSetup === "codex" && account?.account && <span>{account.account.email || "Codex connected"}</span>}
-      {settings.codex !== undefined && account && !account.account && !loginId && <button type="button" disabled={starting} onClick={login}>{starting ? "Opening sign-in…" : "Sign in with ChatGPT"}</button>}
-      <button type="button" aria-label="Refresh conversations" disabled={checking || starting || !!loginId} onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} className={checking ? "spin" : ""} /></button>
+    <header><div className="agent-heading"><h2><MessageSquare size={18} />Agent</h2></div><div className="codex-actions">
+      {repository && <><button type="button" aria-label="Open in VS Code" title="Continue in VS Code" onClick={() => void api.openEditor(repository.id)}><VSCodeIcon/></button><button type="button" aria-label="Open in Cursor" title="Continue in Cursor" onClick={() => void api.openCursor(repository.id)}><CursorIcon/></button></>}
+      <IdentitySignIn />
+      <button type="button" aria-label="Refresh conversations" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button>
     </div></header>
+    <div className="provider-controls" aria-label="Conversation providers">{providers.map(provider => <div className="provider-control" key={provider}><label className={`provider-name provider-${provider}`} title={`Show ${providerName(provider)} conversations`}><input type="checkbox" checked={settings[provider] === true} onChange={event => setEnabled(provider, event.target.checked)} />{providerIcon[provider]}<span>{providerName(provider)}</span></label>{(provider === "codex" || provider === "cursor") && <button type="button" className={`provider-name provider-${provider}`} aria-label={`Set up ${providerName(provider)}`} title={`Set up ${providerName(provider)}`} onClick={() => onSetup(provider)}><Settings2 size={14} /></button>}</div>)}</div>
     <div className="codex-body">
-    <p className="panel-copy">Local Codex and Cursor sessions for this repository. Select a conversation to read its messages.</p>
-    {showSetup === "choose" && <div className="provider-picker"><p>Choose a provider to set up.</p>{providers.map(provider => <button key={provider} type="button" onClick={() => setShowSetup(provider)}>{providerName(provider)}{settings[provider] !== undefined ? " · configured" : ""}</button>)}</div>}
-    {showSetup === "codex" && checking && <p className="panel-copy" role="status">Connecting to Codex…</p>}
-    {showSetup === "codex" && <div className="codex-setup">
-      <h3>Connect Codex to GitCerberus</h3>
-      <SetupTerminal provider="codex" onInstalled={finishCodexSetup} />
-      <ol>
-        <li>Install the Codex CLI. With Node.js and npm installed, run <code>npm install -g @openai/codex</code> in a terminal.</li>
-        <li>Run <code>codex --version</code> to check the installation. If Codex is already installed but this app cannot find it, use <b>Choose Codex executable</b> below. On macOS/Linux, <code>command -v codex</code> prints its location; on Windows, use <code>where.exe codex</code>.</li>
-        <li>Click <b>Retry connection</b>, then <b>Sign in with ChatGPT</b> and finish in your browser. An existing Codex sign-in is reused.</li>
-        <li>Start Codex in your repository’s directory to create a conversation, then refresh this panel. Sessions from other directories do not appear here.</li>
-      </ol>
-      <p>GitCerberus remembers the executable you choose, including when launched from the desktop. Choose the native <code>codex</code> or <code>codex.exe</code> file.</p>
-      <div className="codex-actions"><button type="button" disabled={choosing || starting || !!loginId} onClick={async () => {
-        setChoosing(true);
-        try { if (await api.chooseCodexExecutable()) await finishCodexSetup(); }
-        catch (error) { setError(String(error)); }
-        finally { setChoosing(false); }
-      }}>{choosing ? "Checking executable…" : "Choose Codex executable"}</button>
-      <button type="button" disabled={checking || choosing} onClick={() => setRevision((value) => value + 1)}>Retry connection</button></div>
-    </div>}
-    {showSetup === "cursor" && <CursorSetup repository={repository} onConfigured={() => { enable("cursor"); setShowSetup(null); setRevision(value => value + 1); }} />}
-    {showSetup === "codex" && error && <details className="config-error"><summary>Codex connection details</summary><p role="alert">{error}</p></details>}
-    {loginId && <p className="panel-copy" role="status">Finish signing in in your browser. <button type="button" onClick={async () => {
-      try { await api.codexCancelLogin(loginId); pendingLogin.current = undefined; setLoginId(undefined); }
-      catch (error) { setError(String(error)); }
-    }}>Cancel sign-in</button></p>}
-    {!showSetup && <div className="provider-controls" aria-label="Conversation providers">{providers.map(provider => <div key={provider} className="provider-control"><label><input type="checkbox" checked={settings[provider] === true} disabled={settings[provider] === undefined} onChange={event => setSettings(current => ({...current, [provider]: event.target.checked}))} /><span className={`provider-badge provider-${provider}`}>{providerName(provider)}</span><small>{settings[provider] === undefined ? "Not added" : "Configured"}</small></label>{settings[provider] !== undefined && <button type="button" aria-label={`Configure ${providerName(provider)}`} onClick={() => setShowSetup(provider)}>Setup</button>}</div>)}</div>}
-    {!showSetup && repository && enabled.length > 0 && <ConversationBrowser key={repository.id} repository={repository} revision={revision} enabled={enabled} />}
-    {!showSetup && !enabled.length && <p className="panel-copy">{Object.keys(settings).length ? "Check a provider to show its conversations." : "Add a provider to browse its conversations here."}</p>}
+    {repository && <ConversationBrowser key={repository.id} repository={repository} revision={revision} enabled={enabled} />}
     {!repository && <p className="panel-copy">{unlinkedName ? "Link an existing local checkout, or clone a new one, to see its conversations." : "Select a repository to see its conversations."}</p>}
     </div>
   </section>;
 }
 
-type Provider = "codex" | "cursor";
-type Thread = CodexThread & { provider: Provider; key: string };
-const providers: Provider[] = ["codex", "cursor"];
-const providerName = (provider: Provider) => provider === "codex" ? "Codex" : "Cursor";
-const threadList = (provider: Provider, repositoryId: string, archived: boolean, cursor?: string | null) =>
-  provider === "codex" ? api.codexThreads(repositoryId, archived, cursor) : api.cursorThreads(repositoryId, archived, cursor);
-const readMessages = (repositoryId: string, key: string, cursor?: string | null) => {
-  const separator = key.indexOf(":");
-  return key.slice(0, separator) === "codex" ? api.codexMessages(repositoryId, key.slice(separator + 1), cursor) : api.cursorMessages(repositoryId, key.slice(separator + 1));
-};
-const ordered = (threads: Thread[]) => [...threads].sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));
+type Provider = import("../lib/conversationCache").Provider;
+const providerIcon = {codex:<OpenAILogo/>,cursor:<CursorIcon/>,copilot:<Github/>,claude:<ClaudeIcon/>};
+const providers: Provider[] = ["codex", "cursor", "copilot", "claude"];
 
-function CursorSetup({ onConfigured, repository }: { onConfigured: () => void; repository?: Repository }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  return <div className="codex-setup"><h3>Connect Cursor to GitCerberus</h3><p>Existing Cursor editor history can be connected below without installing the SDK. Install the bridge only for SDK sessions.</p><SetupTerminal provider="cursor" onInstalled={onConfigured} /><ol>
-    <li>Install the Cursor SDK bridge with <code>pip install cursor-sdk</code>, or download the standalone bridge from <a href="https://github.com/cursor/sdk-bridge/releases" target="_blank" rel="noreferrer">Cursor’s releases</a>.</li>
-    <li>Run <code>cursor-sdk-bridge --help</code> to verify installation. Choose the <code>cursor-sdk-bridge</code> executable below if this desktop app cannot find it. Use <code>command -v cursor-sdk-bridge</code> on macOS/Linux or <code>where.exe cursor-sdk-bridge</code> on Windows to locate it.</li>
-    <li>Local history reads do not require an API key. This viewer reads Cursor editor history and SDK sessions. Cloud conversations are not included. Refresh after creating or updating a session in the repository’s directory.</li>
-    <li>For authenticated SDK use, create a user API key in the <a href="https://cursor.com/dashboard" target="_blank" rel="noreferrer">Cursor dashboard</a> and set <code>CURSOR_API_KEY</code> in the environment before launching the app. Signing into the Cursor editor alone does not configure the bridge.</li>
-  </ol><p>The executable selection is remembered. Alternatively set <code>GITCERBERUS_CURSOR_PATH</code>. Reading history does not send prompts or run agent tools.</p>
-    <button type="button" disabled={busy} onClick={async () => { setBusy(true); setError(""); try { if (await api.chooseCursorExecutable()) onConfigured(); } catch (error) { setError(String(error)); } finally { setBusy(false); } }}>{busy ? "Checking executable…" : "Choose Cursor bridge executable"}</button>
-    <button type="button" disabled={busy || !repository} onClick={async () => { if (!repository) return; setBusy(true); setError(""); try { await api.cursorThreads(repository.id, false); onConfigured(); } catch (error) { setError(String(error)); } finally { setBusy(false); } }}>Connect existing installation</button>
-    {!repository && <p>Select a repository to check an existing installation, or choose the bridge executable.</p>}
-    {error && <p className="config-error" role="alert">{error}</p>}
-  </div>;
-}
 
 function ConversationBrowser({ repository, revision, enabled }: { repository: Repository; revision: number; enabled: Provider[] }) {
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [cursors, setCursors] = useState<Partial<Record<Provider, string | null>>>({});
-  const enabledKey = enabled.join(",");
-  const [selected, setSelected] = useState<string>();
   const [archived, setArchived] = useState(false);
-  const messagePane = useRef<HTMLDivElement>(null);
-  const scrollIntent = useRef<{ kind: "latest" } | { kind: "older"; height: number; top: number }>();
-  const [messageCursor, setMessageCursor] = useState<string | null>();
-  const readGeneration = useRef(0);
-  const [messages, setMessages] = useState<CodexMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [reading, setReading] = useState(false);
-  const [listError, setListError] = useState("");
+  const chats = useAgentChats().filter(chat => chat.repositoryId === repository.id);
+  const listedChats = chats.filter(chat => !chat.originKey && !!chat.archived === archived);
+  const enabledKey = enabled.join(",");
+  const [contextMenu,setContextMenu]=useState<{x:number;y:number;chat?:AgentChat;thread?:Thread}>();
+  const [menuError,setMenuError]=useState("");
+  const [cursorNames,setCursorNames]=useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem('gitcerberus.cursorConversationNames')||'{}')}catch{return {}}});
+  const list = peekList(listKey(repository.id, archived, enabled));
+  const [threads, setThreads] = useState<Thread[]>(() => list?.threads ?? []);
+  const [cursors, setCursors] = useState(() => list?.cursors ?? {});
+  const [listError, setListError] = useState(list?.error ?? "");
+  const [loading, setLoading] = useState(!list);
+  const visible = threads.filter((thread) => enabled.includes(thread.provider)).map(thread=>thread.provider==='cursor' && cursorNames[thread.id]?{...thread,name:cursorNames[thread.id]}:thread);
+  const matchingThread=(chat:AgentChat)=>visible.find(thread=>chat.session?.sessionId===thread.id && chat.session.provider===thread.provider);
+  const entries = [
+    ...listedChats.map(chat=>({key:`app:${chat.id}`,time:Math.max(chat.updatedAt,(matchingThread(chat)?.updatedAt||0)*1000),chat,thread:undefined as Thread|undefined})),
+    ...visible.filter(thread=>!listedChats.some(chat=>chat.session?.sessionId===thread.id && chat.session.provider===thread.provider)).map(thread=>({key:thread.key,time:Math.max(thread.updatedAt*1000,...chats.filter(chat=>chat.originKey===thread.key).map(chat=>chat.updatedAt)),chat:undefined as AgentChat|undefined,thread})),
+  ].sort((a,b)=>b.time-a.time || a.key.localeCompare(b.key));
+  const [selected, setSelected] = useState<string>();
+  const [selectionExplicit, setSelectionExplicit] = useState(false);
+  const chooseConversation = (key:string) => { setSelectionExplicit(true); setSelected(key); };
+  const menuAction=async(action:'rename'|'archive'|'copy'|'share')=>{
+    const target=contextMenu;if(!target)return;const chat=target.chat,thread=target.thread;const title=chat?.name||thread?.name||thread?.preview||'Untitled conversation';
+    try {
+      if(action==='rename'){const name=window.prompt('Conversation name',title)?.trim();if(!name)return;if(chat)renameAgentChat(chat.id,name);else if(thread?.provider==='codex'){await api.codexUpdateThread(repository.id,thread.id,'rename',name);await refreshThreadList(repository.id,archived,enabled);}else if(thread){const next={...cursorNames,[thread.id]:name};setCursorNames(next);localStorage.setItem('gitcerberus.cursorConversationNames',JSON.stringify(next));}}
+      else if(action==='archive'){if(chat)archiveAgentChat(chat.id,!chat.archived);else if(thread?.provider==='codex'){await api.codexUpdateThread(repository.id,thread.id,archived?'unarchive':'archive');await refreshThreadList(repository.id,archived,enabled);}else if(thread){await api.cursorArchiveThread(repository.id,thread.id,!archived);await refreshThreadList(repository.id,archived,enabled);}}
+      else {const available=thread ? (await completeMessages(repository.id,thread,()=>false)).messages : undefined;const transcript=(chat?.messages||available||[]).map(message=>`${message.role}: ${message.text}`).join('\n\n');if(!transcript)throw new Error('No conversation messages are available to copy.');if(action==='share' && navigator.share)await navigator.share({title,text:transcript});else await navigator.clipboard.writeText(transcript);}
+      setMenuError('');
+    }catch(error){setMenuError(String(error));}
+  };
+  const latestKey = entries[0]?.key;
+  const directAppChat = chats.find(chat => `app:${chat.id}` === selected);
+  const selectedThread = selected === "new" ? undefined : directAppChat ? matchingThread(directAppChat) : visible.find((thread) => thread.key === selected) ?? visible[0];
+  const selectedKey = selectedThread?.key;
+  const linkedChat = selectedKey ? chats.find(chat => chat.originKey === selectedKey) : undefined;
+  const appChat = directAppChat || linkedChat;
+  const cached = selectedKey ? peekMessages(messageKey(repository.id, selectedKey)) : undefined;
+  const [messages, setMessages] = useState<CodexMessage[]>(() => cached?.messages ?? []);
+  const [messageCursor, setMessageCursor] = useState<string | null | undefined>(() => cached?.nextCursor);
+  const [reading, setReading] = useState(() => !!selectedKey && !cached);
   const [readError, setReadError] = useState("");
-  const generation = useRef(0);
+  const messagePane = useRef<HTMLDivElement>(null);
+  const scrollIntent = useRef<{ kind: "latest" } | { kind: "older"; height: number; top: number } | undefined>({ kind: "latest" });
+  const [messageQuery,setMessageQuery] = useState('');
+  const [repoHits,setRepoHits]=useState<ConversationHit[]>([]);
+  const repoSearch=useRef({query:'',index:-1});
+  const pendingMatch=useRef<{key:string;id?:string;occurrence:number}>();
+  const [matchIndex,setMatchIndex] = useState(0);
+  const [reviewEdits,setReviewEdits] = useState<FileEdit[]>();
+  const [navigationBusy,setNavigationBusy] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const providerHasLocalPrompt=!!appChat && messages.some(message=>message.role==='user' && message.text===appChat.messages.filter(item=>item.role==='user').at(-1)?.text);
+  const displayedMessages = appChat && (appChat.running || !selectedThread || !messages.length || (messages.length < appChat.messages.length && !providerHasLocalPrompt)) ? appChat.messages : messages;
+  const renderedMessages=foldIntermediateMessages(displayedMessages);
+  const continuedOutside=!!appChat && !!selectedThread && !appChat.running && selectedThread.updatedAt*1000>appChat.updatedAt
+    && messages.filter(message=>message.role==='user').at(-1)?.text!==appChat.messages.filter(message=>message.role==='user').at(-1)?.text;
+  const matchedMessages = textMatches(displayedMessages,messageQuery);
+  const jumpToMessage = (id:string, occurrence?:number) => {
+    const pane=messagePane.current; if(!pane)return;
+    const article=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')].find(node=>node.dataset.messageId===id);
+    for(let node:HTMLElement|null|undefined=article;node;node=node.parentElement)if(node instanceof HTMLDetailsElement)node.open=true;
+    const node=occurrence===undefined ? article : article?.querySelectorAll<HTMLElement>('mark')[occurrence] || article;
+    pane.querySelectorAll('.current-search-match').forEach(node=>node.classList.remove('current-search-match'));
+    if(occurrence!==undefined)node?.classList.add('current-search-match');
+    if(node) { const scale=pane.getBoundingClientRect().height/pane.offsetHeight || 1; pane.scrollTop+=(node.getBoundingClientRect().top-pane.getBoundingClientRect().top)/scale; }
+  };
+  const searchJump = (delta:number) => { if(!matchedMessages.length)return; const next=(matchIndex+delta+matchedMessages.length)%matchedMessages.length;setMatchIndex(next);pendingMatch.current=undefined;jumpToMessage(matchedMessages[next].id,matchedMessages[next].occurrence); };
+  useEffect(()=>{
+    const pending=pendingMatch.current;
+    if(pending && pending.key===selected){
+      const index=matchedMessages.findIndex(match=>match.id===pending.id && match.occurrence===pending.occurrence);
+      if(index>=0){setMatchIndex(index);requestAnimationFrame(()=>jumpToMessage(pending.id!,pending.occurrence));}
+      return;
+    }
+    setMatchIndex(0);if(matchedMessages[0])requestAnimationFrame(()=>jumpToMessage(matchedMessages[0].id,0));
+  },[messageQuery,selected,displayedMessages,matchedMessages.length]);
+  useEffect(()=>{
+    if(!messageQuery.trim() || !selectedThread || !messageCursor)return;
+    let cancelled=false;setNavigationBusy(true);
+    void completeMessages(repository.id,selectedThread,()=>cancelled).catch(error=>{if(!cancelled)setReadError(String(error));}).finally(()=>{if(!cancelled)setNavigationBusy(false);});
+    return ()=>{cancelled=true;setNavigationBusy(false);};
+  },[messageQuery,selectedKey]);
+  const navigate = async (command:ShortcutCommand) => {
+    const pane=messagePane.current;if(!pane || navigationBusy)return;
+    if(command==='message.first') {
+      if(selectedThread && messageCursor) { setNavigationBusy(true);try { await completeMessages(repository.id,selectedThread,()=>!pane.isConnected); } catch(error){setReadError(String(error));}finally{setNavigationBusy(false);} }
+      requestAnimationFrame(()=>{pane.scrollTop=0;});return;
+    }
+    if(command==='message.last'){pane.scrollTop=pane.scrollHeight;return;}
+    const nodes=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')];
+    const top=pane.getBoundingClientRect().top;
+    const node=command==='message.previous' ? nodes.reverse().find(node=>node.getBoundingClientRect().top<top-3) : nodes.find(node=>node.getBoundingClientRect().top>top+3);
+    if(node)jumpToMessage(node.dataset.messageId!);
+    else if(command==='message.previous' && selectedThread && messageCursor) { await moreMessages(); requestAnimationFrame(()=>{const previous=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')].reverse().find(node=>node.getBoundingClientRect().top<pane.getBoundingClientRect().top-3);if(previous)jumpToMessage(previous.dataset.messageId!);}); }
+  };
+  useEffect(()=>{
+    const key=(event:KeyboardEvent)=>{
+      if(event.defaultPrevented || document.querySelector('[role=dialog], [role=listbox]'))return;
+      if(matchesShortcut(event,'search.conversations')){event.preventDefault();document.querySelector<HTMLInputElement>('[aria-label="Search repository conversations"]')?.focus();return;}
+      if(matchesShortcut(event,'search.messages')){event.preventDefault();searchInput.current?.focus();return;}
+      for(const command of ['message.first','message.last','message.previous','message.next'] as const)if(matchesShortcut(event,command)){event.preventDefault();void navigate(command);return;}
+    };
+    document.addEventListener('keydown',key,true);return()=>document.removeEventListener('keydown',key,true);
+  });
+  const globalMatches=(hits:ConversationHit[])=>hits.flatMap(hit=>(hit.matches.length ? hit.matches : [{id:undefined,occurrence:0}]).map(match=>({hit,...match})));
+  const selectRepoMatch=(hits:ConversationHit[],index:number,query:string)=>{
+    const match=globalMatches(hits)[index];if(!match)return;
+    repoSearch.current.index=index;pendingMatch.current={key:match.hit.key,id:match.id,occurrence:match.occurrence};
+    setArchived(match.hit.archived);chooseConversation(match.hit.key);setMessageQuery(query);
+    if(match.hit.key===selected && match.id){setMatchIndex(index-globalMatches(hits).findIndex(item=>item.hit.key===match.hit.key));requestAnimationFrame(()=>jumpToMessage(match.id!,match.occurrence));}
+  };
+  const receiveRepoHits=(query:string,hits:ConversationHit[])=>{
+    if(repoSearch.current.query!==query){repoSearch.current={query,index:-1};pendingMatch.current=undefined;setMessageQuery(query);}
+    setRepoHits(hits);if(hits.length && repoSearch.current.index<0)selectRepoMatch(hits,0,query);
+  };
+  const navigateRepoMatch=(delta:number)=>{const count=globalMatches(repoHits).length;if(count)selectRepoMatch(repoHits,(repoSearch.current.index+delta+count)%count,repoSearch.current.query);};
+  const lastRepo = useRef(repository.id);
+  const scope = `${repository.id}:${archived}:${enabledKey}`;
+  const [seenScope, setSeenScope] = useState(scope);
+  if (scope !== seenScope) {
+    setSeenScope(scope);
+    lastRepo.current = repository.id;
+    const next = peekList(listKey(repository.id, archived, enabled));
+    const first = selected === 'new' || selected?.startsWith('app:') ? selected : next?.threads.find(thread => thread.key === selected)?.key || next?.threads[0]?.key;
+    const cachedNext = first ? peekMessages(messageKey(repository.id, first)) : undefined;
+    setThreads(next?.threads ?? []); setCursors(next?.cursors ?? {}); setListError(next?.error ?? ""); setLoading(!next);
+    setSelected(first);
+    setMessages(cachedNext?.messages ?? []); setMessageCursor(cachedNext?.nextCursor);
+    setReading(!!first && !cachedNext); setReadError("");
+    scrollIntent.current = { kind: "latest" };
+  }
+
+  function showCached(threadKey: string, intent: "latest" | undefined) {
+    const next = peekMessages(messageKey(repository.id, threadKey));
+    if (!next) return false;
+    if (intent) scrollIntent.current = { kind: intent };
+    setMessages(next.messages); setMessageCursor(next.nextCursor); setReading(false); setReadError("");
+    return true;
+  }
+
+  useEffect(() => subscribe(() => {
+    const next = peekList(listKey(repository.id, archived, enabled));
+    if (next) { setThreads(next.threads); setCursors(next.cursors); setListError(next.error); setLoading(false); }
+    if (selectedKey) showCached(selectedKey, undefined);
+  }), [repository.id, archived, enabledKey, selectedKey]);
 
   useEffect(() => {
-    const request = ++generation.current;
-    setLoading(true); setListError(""); setCursors({}); setThreads([]); setSelected(undefined);
-    Promise.allSettled(enabled.map(async (provider) => ({ provider, page: await threadList(provider, repository.id, archived) }))).then((results) => {
-      if (request !== generation.current) return;
-      const items: Thread[] = [];
-      const next: Partial<Record<Provider, string | null>> = {};
-      const errors: string[] = [];
-      results.forEach((result, index) => {
-        if (result.status === "rejected") { errors.push(`${providerName(enabled[index])}: ${String(result.reason)}`); return; }
-        const { provider, page } = result.value;
-        items.push(...page.data.map((thread) => ({ ...thread, provider, key: `${provider}:${thread.id}` })));
-        next[provider] = page.nextCursor;
-      });
-      startTransition(() => { setThreads(ordered(items)); setCursors(next); setListError(errors.join("\n")); setLoading(false); });
-    });
-    return () => { generation.current++; };
-  }, [repository.id, archived, revision, enabledKey]);
+    const next = peekList(listKey(repository.id, archived, enabled));
+    const repoChanged = lastRepo.current !== repository.id;
+    lastRepo.current = repository.id;
+    setThreads(next?.threads ?? []); setCursors(next?.cursors ?? {}); setListError(next?.error ?? ""); setLoading(!next);
+    const nextSelected = selected === 'new' || selected?.startsWith('app:') ? selected : (repoChanged ? next?.threads[0]?.key : selectedKey) ?? next?.threads[0]?.key;
+    if (nextSelected !== selected) setSelected(nextSelected);
+    if (nextSelected && showCached(nextSelected, "latest")) { /* cached paint */ }
+    else {
+      scrollIntent.current = { kind: "latest" };
+      setMessages([]); setMessageCursor(undefined); setReading(!!nextSelected); setReadError("");
+    }
+    void refreshThreadList(repository.id, archived, enabled).catch((error) => setListError(String(error)));
+  }, [repository.id, archived, enabledKey]);
 
   useEffect(() => {
+    if (!revision) return;
+    void refreshThreadList(repository.id, archived, enabled).then((list) => {
+      const thread = list.threads.find((item) => item.key === selectedKey) ?? list.threads[0];
+      if (thread) return refreshMessages(repository.id, thread, true);
+    }).catch((error) => setListError(String(error)));
+  }, [revision]);
+
+  useEffect(() => {
+    if (!selectionExplicit && latestKey) setSelected(latestKey);
+  }, [latestKey, selectionExplicit]);
+
+  useEffect(() => {
+    if (!selectedThread) return;
     let active = true;
-    const request = ++readGeneration.current;
-    scrollIntent.current = undefined;
-    setMessageCursor(null);
-    setMessages([]); setReadError(""); setReading(!!selected);
-    if (selected) readMessages(repository.id, selected).then((page) => { if (active && request === readGeneration.current) startTransition(() => { scrollIntent.current = { kind: "latest" }; setMessages(page.data); setMessageCursor(page.nextCursor); }); })
-      .catch((error) => { if (active) setReadError(String(error)); })
-      .finally(() => { if (active) setReading(false); });
-    return () => { active = false; readGeneration.current++; };
-  }, [repository.id, selected, revision]);
+    if (!showCached(selectedThread.key, "latest")) {
+      scrollIntent.current = { kind: "latest" };
+      setMessages([]); setMessageCursor(undefined); setReading(true); setReadError("");
+    }
+    void refreshMessages(repository.id, selectedThread).then(() => { if (active) showCached(selectedThread.key, undefined); }).catch((error) => { if (active) { setReadError(String(error)); setReading(false); } });
+    return () => { active = false; };
+  }, [repository.id, selectedThread?.key, selectedThread?.updatedAt]);
+
+  useEffect(() => {
+    const revalidate = () => { void refreshThreadList(repository.id, archived, enabled).catch(() => {}); };
+    window.addEventListener("focus", revalidate);
+    const timer = window.setInterval(revalidate, 20000);
+    return () => { window.removeEventListener("focus", revalidate); window.clearInterval(timer); };
+  }, [repository.id, archived, enabledKey]);
 
   useLayoutEffect(() => {
     const pane = messagePane.current;
     const intent = scrollIntent.current;
-    if (!pane || !intent || reading) return;
+    if (!pane || !intent) return;
     if (intent.kind === "older") {
       pane.scrollTop = intent.top + pane.scrollHeight - intent.height;
-    } else {
+      scrollIntent.current = undefined;
+      return;
+    }
+    if (reading && !messages.length) return;
+    const align = () => {
       const prompts = pane.querySelectorAll<HTMLElement>(".codex-message.user");
       const latest = prompts[prompts.length - 1];
       pane.scrollTop = latest ? latest.offsetTop : pane.scrollHeight;
-    }
+    };
+    align();
+    const frame = requestAnimationFrame(align);
     scrollIntent.current = undefined;
-  }, [messages, reading]);
+    return () => cancelAnimationFrame(frame);
+  }, [messages, reading, selectedKey]);
 
+  useEffect(() => {
+    const cycle = (event: Event) => {
+      const keys = ['new', ...listedChats.map(chat => `app:${chat.id}`), ...visible.map(thread => thread.key)];
+      const index = Math.max(0, keys.indexOf(selected || selectedKey || 'new'));
+      const delta = (event as CustomEvent<number>).detail;
+      chooseConversation(keys[(index + delta + keys.length) % keys.length]);
+    };
+    window.addEventListener('conversation-cycle', cycle);
+    return () => window.removeEventListener('conversation-cycle', cycle);
+  }, [selected, selectedKey, chats.map(chat => chat.id).join(','), visible.map(thread => thread.key).join(',')]);
+  useEffect(() => { document.querySelector('.codex-thread-list .active')?.scrollIntoView({block:'nearest'}); }, [selected]);
+  useEffect(() => { if (appChat && messagePane.current) messagePane.current.scrollTop = messagePane.current.scrollHeight; }, [appChat?.messages]);
   async function moreMessages() {
-    if (!selected || reading) return;
-    const request = readGeneration.current;
+    if (!selectedThread || reading) return;
     const previous = { kind: "older" as const, height: messagePane.current?.scrollHeight ?? 0, top: messagePane.current?.scrollTop ?? 0 };
     setReading(true); setReadError("");
     try {
-      const page = await readMessages(repository.id, selected, messageCursor);
-      if (request !== readGeneration.current) return;
+      const next = await loadOlderMessages(repository.id, selectedThread, messageCursor);
       scrollIntent.current = previous;
-      setMessages((items) => [...page.data, ...items]); setMessageCursor(page.nextCursor);
-    } catch (error) { if (request === readGeneration.current) setReadError(String(error)); }
-    finally { if (request === readGeneration.current) setReading(false); }
+      setMessages(next.messages); setMessageCursor(next.nextCursor);
+    } catch (error) { setReadError(String(error)); }
+    finally { setReading(false); }
   }
 
-  const visible = threads.filter((thread) => enabled.includes(thread.provider));
-  useEffect(() => {
-    if (!visible.some((thread) => thread.key === selected)) setSelected(visible[0]?.key);
-  }, [threads, enabledKey, selected]);
-
   async function more(provider: Provider) {
-    const request = generation.current;
     setLoading(true);
     try {
-      const page = await threadList(provider, repository.id, archived, cursors[provider]);
-      if (request !== generation.current) return;
-      setThreads((current) => ordered([...current, ...page.data.map((thread) => ({ ...thread, provider, key: `${provider}:${thread.id}` })).filter((thread) => !current.some((item) => item.key === thread.key))]));
-      setCursors((current) => ({ ...current, [provider]: page.nextCursor }));
-    } catch (error) { if (request === generation.current) setListError(`${providerName(provider)}: ${String(error)}`); }
-    finally { if (request === generation.current) setLoading(false); }
+      const next = await loadOlderThreads(repository.id, archived, enabled, provider, cursors[provider]);
+      setThreads(next.threads); setCursors(next.cursors);
+    } catch (error) { setListError(`${providerName(provider)}: ${String(error)}`); }
+    finally { setLoading(false); }
   }
 
   return <>
-    <div className="conversation-filters"><label className="codex-archive"><input type="checkbox" checked={archived} onChange={(event) => { setSelected(undefined); setArchived(event.target.checked); }} />Archived conversations</label></div>
     {listError && <details className="config-error provider-errors"><summary>A configured provider is unavailable · retry or adjust its setup</summary><p role="alert">{listError}</p></details>}
+    {menuError && <p className="config-error" role="alert">{menuError}</p>}
     <div className="codex-conversations">
-      <div className="codex-thread-list" aria-label="Conversations" aria-busy={loading}>
-        {visible.map((thread) => <button type="button" key={thread.key} className={`provider-${thread.provider} ${selected === thread.key ? "active" : ""}`} aria-pressed={selected === thread.key} onClick={() => setSelected(thread.key)}><span className={`provider-badge provider-${thread.provider}`}>{providerName(thread.provider)}</span><b title={thread.name || thread.preview}>{thread.name || thread.preview || "Untitled conversation"}</b><small>{new Date(thread.updatedAt * 1000).toLocaleString()}{thread.gitInfo?.branch ? ` · ${thread.gitInfo.branch}` : ""}</small></button>)}
+      <div className="codex-thread-list" aria-label="Conversations" aria-busy={loading}><ConversationSearch repositoryId={repository.id} enabled={enabled} chats={chats} onResults={receiveRepoHits} onNavigate={navigateRepoMatch} />
+        <div className="conversation-list-tools"><label className="codex-archive"><input type="checkbox" checked={archived} onChange={event => setArchived(event.target.checked)} />Archived</label></div>
+        {entries.map(entry=>entry.chat ? <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.chat.profile.provider} ${appChat?.id === entry.chat.id ? 'active' : ''}`} aria-pressed={appChat?.id === entry.chat.id} title={`${entry.chat.profile.provider} · ${entry.chat.profile.label} · ${new Date(entry.time).toLocaleString()} · ${entry.chat.status}`} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,chat:entry.chat});}}><span className="conversation-provider-mark">{providerIcon[entry.chat.profile.provider as Provider] || <MessageSquare/>}</span><b>{entry.chat.name}</b>{(entry.chat.running || matchingThread(entry.chat)?.working) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button> : entry.thread && <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.thread.provider} ${selectedKey === entry.key ? 'active' : ''}`} aria-pressed={selectedKey === entry.key} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,thread:entry.thread});}}><span className="conversation-provider-mark">{providerIcon[entry.thread.provider]}</span><b title={`${providerName(entry.thread.provider)} · ${new Date(entry.thread.updatedAt * 1000).toLocaleString()}${entry.thread.gitInfo?.branch ? ` · ${entry.thread.gitInfo.branch}` : ''}${entry.thread.provider === "copilot" || entry.thread.provider === "claude" ? " · Live activity unavailable" : ""}
+${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.thread.preview || "Untitled conversation"}</b>{(entry.thread.working || chats.some(chat=>chat.originKey===entry.key && chat.running)) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button>)}
         {loading && <p className="panel-copy" role="status">Loading conversations…</p>}
         {!loading && !listError && !visible.length && <p className="panel-copy">No {archived ? "archived " : ""}conversations found for this directory.</p>}
         {providers.filter((provider) => cursors[provider] && enabled.includes(provider)).map((provider) => <button key={provider} type="button" disabled={loading} onClick={() => more(provider)}>Load older {providerName(provider)} conversations</button>)}
       </div>
-      <div ref={messagePane} className="codex-messages" key={selected} aria-label="Conversation messages" aria-busy={reading} tabIndex={0}>
+      <div className="chat-message-column"><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}>
+        {appChat ? <>{readError && <p className="config-error" role="alert">{readError}</p>}{renderedMessages.map((message,index) => <ConversationMessage key={message.id} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={false} finished={!appChat.running || index < renderedMessages.length-1} />)}<p className="chat-status" role="status">{continuedOutside ? 'Continued outside this app · history is available here' : appChat.status}</p></> : selected === 'new' || !selectedThread ? <p className="panel-copy">Select a conversation to read its history. Open this repository in VS Code or Cursor to continue working.</p> : <>
         {messageCursor && <button type="button" disabled={reading} onClick={moreMessages}>Load older messages</button>}
         {reading && <p className="panel-copy" role="status">Loading messages…</p>}
         {readError && <p className="config-error" role="alert">{readError}</p>}
-        {!selected && <p className="panel-copy">Choose a conversation from the list.</p>}
-        {selected && !reading && !readError && !messages.length && <p className="panel-copy">No stored user or assistant messages in this conversation.</p>}
-        {messages.map((message, index) => <ConversationMessage key={`${message.id}-${index}`} message={message} formatCursor={!!selected?.startsWith("cursor:")} />)}
-      </div>
+        {!selectedThread && <p className="panel-copy">Choose a conversation from the list.</p>}
+        {selectedThread && !reading && !readError && !messages.length && <p className="panel-copy">No stored user or assistant messages in this conversation.</p>}
+        {renderedMessages.map((message, index) => <ConversationMessage key={`${message.id}-${index}`} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={!!selected?.startsWith("cursor:")} />)}
+        </>}
+      </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></div>
     </div>
+    {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
+    {reviewEdits && <EditReview edits={reviewEdits} onClose={()=>setReviewEdits(undefined)} />}
   </>;
 }
 
+const markdownCache = new Map<string, React.ReactElement>();
 const markdownComponents = { a: ({ children, href }: { children?: React.ReactNode; href?: string }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>, img: ({ alt }: { alt?: string }) => <span>{alt ? `[Image: ${alt}]` : "[Image]"}</span> };
-const ConversationMessage = memo(function ConversationMessage({ message, formatCursor }: { message: CodexMessage; formatCursor: boolean }) {
+function highlight(query:string) {
+  return () => (tree:any) => {
+    const visit=(node:any)=>{if(!node.children)return;node.children=node.children.flatMap((child:any)=>{
+      if(child.type!=='text'){visit(child);return [child];}
+      const text=child.value as string,lower=text.toLocaleLowerCase(),needle=query.toLocaleLowerCase();const result:any[]=[];let start=0,at=lower.indexOf(needle);
+      while(at>=0){if(at>start)result.push({type:'text',value:text.slice(start,at)});result.push({type:'element',tagName:'mark',properties:{},children:[{type:'text',value:text.slice(at,at+needle.length)}]});start=at+needle.length;at=lower.indexOf(needle,start);}
+      if(start<text.length)result.push({type:'text',value:text.slice(start)});return result;
+    });};visit(tree);
+  };
+}
+const ConversationMessage = memo(function ConversationMessage({ message, formatCursor,query,onReview,finished=true }: { message: CodexMessage; formatCursor: boolean;query:string;onReview:(edits:FileEdit[])=>void;finished?:boolean }) {
   const text = formatCursor && message.role === "user" ? cursorDisplayText(message.text) : message.text;
-  return <article className={`codex-message ${message.role}`}><div className="conversation-markdown"><Markdown components={markdownComponents}>{text}</Markdown></div></article>;
+  const cacheKey = text+'\0'+query.trim();
+  let markdown = markdownCache.get(cacheKey);
+  if (!markdown) { markdown = <Markdown rehypePlugins={query.trim() ? [highlight(query.trim())] : []} components={markdownComponents}>{text}</Markdown>; if(markdownCache.size>500)markdownCache.clear();markdownCache.set(cacheKey, markdown); }
+  return <article data-message-id={message.id} className={`codex-message ${message.role}`}>{message.role === 'assistant' && <AgentActivity steps={message.steps} finished={finished} />}{!!text && <div className="conversation-markdown">{markdown}</div>}{message.edits?.length ? <button className="turn-edits-button" onClick={()=>onReview(message.edits!)}>Review {new Set(message.edits.map(edit=>edit.path)).size} changed file{message.edits.length === 1 ? '' : 's'}</button> : null}</article>;
 });

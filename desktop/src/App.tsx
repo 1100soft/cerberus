@@ -1,18 +1,24 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, FolderGit2, Plus, Search, Settings, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { ChatgptLoginDialog } from './components/ChatgptIdentities';
+import { revealRepository } from './lib/repositoryScroll';
+import { useWorkspaceFocus } from './lib/workspaceFocus';
+import { matchesShortcut, shortcuts } from './lib/shortcuts';
+import { ProviderSetup, type Provider } from "./components/ProviderSetup";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownWideNarrow, Bell, FolderGit2, ListFilter, Plus, Search, Settings, ShieldCheck } from "lucide-react";
+import { AgentsPanel } from "./components/AgentsPanel";
 import { Select } from "./components/Select";
 import { CodexHistory } from "./components/CodexHistory";
 import { CommitHistory } from "./components/CommitHistory";
 import { RepositoryCard } from "./components/RepositoryCard";
-import { isLocal, mergeRepositories, repositoryControls, selectRepositoryControl, repositoryOwner, filterAndSortRepositories, readRepositoryFilters, type RepositorySelection } from "./lib/repositories";
+import { isLocal, mergeRepositories, repositoryControls, selectRepositoryControl, repositoryOwner, filterAndSortRepositories, filterMatchCount, readRepositoryFilters, defaultRepositoryFilters, type RepositoryFilters, type RepositorySelection, type StatusFilter } from "./lib/repositories";
 import { IdentitiesPanel } from "./components/IdentitiesPanel";
 import { RepositoryConfigDialog } from "./components/RepositoryConfigDialog";
 import { RepositoryContextMenu, type ContextAction } from "./components/RepositoryContextMenu";
 import { AddRepositoryChooser } from "./components/AddRepositoryChooser";
-import { api } from "./lib/api";
+import { api, inTauri } from "./lib/api";
+import { useChatgptAccounts } from "./lib/chatgptAccounts";
+import { useExternalIdentities } from "./lib/externalIdentities";
 import type { GithubRepository, Identity, ImportResult, Repository, RepositoryUpdate } from "./types";
-
-type Filter = "all" | "dirty" | "ahead" | "behind" | "mismatch";
 
 export function App() {
   const [paneSplit, setPaneSplit] = useState(() => Number(localStorage.getItem("gitcerberus.paneSplit")) || 50);
@@ -20,48 +26,98 @@ export function App() {
   const [query, setQuery] = useState("");
   const [listFilters, setListFilters] = useState(() => readRepositoryFilters(localStorage.getItem("gitcerberus.repositoryFilters")));
   useEffect(() => { localStorage.setItem("gitcerberus.repositoryFilters", JSON.stringify(listFilters)); }, [listFilters]);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const filterAnchor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Element;
+      if (target.closest('.app-select-menu')) return;
+      if (!filterAnchor.current?.contains(target)) setShowFilters(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || document.querySelector('.app-select-menu')) return;
+      if (showFilters) filterAnchor.current?.querySelector('button')?.focus();
+      setShowFilters(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [showFilters]);
+  useLayoutEffect(() => {
+    const position = () => {
+      for (const anchor of [filterAnchor.current]) {
+        const panel = anchor?.querySelector<HTMLElement>('.repo-filters, .repo-sort');
+        if (!panel || !anchor) continue;
+        panel.style.left = '0px';
+        const rect = panel.getBoundingClientRect();
+        const zoom = anchor.getBoundingClientRect().width / anchor.offsetWidth || 1;
+        panel.style.left = `${Math.min(0, (window.innerWidth - 8 - rect.right) / zoom)}px`;
+        panel.style.maxHeight = `${Math.max(100, (window.innerHeight - rect.top - 8) / zoom)}px`;
+      }
+    };
+    position(); window.addEventListener('resize', position);
+    const observer = new MutationObserver(position);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    return () => { window.removeEventListener('resize', position); observer.disconnect(); };
+  }, [showFilters]);
   const [busy, setBusy] = useState<string>();
   const [dragged, setDragged] = useState<string>();
-  const [notice, setNotice] = useState("Local repository monitoring is active");
+  const [notice, setNotice] = useState("");
   const [selection, setSelection] = useState<RepositorySelection>({ repositoryId: '', controlIndex: 0 });
   const [githubRepositories, setGithubRepositories] = useState<GithubRepository[]>([]);
   const [githubWarnings, setGithubWarnings] = useState<string[]>([]);
   const [syncingGithub, setSyncingGithub] = useState(false);
+  const [githubReady, setGithubReady] = useState(false);
   const catalogGeneration = useRef(0);
+  const lastCatalogSync = useRef(0);
+  const catalogInFlight = useRef(false);
   const repositories = useMemo(() => mergeRepositories(localRepositories, githubRepositories), [localRepositories, githubRepositories]);
   const [identities, setIdentities] = useState<Identity[]>([]);
+  const chatgptAccounts = useChatgptAccounts();
+  const externalAccounts = useExternalIdentities();
+  const [providerSetup, setProviderSetup] = useState<Provider>();
+  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('sidebar-open') === 'true');
+  useEffect(() => { localStorage.setItem('sidebar-open', String(sidebarOpen)); }, [sidebarOpen]);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showAgents, setShowAgents] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
+  const [startGithubLogin, setStartGithubLogin] = useState(false);
+  const [startExternalLogin, setStartExternalLogin] = useState<'cursor'|'claude'>();
   const [identityPrompt, setIdentityPrompt] = useState<{ owner: string; repositoryId: string }>();
   const [menu, setMenu] = useState<{ repository: Repository; x: number; y: number }>();
   const [configRepo, setConfigRepo] = useState<Repository>();
   const [addRepo, setAddRepo] = useState<"choose" | "create">();
 
-  async function syncGithub() {
+  async function syncGithub(force = false) {
+    if (catalogInFlight.current || (!force && Date.now() - lastCatalogSync.current < 300000)) return;
+    catalogInFlight.current = true;
     const generation = ++catalogGeneration.current;
     setSyncingGithub(true);
     try {
       const catalog = await api.githubRepositories();
       if (generation !== catalogGeneration.current) return;
       setGithubRepositories(current => [...current.filter(repo => catalog.failedIdentityIds?.includes(repo.identityId)), ...catalog.repositories]); setGithubWarnings(catalog.warnings);
+      setGithubReady(true); lastCatalogSync.current = Date.now();
     } catch (error) { if (generation === catalogGeneration.current) setGithubWarnings([String(error)]); }
-    finally { if (generation === catalogGeneration.current) setSyncingGithub(false); }
+    finally { catalogInFlight.current = false; if (generation === catalogGeneration.current) setSyncingGithub(false); }
   }
-  async function reload() { const [repos, ids] = await Promise.all([api.repositories(), api.identities()]); setRepositories(repos); setIdentities(ids); await syncGithub(); }
-  useEffect(() => { reload().catch((e) => setNotice(String(e))); }, []);
+  async function reload() { await Promise.all([api.repositories().then(setRepositories), api.identities().then(setIdentities)]); void syncGithub(true); }
+  useEffect(() => { void reload().then(() => { if (!inTauri()) return; requestAnimationFrame(() => { void api.syncRepositoryRemotes().then(updated => { const byId = new Map(updated.map(repo => [repo.id, repo])); setRepositories(current => current.map(repo => { const next = byId.get(repo.id); return next ? {...repo, canonicalRemote: next.canonicalRemote, hostType: next.hostType} : repo; })); }).catch(() => {}); }); }).catch((e) => setNotice(String(e))); }, []);
   useEffect(() => {
-    const sync = () => { api.repositories().then(setRepositories).catch((error) => setNotice(String(error))); };
-    const onVisible = () => { if (!document.hidden) sync(); };
-    window.addEventListener("focus", sync);
+    const syncLocal = () => { api.repositories().then(setRepositories).catch((error) => setNotice(String(error))); };
+    const onVisible = () => { if (!document.hidden) { syncLocal(); void syncGithub(); } };
+    window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
+    const poll = window.setInterval(() => { if (!document.hidden) { syncLocal(); void syncGithub(); } }, 30000);
     return () => {
-      window.removeEventListener("focus", sync);
+      window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(poll);
     };
   }, []);
 
   useEffect(() => {
-    const minimum = 0.75, maximum = 1.5, step = 0.1;
+    const minimum = 0.75, maximum = 2, step = 0.1;
     let zoom = Number(localStorage.getItem("gitcerberus.uiZoom")) || 1;
     const apply = (next: number) => {
       zoom = Math.min(maximum, Math.max(minimum, Math.round(next * 10) / 10));
@@ -74,11 +130,10 @@ export function App() {
       apply(zoom + (event.deltaY < 0 ? step : -step));
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
-      if (!["+", "=", "-", "_", "0"].includes(event.key)) return;
+      if (!(['view.zoomIn', 'view.zoomOut', 'view.zoomReset'] as const).some(command => matchesShortcut(event, command))) return;
       event.preventDefault();
-      if (event.key === "0") apply(1);
-      else apply(zoom + (["+", "="].includes(event.key) ? step : -step));
+      if (matchesShortcut(event, 'view.zoomReset')) apply(1);
+      else apply(zoom + (matchesShortcut(event, 'view.zoomIn') ? step : -step));
     };
     apply(zoom);
     window.addEventListener("wheel", onWheel, { passive: false });
@@ -90,20 +145,19 @@ export function App() {
   }, []);
 
   const owners = [...new Set(repositories.map(repositoryOwner))].sort((a, b) => a.localeCompare(b));
-  const visible = useMemo(() => filterAndSortRepositories(repositories.filter((repo) => {
-    const haystack = [repo.displayName, repo.localPath, repo.canonicalRemote, repo.identity?.label, repo.github?.owner, ...repo.tags].join(" ").toLowerCase();
-    const matchesQuery = haystack.includes(query.toLowerCase());
-    const changes = repo.stagedCount + repo.modifiedCount + repo.untrackedCount;
-    const matchesFilter = filter === "all" || (filter === "dirty" && changes > 0) || (filter === "ahead" && repo.ahead > 0) || (filter === "behind" && repo.behind > 0) || (filter === "mismatch" && repo.identityMismatch);
-    return matchesQuery && matchesFilter;
-  }), listFilters), [repositories, query, filter, listFilters]);
+  const ownerOptions = [...new Set([...owners, ...listFilters.owners])].sort((a, b) => a.localeCompare(b));
+  const selectedOwners = listFilters.ownersExplicit || listFilters.owners.length ? listFilters.owners : ownerOptions;
+  const allOwnersSelected = ownerOptions.length > 0 && ownerOptions.every(owner => selectedOwners.includes(owner));
+  const visible = useMemo(() => filterAndSortRepositories(repositories, listFilters, query), [repositories, query, listFilters]);
+  const counted = (patch: Partial<RepositoryFilters>) => filterMatchCount(repositories, listFilters, query, patch);
+  const filtersActive = !!listFilters.ownersExplicit || listFilters.owners.length > 0 || listFilters.visibility !== defaultRepositoryFilters.visibility || listFilters.presence !== defaultRepositoryFilters.presence || listFilters.status !== defaultRepositoryFilters.status;
 
   const normalizedSelection = selectRepositoryControl(visible, selection.repositoryId, selection.controlIndex);
   const selectedIndex = visible.findIndex(repo => repo.id === normalizedSelection.repositoryId);
   const selectedRepository = visible[selectedIndex];
   const actionIndex = normalizedSelection.controlIndex;
   const historyRepository = selectedRepository && isLocal(selectedRepository) ? selectedRepository : undefined;
-  const deferredHistory = useDeferredValue(historyRepository);
+  useWorkspaceFocus(!providerSetup && !configRepo && !addRepo && !menu && !showAgents && !showIdentities, historyRepository?.id);
   function selectControl(repositoryId: string, controlIndex = actionIndex, focus = false, list = visible) {
     const next = selectRepositoryControl(list, repositoryId, controlIndex);
     setSelection(next);
@@ -111,15 +165,29 @@ export function App() {
       const row = [...document.querySelectorAll<HTMLElement>('[data-repository-id]')].find(row => row.dataset.repositoryId === next.repositoryId);
       const control = row?.querySelector<HTMLElement>(`[data-control-index="${next.controlIndex}"]`);
       if (focus) (control || row)?.focus({ preventScroll: true });
-      row?.scrollIntoView({ block: 'nearest' });
+      if (row) revealRepository(row);
     });
   }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (!document.querySelector('[role=dialog]') && !providerSetup && !configRepo && !menu && !addRepo && !document.querySelector('[role=listbox]')) {
+        if (matchesShortcut(event, 'repository.focus')) {
+          event.preventDefault(); setSidebarOpen(false); setShowShortcuts(false);
+          if (!showIdentities && !showAgents && selectedRepository) selectControl(selectedRepository.id, actionIndex, true);
+          return;
+        }
+        if (!showIdentities && !showAgents && (matchesShortcut(event, 'conversation.previous') || matchesShortcut(event, 'conversation.next'))) {
+          event.preventDefault(); window.dispatchEvent(new CustomEvent('conversation-cycle', {detail: matchesShortcut(event, 'conversation.previous') ? -1 : 1})); return;
+        }
+      }
+      if (!document.querySelector('[role=dialog], [role=listbox]') && !showIdentities && !showAgents && matchesShortcut(event, 'search.repositories') && !(event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')) {
+        event.preventDefault(); document.querySelector<HTMLInputElement>('.search input')?.focus(); return;
+      }
       if (event.defaultPrevented || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement;
-      if (target.closest("input, select, textarea, [role=listbox], .history-panel, .codex-panel") || (target.closest('button') && !target.closest('.row-actions')) || showIdentities || configRepo || menu || addRepo || busy) return;
+      if (target.closest("input, select, textarea, [role=listbox], .history-panel, .codex-panel") || (target.closest('button') && !target.closest('.row-actions')) || showShortcuts || providerSetup || showIdentities || showAgents || configRepo || menu || addRepo || busy) return;
       const repo = selectedRepository;
       if (!repo) return;
       const controls = repositoryControls(repo);
@@ -130,7 +198,7 @@ export function App() {
         else void action(repo, controls[shortcut].id);
         return;
       }
-      if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(event.key)) return;
+      if (!(['repository.previous', 'repository.next', 'control.previous', 'control.next', 'control.activate'] as const).some(command => matchesShortcut(event, command))) return;
       // Native button activation owns Enter when focus is already on a control.
       if (event.key === 'Enter' && target.closest('button')) return;
       event.preventDefault();
@@ -143,10 +211,12 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [visible, selectedIndex, actionIndex, showIdentities, configRepo, menu, addRepo, busy]);
+  }, [sidebarOpen, showShortcuts, providerSetup, visible, selectedIndex, actionIndex, showIdentities, showAgents, configRepo, menu, addRepo, busy]);
 
+  useEffect(()=>{const show=(event:Event)=>{const detail=(event as CustomEvent<{githubLogin?:boolean;externalLogin?:'cursor'|'claude'}>).detail;setProviderSetup(undefined);setStartGithubLogin(!!detail?.githubLogin);setStartExternalLogin(detail?.externalLogin);setShowIdentities(true);setShowAgents(false);};window.addEventListener('show-identities',show);return()=>window.removeEventListener('show-identities',show);},[]);
   async function action(repo: Repository, name: string) {
     if (busy) return;
+    if (name === 'chat') { requestAnimationFrame(() => document.querySelector<HTMLElement>('.codex-thread-list button.active, .codex-thread-list button.provider-codex, .codex-thread-list button, .conversation-search input')?.focus()); return; }
     if (name === 'configure') { setConfigRepo(repo); return; }
     setBusy(repo.id);
     try {
@@ -259,39 +329,78 @@ export function App() {
     } else setNotice(result.warnings[0] ?? `${verb} ${result.repository.displayName}`);
   }
 
-  return <div className="shell">
-    <aside>
+  return <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
+    <button className="app-menu-toggle" aria-label="Toggle navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)} title="GitCerberus navigation"><ShieldCheck /></button>
+    <aside hidden={!sidebarOpen}>
       <div className="brand"><div className="brand-mark"><ShieldCheck /></div><div><b>GitCerberus</b><span>Repository guardian</span></div></div>
       <nav>
-        <button className={!showIdentities ? "active" : ""} onClick={() => { setShowIdentities(false); setIdentityPrompt(undefined); }}><FolderGit2 />Repositories <span>{repositories.length}</span></button>
-        <button className={showIdentities ? "active" : ""} onClick={() => setShowIdentities(true)}><ShieldCheck />Identities <span>{identities.length}</span></button>
-        <button><Bell />Automation</button>
+        <button className={!showIdentities && !showAgents ? "active" : ""} onClick={() => { setShowIdentities(false); setShowAgents(false); setIdentityPrompt(undefined); }}><FolderGit2 /><span className="nav-label">Repositories</span><span className="nav-count">{repositories.length}</span></button>
+        <button className={showIdentities ? "active" : ""} onClick={() => { setShowAgents(false); setShowIdentities(true); }}><ShieldCheck /><span className="nav-label">Identities</span><span className="nav-count">{identities.length}</span></button>
+        <button className={showAgents ? "active" : ""} onClick={() => { setShowAgents(true); setShowIdentities(false); }}><Bell /><span className="nav-label">Agents</span></button>
       </nav>
-      <div className="aside-bottom"><button><Settings />Settings</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
+      <div className="aside-bottom"><button onClick={() => { setShowShortcuts(open => !open); }}><Settings />Keyboard shortcuts</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
     </aside>
 
     <main style={{ "--pane-top": `${paneSplit}fr`, "--pane-bottom": `${100 - paneSplit}fr` } as React.CSSProperties}>
-      {!showIdentities && <>
+      {!showIdentities && !showAgents && <>
       <section className="toolbar">
-        <label className="search"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search repositories, identities, tags, paths…" /><kbd>⌘ K</kbd></label>
-        <div className="filter"><SlidersHorizontal size={17} /><Select label="Filter repositories" value={filter} onChange={(value) => setFilter(value as Filter)} options={[{value:"all",label:"All statuses"},{value:"dirty",label:"Has changes"},{value:"ahead",label:"Ahead"},{value:"behind",label:"Behind"},{value:"mismatch",label:"Identity mismatch"}]} /></div>
-        <div className="header-actions"><button disabled={syncingGithub} onClick={() => void syncGithub()} title={githubWarnings.join("\n") || "Refresh connected GitHub repositories"}>{syncingGithub ? "Loading GitHub…" : "Refresh GitHub"}</button><button className="import" onClick={() => setAddRepo("choose")}><Plus size={17} />Add repository</button></div>
+        <label className="search"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" /></label>
+        <div className="toolbar-popover" ref={filterAnchor}>
+        <button type="button" className={`toolbar-icon ${showFilters ? "active" : ""} ${filtersActive ? "armed" : ""}`} aria-pressed={showFilters} aria-expanded={showFilters} aria-controls="repository-filters" aria-label="Filter repositories" title="Filter repositories" onClick={() => setShowFilters(open => !open)}><ListFilter size={16} /></button>
+        {showFilters && <div id="repository-filters" className="repo-filters" aria-label="Repository filters">
+          <Select label="Filter by status" title="Working tree and identity status" value={listFilters.status} onChange={status => setListFilters(current => ({ ...current, status: status as StatusFilter }))} options={[
+            { value: 'all', label: 'All statuses', count: counted({ status: 'all' }) },
+            { value: 'dirty', label: 'Has changes', count: counted({ status: 'dirty' }) },
+            { value: 'ahead', label: 'Ahead', count: counted({ status: 'ahead' }) },
+            { value: 'behind', label: 'Behind', count: counted({ status: 'behind' }) },
+            { value: 'mismatch', label: 'Identity mismatch', count: counted({ status: 'mismatch' }) },
+          ]} />
+          <Select label="Filter by visibility" title="Repository visibility" value={listFilters.visibility} onChange={visibility => setListFilters(current => ({ ...current, visibility }))} options={[
+            { value: 'all', label: 'Any visibility', count: counted({ visibility: 'all' }) },
+            { value: 'public', label: 'Public', count: counted({ visibility: 'public' }) },
+            { value: 'private', label: 'Private', count: counted({ visibility: 'private' }) },
+            { value: 'unverified', label: 'Unverified', count: counted({ visibility: 'unverified' }) },
+          ]} />
+          <Select label="Filter by local presence" title="Whether a local checkout is linked" value={listFilters.presence} onChange={presence => setListFilters(current => ({ ...current, presence }))} options={[
+            { value: 'all', label: 'Any location', count: counted({ presence: 'all' }) },
+            { value: 'local', label: 'Linked locally', count: counted({ presence: 'local' }) },
+            { value: 'unlinked', label: 'Folder not linked', count: counted({ presence: 'unlinked' }) },
+          ]} />
+          <fieldset className="owner-filter">
+            <legend>Owners</legend>
+            <div className="owner-checks">
+              <label className="owner-select-all"><input type="checkbox" aria-label="Select all owners" checked={allOwnersSelected}
+                ref={node => { if (node) node.indeterminate = !allOwnersSelected && selectedOwners.length > 0; }}
+                onChange={() => setListFilters(current => ({ ...current, owners: [], ownersExplicit: allOwnersSelected }))} /><span>Select all</span></label>
+              {ownerOptions.map(owner => {
+                const count = counted({ owners: [owner], ownersExplicit: true });
+                return <label key={owner} title={`${count} ${count === 1 ? 'repository' : 'repositories'}`}>
+                  <input type="checkbox" checked={selectedOwners.includes(owner)} onChange={() => setListFilters(current => ({
+                    ...current,
+                    ownersExplicit: true,
+                    owners: selectedOwners.includes(owner) ? selectedOwners.filter(item => item !== owner) : [...selectedOwners, owner],
+                  }))} />
+                  <span>{owner}</span>
+                  <span className="option-count">{count}</span>
+                </label>;
+              })}
+            </div>
+          </fieldset>
+        </div>}
+
+        </div>
+        <Select className={`toolbar-icon sort-trigger ${listFilters.sort !== "manual" ? "armed" : ""}`} triggerContent={<ArrowDownWideNarrow size={16} />} label="Sort repositories" title="Sort repositories. Last updated uses local commit time or GitHub’s last push, with uncommitted work first." value={listFilters.sort} onChange={sort => setListFilters(current => ({ ...current, sort }))} options={[{ value: 'manual', label: 'Manual order' }, { value: 'name', label: 'Name A–Z' }, { value: 'updated', label: 'Last updated' }, { value: 'changes', label: 'Most changes' }, { value: 'owner', label: 'Owner A–Z' }]} />
+        <button type="button" className="toolbar-icon" aria-label="Add repository" title="Add a local repository that GitHub did not list" onClick={() => setAddRepo("choose")}><Plus size={16} /></button>
       </section>
-      <div className="summary"><span><b>{visible.length}</b> repositories</span><span><i className="ok" />{repositories.filter(isLocal).length} local</span><span><i className="warn" />{repositories.filter(repo => !isLocal(repo)).length} without a linked folder</span>{githubWarnings.length > 0 && <span className="github-warning" role="status" title={githubWarnings.join("\n")}>{githubWarnings.join(" ")}</span>}</div>
+      <div className="summary">{notice && <div className="app-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}>×</button></div>}<span><b>{visible.length}</b> repositories</span><span><i className="ok" />{repositories.filter(isLocal).length} local</span><span><i className="warn" />{repositories.filter(repo => !isLocal(repo)).length} without a linked folder</span>{syncingGithub && <span>Updating GitHub…</span>}{githubWarnings.length > 0 && <span className="github-warning" role="status" title={githubWarnings.join("\n")}>{githubWarnings.join(" ")}</span>}</div>
       <div className="repository-workspace">
       <div className="repository-list-column">
-      <div className="repo-list-controls" aria-label="Repository filters and sorting">
-        <Select label="Filter by owner" title="Repository owner" value={listFilters.owner} onChange={owner => setListFilters(current => ({ ...current, owner }))} options={[{ value: '', label: 'All owners' }, ...[...new Set([...owners, ...(listFilters.owner ? [listFilters.owner] : [])])].map(owner => ({ value: owner, label: owner }))]} />
-        <Select label="Filter by visibility" title="Repository visibility" value={listFilters.visibility} onChange={visibility => setListFilters(current => ({ ...current, visibility }))} options={[{ value: 'all', label: 'Any visibility' }, { value: 'public', label: 'Public' }, { value: 'private', label: 'Private' }, { value: 'unverified', label: 'Unverified' }]} />
-        <Select label="Filter by local presence" title="Whether a local checkout is linked" value={listFilters.presence} onChange={presence => setListFilters(current => ({ ...current, presence }))} options={[{ value: 'all', label: 'Any location' }, { value: 'local', label: 'Linked locally' }, { value: 'unlinked', label: 'Folder not linked' }]} />
-        <Select label="Sort repositories" title="Last updated uses GitHub’s update time or the latest local commit; changes counts known working-tree changes." value={listFilters.sort} onChange={sort => setListFilters(current => ({ ...current, sort }))} options={[{ value: 'manual', label: 'Manual order' }, { value: 'name', label: 'Name A–Z' }, { value: 'updated', label: 'Last updated' }, { value: 'changes', label: 'Most changes' }, { value: 'owner', label: 'Owner A–Z' }]} />
-      </div>
-      <section className="repo-grid">
-        {visible.map((repo, index) => <RepositoryCard key={repo.id} repository={repo} identities={identities} onAssignIdentity={async (identityId) => { await api.assignIdentity(repo.id, identityId); setRepositories(await api.repositories()); setNotice(`Updated identity for ${repo.displayName}`); }} selected={index === selectedIndex} actionIndex={actionIndex} busy={!!busy} onSelect={(controlIndex, focus) => selectControl(repo.id, controlIndex, focus)} onAction={(name) => action(repo, name)} onConfigure={() => { setMenu(undefined); setConfigRepo(repo); }} onContextMenu={(event) => setMenu({ repository: repo, x: event.clientX, y: event.clientY })} onDragStart={() => setDragged(repo.id)} onDrop={() => drop(repo.id)} />)}
+      <section className="repo-grid" tabIndex={-1}>
+        {visible.map((repo, index) => <RepositoryCard key={repo.id} repository={repo} identities={identities} chatgpt={chatgptAccounts} external={externalAccounts} catalog={githubReady ? githubRepositories : undefined} onAssignIdentity={async (identityId) => { await api.assignIdentity(repo.id, identityId); setRepositories(await api.repositories()); setNotice(`Updated identity for ${repo.displayName}`); }} selected={index === selectedIndex} actionIndex={actionIndex} busy={!!busy} onSelect={(controlIndex, focus) => selectControl(repo.id, controlIndex, focus)} onAction={(name) => action(repo, name)} onConfigure={() => { setMenu(undefined); setConfigRepo(repo); }} onContextMenu={(event) => setMenu({ repository: repo, x: event.clientX, y: event.clientY })} onDragStart={() => setDragged(repo.id)} onDrop={() => drop(repo.id)} />)}
         {!visible.length && <div className="empty"><FolderGit2 /><h2>No repositories found</h2><p>Try another search or add a local Git repository.</p></div>}
       </section>
       </div>
-      <CommitHistory unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} repository={deferredHistory} shortcutsEnabled={!configRepo && !menu && !addRepo} />
+      <CommitHistory unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} key={historyRepository?.id ?? "none"} repository={historyRepository} shortcutsEnabled={!providerSetup && !showShortcuts && !configRepo && !menu && !addRepo} />
       </div>
       <div className="pane-divider" role="separator" aria-label="Resize repository and conversation panels" aria-orientation="horizontal" aria-valuemin={20} aria-valuemax={80} aria-valuenow={paneSplit} tabIndex={0}
         onKeyDown={(event) => {
@@ -309,14 +418,17 @@ export function App() {
           const next = Math.min(80, Math.max(20, Math.round((event.clientY - top) / (bottom - top) * 100)));
           setPaneSplit(next); localStorage.setItem("gitcerberus.paneSplit", String(next));
         }} onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)} />
-      <CodexHistory unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} repository={deferredHistory} />
+      <CodexHistory onSetup={setProviderSetup} unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} repository={historyRepository} />
       </>}
-      <div className="toast"><i />{notice}</div>
-      {showIdentities && <IdentitiesPanel identities={identities} inferredOwner={identityPrompt?.owner} pendingRepositoryId={identityPrompt?.repositoryId} onClose={() => { setShowIdentities(false); setIdentityPrompt(undefined); }} onChanged={reload} />}
+      {showShortcuts && <section className="shortcut-help" aria-label="Keyboard shortcuts"><header><h2>Keyboard shortcuts</h2><button onClick={() => setShowShortcuts(false)}>Close</button></header>{Object.entries(shortcuts).map(([id,shortcut]) => <p key={id}><kbd>{shortcut.label}</kbd> {shortcut.description}</p>)}<p>Repository action keys are shown on the selected card. Escape closes menus before returning to repository actions.</p></section>}
+      <ChatgptLoginDialog onSetup={()=>setProviderSetup('codex')}/>
+      {providerSetup && <ProviderSetup provider={providerSetup} onClose={() => setProviderSetup(undefined)} />}
+      <AgentsPanel onSetup={setProviderSetup} visible={showAgents} />
+      {showIdentities && <IdentitiesPanel identities={identities} inferredOwner={identityPrompt?.owner} pendingRepositoryId={identityPrompt?.repositoryId} startGithubLogin={startGithubLogin} startExternalLogin={startExternalLogin} onClose={() => { setShowIdentities(false); setIdentityPrompt(undefined); setStartGithubLogin(false); setStartExternalLogin(undefined); }} onChanged={reload} />}
       {menu && <RepositoryContextMenu repository={menu.repository} x={menu.x} y={menu.y} busy={busy === menu.repository.id} onAction={(name) => void contextAction(menu.repository, name)} onClose={() => setMenu(undefined)} />}
-      {configRepo && <RepositoryConfigDialog repository={configRepo} identities={identities} onClose={() => setConfigRepo(undefined)} onSave={saveConfig} onRemove={() => removeRepo(configRepo)} />}
+      {configRepo && <RepositoryConfigDialog repository={configRepo} identities={identities} catalog={githubReady ? githubRepositories : undefined} onClose={() => setConfigRepo(undefined)} onSave={saveConfig} onRemove={() => removeRepo(configRepo)} />}
       {addRepo === "choose" && <AddRepositoryChooser onClose={() => setAddRepo(undefined)} onImport={importRepo} onCreate={() => setAddRepo("create")} />}
-      {addRepo === "create" && <RepositoryConfigDialog identities={identities} onClose={() => setAddRepo(undefined)} onSave={createRepo} />}
+      {addRepo === "create" && <RepositoryConfigDialog identities={identities} catalog={githubReady ? githubRepositories : undefined} onClose={() => setAddRepo(undefined)} onSave={createRepo} />}
     </main>
   </div>;
 }

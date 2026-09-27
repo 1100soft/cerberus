@@ -19,22 +19,24 @@ if len(sys.argv) == 1:
 
 css = (Path(__file__).resolve().parents[1] / "src/styles.css").read_text()
 css = "\n".join(line for line in css.splitlines() if not line.startswith("@import"))
-html = """<div class="shell"><main>
+html = """<div class="shell"><aside><div class="brand">GitCerberus</div><nav>Repositories</nav></aside><main>
 <section class="toolbar">Repository controls</section><div class="summary">Repositories</div>
 <div class="repository-workspace"><div class="repository-list-column"><div class="repo-list-controls">Filters and sort</div><section class="repo-grid">Repositories</section></div>
 <section class="history-panel">Commit history</section></div>
 <div class="pane-divider"></div><section class="codex-panel"><header>Conversations</header>
 <div class="codex-body"><div class="provider-controls">Codex · Cursor</div><div class="codex-conversations"><div class="codex-thread-list"><button>Conversation with a long title that should wrap</button></div><div class="codex-messages"><article class="codex-message user"><div>A prompt with enough text to exercise wrapping within the available pane width.</div></article></div></div></div></section></main></div>"""
-script = """JSON.stringify([0.75, 1, 1.4, 1.5].map(zoom => {
+script = """JSON.stringify([false, true].flatMap(open => [0.75, 1, 1.4, 1.5].map(zoom => {
+ document.querySelector('.shell').classList.toggle('sidebar-open', open);
+ document.querySelector('aside').hidden = !open;
  document.documentElement.style.setProperty('--ui-zoom', zoom);
  const main = document.querySelector('main');
  const shell = document.querySelector('.shell').getBoundingClientRect();
  const ai = document.querySelector('.codex-panel').getBoundingClientRect();
  const panes = [...document.querySelectorAll('.repository-workspace, .repo-grid, .history-panel, .codex-panel, .codex-thread-list, .codex-messages')].map(node => { const r = node.getBoundingClientRect(); return {name: node.className, left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height, overflow:node.scrollWidth-node.clientWidth}; });
- return {zoom, width:innerWidth, panes, viewport: innerHeight, shell: shell.height,
+ return {open, zoom, width:innerWidth, panes, viewport: innerHeight, shell: shell.height,
    bottomGap: innerHeight - ai.bottom,
    expectedGap: parseFloat(getComputedStyle(main).paddingBottom) * zoom};
-}))"""
+})))"""
 window = Gtk.OffscreenWindow()
 view = WebKit2.WebView()
 view.set_size_request(int(sys.argv[1]), int(sys.argv[2]))
