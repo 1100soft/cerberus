@@ -21,9 +21,14 @@ pub struct ExternalIdentity {
 fn executable(provider: &str) -> Result<&'static str, String> {
     match provider { "cursor" => Ok("cursor-agent"), "claude" => Ok("claude"), _ => Err("Unknown identity provider".into()) }
 }
+fn program(root: &Path, provider: &str) -> Result<std::path::PathBuf, String> {
+    let tool = executable(provider)?;
+    let resolved = if provider == "cursor" { "cursor-agent" } else { tool };
+    crate::provider_paths::resolve(root, resolved)?.ok_or_else(|| format!("Install {tool} in provider setup first"))
+}
 fn status(root: &Path, provider: &str) -> Result<Option<ExternalIdentity>, String> {
     let exe = executable(provider)?;
-    let program = if provider == "cursor" { crate::provider_paths::resolve(root,"cursor-agent")?.ok_or("Cursor Agent is unavailable")? } else { std::path::PathBuf::from(exe) };
+    let program = program(root, provider)?;
     let args: &[&str] = if provider == "claude" { &["auth", "status"] } else { &["status"] };
     let output = Command::new(&program).args(args).output().map_err(|e| format!("{exe} is unavailable: {e}"))?;
     let detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -46,7 +51,7 @@ pub fn identities(root: &Path) -> Vec<ExternalIdentity> {
 }
 pub fn login(root: &Path, provider: &str) -> Result<(), String> {
     let exe = executable(provider)?;
-    let program = if provider == "cursor" { crate::provider_paths::resolve(root,"cursor-agent")?.ok_or("Install Cursor Agent in provider setup first")? } else { std::path::PathBuf::from(exe) };
+    let program = program(root, provider)?;
     let args: &[&str] = if provider == "claude" { &["auth", "login"] } else { &["login"] };
     let mut child = Command::new(&program).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
         .map_err(|e| format!("Could not start {exe} login: {e}"))?;
@@ -55,9 +60,9 @@ pub fn login(root: &Path, provider: &str) -> Result<(), String> {
 }
 pub fn logout(root: &Path, provider: &str) -> Result<(), String> {
     let exe = executable(provider)?;
-    let program = if provider == "cursor" { crate::provider_paths::resolve(root,"cursor-agent")?.ok_or("Cursor Agent is unavailable")? } else { std::path::PathBuf::from(exe) };
+    let program = program(root, provider)?;
     let args: &[&str] = if provider == "claude" { &["auth", "logout"] } else { &["logout"] };
-    let output = Command::new(&program).args(args).output().map_err(|e| e.to_string())?;
+    let output = Command::new(&program).args(args).output().map_err(|e| format!("Could not run {exe} logout: {e}"))?;
     if output.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&output.stderr).to_string()) }
 }
 fn path(root: &Path) -> std::path::PathBuf {root.join("external-identity-assignments.json")}

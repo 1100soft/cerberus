@@ -3,7 +3,7 @@ import { revealRepository } from './lib/repositoryScroll';
 import { useWorkspaceFocus } from './lib/workspaceFocus';
 import { matchesShortcut, shortcuts } from './lib/shortcuts';
 import { ProviderSetup, type Provider } from "./components/ProviderSetup";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownWideNarrow, Bell, FolderGit2, ListFilter, Plus, Search, Settings, ShieldCheck } from "lucide-react";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { Select } from "./components/Select";
@@ -16,11 +16,13 @@ import { RepositoryConfigDialog } from "./components/RepositoryConfigDialog";
 import { RepositoryContextMenu, type ContextAction } from "./components/RepositoryContextMenu";
 import { AddRepositoryChooser } from "./components/AddRepositoryChooser";
 import { api, inTauri } from "./lib/api";
+import { watchCursorCompletion } from "./lib/conversationCache";
 import { useChatgptAccounts } from "./lib/chatgptAccounts";
 import { useExternalIdentities } from "./lib/externalIdentities";
 import type { GithubRepository, Identity, ImportResult, Repository, RepositoryUpdate } from "./types";
 
 export function App() {
+  useEffect(() => watchCursorCompletion(), []);
   const [paneSplit, setPaneSplit] = useState(() => Number(localStorage.getItem("gitcerberus.paneSplit")) || 50);
   const [localRepositories, setRepositories] = useState<Repository[]>([]);
   const [query, setQuery] = useState("");
@@ -76,6 +78,10 @@ export function App() {
   const chatgptAccounts = useChatgptAccounts();
   const externalAccounts = useExternalIdentities();
   const [providerSetup, setProviderSetup] = useState<Provider>();
+  const [cursorConversation, setCursorConversation] = useState<{ repositoryId: string; id?: string }>();
+  const reportCursorConversation = useCallback((repositoryId: string, id?: string) => {
+    setCursorConversation(current => current?.repositoryId === repositoryId && current.id === id ? current : { repositoryId, id });
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('sidebar-open') === 'true');
   useEffect(() => { localStorage.setItem('sidebar-open', String(sidebarOpen)); }, [sidebarOpen]);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -245,7 +251,7 @@ export function App() {
       }
       else if (!isLocal(repo)) throw new Error('Link a local folder or clone this repository first.');
       else if (name === "editor") await api.openEditor(repo.id);
-      else if (name === "cursor") await api.openCursor(repo.id);
+      else if (name === "cursor") await api.openCursor(repo.id, cursorConversation?.repositoryId === repo.id ? cursorConversation.id : undefined);
       else if (name === "folder") await api.openLocalFolder(repo.id);
       else if (name === "refresh") {
         const updated = await api.refresh(repo.id);
@@ -418,12 +424,12 @@ export function App() {
           const next = Math.min(80, Math.max(20, Math.round((event.clientY - top) / (bottom - top) * 100)));
           setPaneSplit(next); localStorage.setItem("gitcerberus.paneSplit", String(next));
         }} onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)} />
-      <CodexHistory onSetup={setProviderSetup} unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} repository={historyRepository} />
+      <CodexHistory onSetup={setProviderSetup} onCursorConversation={reportCursorConversation} unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} repository={historyRepository} />
       </>}
       {showShortcuts && <section className="shortcut-help" aria-label="Keyboard shortcuts"><header><h2>Keyboard shortcuts</h2><button onClick={() => setShowShortcuts(false)}>Close</button></header>{Object.entries(shortcuts).map(([id,shortcut]) => <p key={id}><kbd>{shortcut.label}</kbd> {shortcut.description}</p>)}<p>Repository action keys are shown on the selected card. Escape closes menus before returning to repository actions.</p></section>}
       <ChatgptLoginDialog onSetup={()=>setProviderSetup('codex')}/>
       {providerSetup && <ProviderSetup provider={providerSetup} onClose={() => setProviderSetup(undefined)} />}
-      <AgentsPanel onSetup={setProviderSetup} visible={showAgents} />
+      <AgentsPanel identities={identities} onSetup={setProviderSetup} visible={showAgents} />
       {showIdentities && <IdentitiesPanel identities={identities} inferredOwner={identityPrompt?.owner} pendingRepositoryId={identityPrompt?.repositoryId} startGithubLogin={startGithubLogin} startExternalLogin={startExternalLogin} onClose={() => { setShowIdentities(false); setIdentityPrompt(undefined); setStartGithubLogin(false); setStartExternalLogin(undefined); }} onChanged={reload} />}
       {menu && <RepositoryContextMenu repository={menu.repository} x={menu.x} y={menu.y} busy={busy === menu.repository.id} onAction={(name) => void contextAction(menu.repository, name)} onClose={() => setMenu(undefined)} />}
       {configRepo && <RepositoryConfigDialog repository={configRepo} identities={identities} catalog={githubReady ? githubRepositories : undefined} onClose={() => setConfigRepo(undefined)} onSave={saveConfig} onRemove={() => removeRepo(configRepo)} />}

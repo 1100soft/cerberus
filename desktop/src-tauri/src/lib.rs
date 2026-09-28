@@ -10,7 +10,10 @@ mod agent_edits;
 mod codex;
 mod cursor;
 mod cursor_editor;
+mod cursor_launch;
+mod cursor_notifications;
 mod copilot;
+mod copilot_history;
 mod claude_history;
 mod setup_terminal;
 mod db;
@@ -130,8 +133,9 @@ fn chatgpt_settings(state:State<AppState>)->Result<chatgpt_accounts::AccountSett
 #[tauri::command]
 fn external_identities(state:State<AppState>) -> Vec<external_identities::ExternalIdentity> { external_identities::identities(&state.data_dir) }
 #[tauri::command]
-async fn copilot_repository_snapshot(identity_id:String,repository:String) -> Result<Value,String> {
-    copilot::repository_snapshot(&identity_id,&repository).await
+async fn copilot_repository_snapshot(identity_id:String,repository:String,state:State<'_,AppState>) -> Result<Value,String> {
+    let data_dir = state.data_dir.clone();
+    copilot::repository_snapshot(&data_dir,&identity_id,&repository).await
 }
 #[tauri::command]
 async fn external_identity_snapshot(state:State<'_,AppState>)->Result<Value,String>{
@@ -231,9 +235,21 @@ async fn clone_github_repository(identity_id: String, full_name: String, parent:
     tauri::async_runtime::spawn_blocking(move || github::clone_repository(&db, &git, &identity_id, &full_name, Path::new(&parent))).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-fn open_in_cursor(repository_id: String, state: State<AppState>) -> Result<(), String> {
+fn open_in_cursor(repository_id: String, conversation_id: Option<String>, state: State<AppState>) -> Result<(), String> {
     let path = state.db.repository_path(&repository_id)?;
-    Command::new("cursor").arg(&path).spawn().map(|_| ()).map_err(|e| format!("Could not launch Cursor: {e}. Install the cursor shell command and make it available on PATH."))
+    let steps = cursor_launch::plan(&path, conversation_id.as_deref());
+    launch_cursor(&steps[0])?;
+    let later = steps.into_iter().skip(1).collect::<Vec<_>>();
+    std::thread::spawn(move || {
+        for step in later {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            let _ = launch_cursor(&step);
+        }
+    });
+    Ok(())
+}
+fn launch_cursor(args: &[String]) -> Result<(), String> {
+    Command::new("cursor").args(args).spawn().map(|_| ()).map_err(|e| format!("Could not launch Cursor: {e}. Install the cursor shell command and make it available on PATH."))
 }
 
 #[tauri::command]
@@ -329,33 +345,15 @@ async fn codex_cancel_login(login_id: String, state: State<'_, AppState>) -> Res
     tauri::async_runtime::spawn_blocking(move || service.request("account/login/cancel", serde_json::json!({"loginId":login_id})).map(|_| ())).await.map_err(|e| e.to_string())?
 }
 
-fn copilot_repository(state:&AppState,id:&str)->Result<(String,String,PathBuf),String>{
-    let repo=state.db.list()?.into_iter().find(|repo|repo.id==id).ok_or("Repository not found")?;
-    let remote=repo.canonical_remote.ok_or("Connect this repository to GitHub first")?;
-    let url=url::Url::parse(&remote).map_err(|e|e.to_string())?;
-    if url.host_str()!=Some("github.com"){return Err("Copilot conversations require a GitHub repository".into())}
-    let repository=url.path().trim_matches('/').trim_end_matches(".git").to_owned();
-    if repository.split('/').count()!=2{return Err("Invalid GitHub repository URL".into())}
-    let owner=repository.split('/').next().unwrap_or_default();
-    let identity=match repo.identity {Some(identity) if oauth::github_connected(&identity.id)=>identity.id,_=>{
-        let connected=state.db.identities()?.into_iter().filter(|identity|oauth::github_connected(&identity.id)).collect::<Vec<_>>();
-        if connected.is_empty(){return Err("Connect a GitHub account in Identities to see Copilot conversations".into())}
-        connected.iter().find(|identity|identity.provider_username.as_deref().is_some_and(|name|name.eq_ignore_ascii_case(owner))).unwrap_or(&connected[0]).id.clone()
-    }};
-    Ok((identity,repository,PathBuf::from(repo.local_path)))
-}
 #[tauri::command]
 async fn copilot_threads(repository_id:String,archived:bool,state:State<'_,AppState>)->Result<codex::ThreadPage,String>{
-    if archived{return Ok(codex::ThreadPage{data:vec![],next_cursor:None})}
-    let repo=state.db.list()?.into_iter().find(|repo|repo.id==repository_id).ok_or("Repository not found")?;
-    if repo.host_type!="github" {return Ok(codex::ThreadPage{data:vec![],next_cursor:None})}
-    let (identity,repository,path)=copilot_repository(&state,&repository_id)?;
-    copilot::threads(&identity,&repository,&path).await
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||copilot_history::threads(&path,archived)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 async fn copilot_messages(repository_id:String,thread_id:String,state:State<'_,AppState>)->Result<codex::MessagePage,String>{
-    let (identity,_,_)=copilot_repository(&state,&repository_id)?;
-    copilot::messages(&identity,&thread_id).await
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||copilot_history::messages(&path,&thread_id)).await.map_err(|e|e.to_string())?
 }
 
 #[tauri::command]
@@ -642,7 +640,7 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 fn permitted_external_url(url:&str)->bool{
-    permitted_github_url(url) || matches!(url, "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation")
+    permitted_github_url(url) || matches!(url, "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
 }
 
 #[cfg(test)]
@@ -650,7 +648,7 @@ mod external_url_tests {
     use super::permitted_external_url;
     #[test]
     fn usage_pages_are_permitted(){
-        for url in ["https://cursor.com/dashboard/spending","https://claude.ai/settings/usage","https://github.com/settings/copilot"]{
+        for url in ["https://cursor.com/dashboard/spending","https://claude.ai/settings/usage","https://github.com/settings/copilot","https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli","https://code.claude.com/docs/en/setup"]{
             assert!(permitted_external_url(url),"{url}");
         }
         assert!(!permitted_external_url("https://cursor.com/dashboard/spending?redirect=https://example.com"));
@@ -712,6 +710,7 @@ pub fn run() {
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             let db = Database::open(data.join("gitcerberus.db")).map_err(std::io::Error::other)?;
+            cursor_notifications::start(app.handle().clone());
             app.manage(AppState {
                 db: Arc::new(db),
                 git: GitService::default(),

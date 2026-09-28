@@ -10,7 +10,7 @@ The Identity page manages ChatGPT, GitHub, Cursor, and Claude identities. Each i
 
 ## Copilot startup and quota
 
-The current Copilot adapter uses the official Copilot SDK, which starts the `copilot` CLI. A connected GitHub identity supplies a token but does not supply that executable or its local session. Both Copilot conversation listing and quota depend on successful CLI startup.
+Copilot conversations are the editor chat sessions saved for the repository folder. Listing them does not start the Copilot CLI. Quota still uses the official Copilot SDK with the connected GitHub account's saved token. A connected GitHub identity does not by itself install a CLI.
 
 If the Agent pane says the Copilot CLI stopped during startup:
 
@@ -20,7 +20,7 @@ If the Agent pane says the Copilot CLI stopped during startup:
 
 The previous raw `Copilot CLI: request cancelled` message came from SDK `Client::start`; it did **not** prove that `account.getQuota` rejected the GitHub identity. The current backend translates this transport error into a startup diagnostic. The CLI was absent from the development shell's `PATH` during this handoff, so live quota recovery was not verified here.
 
-The quota UI labels `premium_interactions` as **Premium requests** when the CLI returns it. An account on current AI-credit billing may return different quota buckets or no premium-request bucket. The source is `src-tauri/src/copilot.rs`; the shared renderer is `src/components/CopilotQuota.tsx`.
+The Identity card labels `premium_interactions` as **Premium requests** only when that bucket has a positive entitlement. Chat, Completions, and a 0/0 premium snapshot are unlimited and stay hidden. Usage is not repeated on the repository action tray. The source is `src-tauri/src/copilot.rs`; the renderer is `src/components/CopilotQuota.tsx`.
 
 ## Provider setup rules
 

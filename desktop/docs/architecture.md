@@ -15,8 +15,8 @@ The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-t
 | Provider | Conversation source | Usage shown in Identity | Working state |
 | --- | --- | --- | --- |
 | Codex | Local Codex app-server sessions and validated rollout files | Available ChatGPT 5h/7d windows, credits, and reset times | App runs and Codex thread/rollout status |
-| Cursor | Local editor history and optional SDK bridge | Link to Cursor Spending dashboard | SDK status where available; app runs |
-| GitHub Copilot | Local Copilot CLI sessions through the Copilot SDK | `account.getQuota` snapshots, including `premium_interactions` when returned; web usage link | CLI processing state for recently listed sessions where supported |
+| Cursor | Read-only editor `state.vscdb` history, plus one reused SDK bridge for local agents | Link to Cursor Spending dashboard | Editor composer activity, cleared when Cursor's completion notification arrives |
+| GitHub Copilot | Read-only VS Code or Cursor Copilot Chat `chatSessions` JSONL for that folder | Premium requests only, and only when `premium_interactions.entitlementRequests` is greater than zero | App runs only |
 | Claude | Local Claude Code JSONL transcripts | Link to Claude Usage settings | App runs only; the transcript reader does not report live state |
 
 All four conversation providers are opt-in through the Agent pane. The presence of a GitHub identity does not install or authenticate the local Copilot CLI. Cursor and Claude web usage buttons open the browser's current session; the app cannot select that browser's active provider account.
@@ -31,6 +31,10 @@ All four conversation providers are opt-in through the Agent pane. The presence 
 
 ## Known integration boundary
 
-The Copilot SDK launches a local `copilot` process. `request cancelled` during `Client::start` is a transport/startup failure before any quota or conversation request. The UI now reports that the CLI stopped during startup and keeps the GitHub web usage link visible. The exact exit cause must be diagnosed on a machine with a working Copilot CLI; the development shell for this handoff has `gh` but no `copilot` executable on `PATH`.
+Copilot conversations are replayed from the editor's `chatSessions` JSONL (`copilot_history.rs`). They do not come from the Copilot CLI. Quota still uses the Copilot SDK in `copilot.rs`, started with the saved GitHub token and the bundled runtime. `request cancelled` during `Client::start` is a transport failure before `account.getQuota`. The Identity card shows that startup error and keeps **Open Copilot usage**. Chat and Completions quotas of 0/0 are unlimited and are not rendered. A Premium requests row appears only when `premium_interactions.entitlementRequests` is greater than zero.
 
-GitHub's [Copilot SDK quota documentation](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing) describes `quotaSnapshots`, including `premium_interactions`. Newer plans may report AI credits rather than a premium-request entitlement. Do not fabricate a missing quota from a GitHub repository assignment.
+GitHub's [Copilot SDK quota documentation](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing) describes `quotaSnapshots`. Do not fabricate a missing quota from a GitHub repository assignment.
+
+Conversation order is newest change first. Codex rollout files also move when settings are rewritten; `conversation_updated_at` uses the last message or task boundary so that rewrite does not sort an idle conversation above a later one. Cursor editor times and Codex times may be seconds or milliseconds; `updatedMillis` compares both as milliseconds.
+
+The working spinner uses the provider color in the Agent pane (`--provider-codex`, `--provider-cursor`, `--provider-copilot`, `--provider-claude`) and the app accent (`--accent-codex`) on the repository row. On Linux, `cursor_notifications.rs` watches the session bus for Cursor's completion notification (`Done • …`, `Agent complete`, or `Cloud agent complete`). That event clears the spinner immediately. The composer database can otherwise keep an unfinished checkpoint for up to three minutes after the task ends.

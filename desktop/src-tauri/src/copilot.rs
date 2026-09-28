@@ -1,56 +1,32 @@
-use github_copilot_sdk::{Client, ClientOptions, types::SessionListFilter};
+use github_copilot_sdk::{Client, ClientOptions};
 use serde_json::{json,Value};
 
-async fn start_client(identity_id:&str)->Result<Client,String>{
-    let options=client_options(identity_id)?;
+async fn start_client(data_dir:&std::path::Path,identity_id:&str)->Result<Client,String>{
+    let options=client_options(data_dir,identity_id)?;
     Client::start(options).await.map_err(|error|{
-        if error.is_transport_failure(){
-            "Copilot CLI stopped during startup. Check that the Copilot CLI is installed, up to date, and signed in; then retry.".into()
-        }else{format!("Copilot CLI could not start: {error}")}
+        if matches!(error.kind(), github_copilot_sdk::ErrorKind::BinaryNotFound { .. }) {
+            format!("Copilot runtime is not available in this app build ({error}). The connected GitHub account is already saved.")
+        } else {
+            format!("Copilot runtime stopped during startup: {error}")
+        }
     })
 }
 
-pub async fn repository_snapshot(identity_id:&str, _repository:&str) -> Result<Value,String> {
-    let client=start_client(identity_id).await?;
+pub async fn repository_snapshot(data_dir:&std::path::Path,identity_id:&str, _repository:&str) -> Result<Value,String> {
+    let client=start_client(data_dir,identity_id).await?;
     let quota=client.call("account.getQuota",Some(json!({}))).await;
     let _=client.stop().await;
     Ok(json!({"quota":quota.map_err(|e|e.to_string())?}))
 }
 
-fn client_options(identity_id:&str)->Result<ClientOptions,String>{
+fn client_options(_data_dir:&std::path::Path,identity_id:&str)->Result<ClientOptions,String>{
     let token=crate::oauth::github_token(identity_id)?;
-    Ok(ClientOptions::default().with_program(std::path::PathBuf::from("copilot")).with_github_token(token))
+    // The SDK starts its own protocol-matched runtime. A `copilot` binary from
+    // npm or PATH is a different program and exits under `--server`. The
+    // connected GitHub token is the account; there is no second sign-in.
+    Ok(ClientOptions::default().with_github_token(token).with_use_logged_in_user(false))
 }
-pub async fn threads(identity_id:&str,repository:&str,cwd:&std::path::Path)->Result<crate::codex::ThreadPage,String>{
-    let client=start_client(identity_id).await?;
-    let result=client.list_sessions(Some(SessionListFilter{repository:Some(repository.into()),..Default::default()})).await;
-    let mut data=Vec::new();
-    if let Ok(sessions)=result {
-        for (index,session) in sessions.into_iter().enumerate() {
-            let working=index<10 && client.call("session.metadata.isProcessing",Some(json!({"sessionId":session.session_id.to_string()}))).await
-                .ok().and_then(|value|value["processing"].as_bool()).unwrap_or(false);
-            data.push(crate::codex::ThreadSummary{
-                id:session.session_id.to_string(),name:session.summary.clone(),preview:session.summary.unwrap_or_else(||"Copilot conversation".into()),
-                cwd:cwd.to_string_lossy().into_owned(),updated_at:chrono::DateTime::parse_from_rfc3339(&session.modified_time).map(|date|date.timestamp()).unwrap_or(0),
-                git_info:None,working,
-            });
-        }
-    } else {
-        let _=client.stop().await;
-        return Err(result.unwrap_err().to_string());
-    }
-    let _=client.stop().await;
-    Ok(crate::codex::ThreadPage{data,next_cursor:None})
-}
-pub async fn messages(identity_id:&str,session_id:&str)->Result<crate::codex::MessagePage,String>{
-    let client=start_client(identity_id).await?;
-    let result=client.call("session.getMessages",Some(json!({"sessionId":session_id}))).await;
-    let _=client.stop().await;
-    let result=result.map_err(|e|e.to_string())?;
-    let data=event_messages(&result);
-    Ok(crate::codex::MessagePage{data,next_cursor:None})
-}
-
+#[cfg(test)]
 fn event_messages(result:&Value)->Vec<crate::codex::Message>{
     result["events"].as_array().into_iter().flatten().filter_map(|event|{
         let role=match event["type"].as_str()?{"user.message"=>"user","assistant.message"=>"assistant",_=>return None};
@@ -60,6 +36,16 @@ fn event_messages(result:&Value)->Vec<crate::codex::Message>{
 }
 #[cfg(test)] mod tests {
     use super::*;
+    #[test]
+    fn runtime_starts_with_the_connected_github_token() {
+        let started = tauri::async_runtime::block_on(async {
+            match Client::start(ClientOptions::default().with_github_token("fixture-github-token").with_use_logged_in_user(false)).await {
+                Ok(client) => { let _ = client.stop().await; Ok(()) }
+                Err(error) => Err(error.to_string()),
+            }
+        });
+        started.expect("Copilot runtime should start with the saved GitHub token");
+    }
     #[test] fn maps_only_complete_conversation_messages(){
         let input=json!({"events":[
             {"id":"1","type":"user.message","data":{"content":"Review this"}},

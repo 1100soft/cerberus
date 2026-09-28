@@ -14,6 +14,8 @@ pub fn specification(tool: &str) -> Result<(&'static str, &'static str, &'static
             "GITCERBERUS_CURSOR_AGENT_PATH",
             "agent",
         )),
+        "copilot" => Ok(("copilot-executable.txt", "GITCERBERUS_COPILOT_PATH", "copilot")),
+        "claude" => Ok(("claude-executable.txt", "GITCERBERUS_CLAUDE_PATH", "claude")),
         _ => Err("Unknown provider tool".into()),
     }
 }
@@ -80,6 +82,9 @@ pub fn resolve_from_file(file: &Path, tool: &str) -> Result<Option<PathBuf>, Str
     let mut candidates = vec![PathBuf::from(name)];
     if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
         let home = PathBuf::from(home);
+        if tool == "claude" {
+            candidates.push(home.join(".claude/local/claude"));
+        }
         if tool == "cursor-agent" {
             candidates.push(PathBuf::from("cursor-agent"));
             candidates.push(home.join(".local/bin/cursor-agent"));
@@ -167,6 +172,8 @@ pub fn status(root: &Path, provider: &str) -> Result<Vec<ToolStatus>, String> {
     let tools = match provider {
         "codex" => vec!["codex"],
         "cursor" => vec!["cursor-agent", "cursor"],
+        "copilot" => vec!["copilot"],
+        "claude" => vec!["claude"],
         _ => return Err("Unknown provider".into()),
     };
     Ok(tools

@@ -1,9 +1,7 @@
-import { invoke } from '@tauri-apps/api/core';
 import { assignedExternalIdentity, externalProviders, useExternalIdentities } from '../lib/externalIdentities';
 import { RepositoryAccounts } from './RepositoryAccounts';
 import { ChatgptAccountBadge } from './ChatgptAccountBadge';
 import { ProviderIdentityBadge } from './ProviderIdentityBadge';
-import { CopilotQuota, type CopilotQuotaResponse } from './CopilotQuota';
 import { useAgentChats } from '../lib/agentChats';
 import { repositoryHistoryWorking, subscribe } from '../lib/conversationCache';
 import { assignedChatgpt,repositoryAccountKey,useChatgptAccounts } from '../lib/chatgptAccounts';
@@ -35,7 +33,6 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
   const assigned=assignedChatgpt(chatgpt.settings,accountKey);
   const chatgptAccount=chatgpt.profiles.find(profile=>profile.id===assigned);
   const [assignOpen, setAssignOpen] = useState(false);
-  const [copilot,setCopilot]=useState<CopilotQuotaResponse|null>(null);
   const local = isLocal(repo);
   const changes = repo.stagedCount + repo.modifiedCount + repo.untrackedCount;
   const owner = repositoryOwner(repo);
@@ -43,7 +40,6 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
   const visibility = repositoryVisibility(repo);
   const account = associatedIdentity(repo, identities);
   const assignable = identitiesWithRepositoryAccess(identities, repo, catalog);
-  useEffect(()=>{if(!selected || !repo.github?.fullName || !account?.id || account.connected===false){setCopilot(null);return;}let alive=true;void invoke<typeof copilot>('copilot_repository_snapshot',{identityId:account.id,repository:repo.github.fullName}).then(result=>{if(alive)setCopilot(result);}).catch(()=>{if(alive)setCopilot(null);});return()=>{alive=false;};},[selected,repo.github?.fullName,account?.id,account?.connected]);
   const visibilityDetail = repo.github ? `${repo.github.private ? "Private" : "Public"} GitHub repository` : repo.hostType === 'github' ? 'Visibility unverified. Connect an account that can access this repository.' : 'Visibility is not verified for this host.';
   const icons: Record<string, React.ReactNode> = { chat: <MessageSquare />, editor: <VSCodeIcon />, cursor: <CursorIcon />, hosted: <ExternalLink />, configure: <Settings2 />, clone: <CloudDownload />, locate: <FolderOpen /> };
   useEffect(() => { if (!selected) setAssignOpen(false); }, [selected]);
@@ -88,9 +84,6 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
             onClick={() => { onSelect(index); onAction(control.id); }} onDoubleClick={event => event.stopPropagation()} title={`${control.label} (${control.key})`} aria-label={control.label}>
             {icons[control.id]}{control.id === 'locate' && <span>Link folder</span>}{control.id === 'clone' && <span>Clone</span>}<kbd>{control.key}</kbd>
           </button>)}</div>
-      {repo.github && copilot && <div className="copilot-summary" aria-label="GitHub Copilot">
-        <b>Copilot</b><CopilotQuota usage={copilot}/>
-      </div>}
     </div>}
     {assignOpen && <RepositoryAccounts repository={repo} identities={assignable} onAssignIdentity={onAssignIdentity} onClose={()=>setAssignOpen(false)}/>}
   </article>;

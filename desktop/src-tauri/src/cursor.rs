@@ -2,15 +2,23 @@
 use crate::codex::{Message, MessagePage, ThreadPage, ThreadSummary};
 use serde_json::{json, Value};
 use std::{
+    ffi::{OsStr, OsString},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::mpsc,
+    sync::{mpsc, Mutex},
     time::Duration,
 };
 
 pub struct CursorService {
     executable_file: PathBuf,
+    // One bridge per workspace. Listing used to start a new process on every refresh.
+    session: Mutex<Option<BridgeSession>>,
+}
+struct BridgeSession {
+    workspace: PathBuf,
+    executable: OsString,
+    bridge: Bridge,
 }
 struct Bridge {
     child: Child,
@@ -18,16 +26,75 @@ struct Bridge {
     token: String,
     http: reqwest::blocking::Client,
 }
+fn stop_child(child: &mut Child) {
+    // The published bridge is a shell wrapper that runs Node. Killing only the
+    // shell reparents Node to the user session, which is how hundreds of
+    // bridges accumulated.
+    #[cfg(unix)]
+    unsafe {
+        extern "C" { fn kill(pid: i32, sig: i32) -> i32; }
+        let _ = kill(-(child.id() as i32), 9);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+fn bridge_launcher(executable: &Path) -> PathBuf {
+    // A pip console script execs the bundled shell launcher and then exits.
+    // The shell's Node child is what used to survive after the script was killed.
+    let text = std::fs::read_to_string(executable).unwrap_or_default();
+    if text.contains("cursor_sdk._vendor") && text.contains("console_entry") {
+        if let Some(env_root) = executable.parent().and_then(|bin| bin.parent()) {
+            if let Ok(pythons) = std::fs::read_dir(env_root.join("lib")) {
+                for python in pythons.flatten() {
+                    let launcher = python.path().join("site-packages/cursor_sdk/_vendor/bridge/bin/cursor-sdk-bridge");
+                    if launcher.is_file() { return launcher; }
+                }
+            }
+        }
+    }
+    executable.to_path_buf()
+}
+fn bridge_command(executable: &OsStr) -> Command {
+    let path = bridge_launcher(Path::new(executable));
+    // Launch Node directly when the file is the SDK's shell wrapper.
+    if let Some(dir) = path.parent() {
+        let node = dir.join("node");
+        let script = std::fs::canonicalize(dir.join("../dist/bin/cursor-sdk-bridge.js")).unwrap_or_else(|_| dir.join("../dist/bin/cursor-sdk-bridge.js"));
+        if node.is_file() && script.is_file() && path.file_name().is_some_and(|name| name != "node") {
+            let mut command = Command::new(node);
+            command.arg(script);
+            return command;
+        }
+    }
+    Command::new(path)
+}
 impl Drop for Bridge {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        stop_child(&mut self.child);
     }
 }
 impl Bridge {
-    fn start(executable: &std::ffi::OsStr, path: &Path) -> Result<Self, String> {
-        let mut child = Command::new(executable).args(["--host", "127.0.0.1", "--port", "0", "--workspace"]).arg(path)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn()
+    fn start(executable: &OsStr, path: &Path) -> Result<Self, String> {
+        let mut command = bridge_command(executable);
+        command.args(["--host", "127.0.0.1", "--port", "0", "--workspace"]).arg(path)
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        // tauri dev stops this app with SIGKILL, which skips Drop. Ask the
+        // kernel to stop the bridge when this process dies.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                extern "C" { fn prctl(option: i32, sig: u64, arg3: u64, arg4: u64, arg5: u64) -> i32; }
+                let _ = prctl(1, 9, 0, 0, 0);
+                Ok(())
+            });
+        }
+        let mut child = command.spawn()
             .map_err(|e| format!("Could not start Cursor SDK bridge: {e}. Open Setup to install or choose cursor-sdk-bridge."))?;
         let stderr = child
             .stderr
@@ -211,7 +278,21 @@ fn messages(value: &Value) -> Vec<Message> {
 }
 impl CursorService {
     pub fn new(executable_file: PathBuf) -> Self {
-        Self { executable_file }
+        Self { executable_file, session: Mutex::new(None) }
+    }
+    fn with_bridge<T>(&self, path: &Path, body: impl FnOnce(&Bridge) -> Result<T, String>) -> Result<T, String> {
+        let workspace = path.canonicalize().map_err(|e| e.to_string())?;
+        let executable = self.executable()?;
+        let mut slot = self.session.lock().map_err(|_| "Cursor bridge lock poisoned".to_owned())?;
+        let same = slot.as_ref().is_some_and(|session| session.workspace == workspace && session.executable == executable);
+        if !same { slot.take(); }
+        else if slot.as_ref().is_some_and(|session| session.bridge.call("SdkBridgeControlService/Ping", json!({})).is_err()) {
+            slot.take();
+        }
+        if slot.is_none() {
+            *slot = Some(BridgeSession { workspace: workspace.clone(), executable: executable.clone(), bridge: Bridge::start(&executable, &workspace)? });
+        }
+        body(&slot.as_ref().unwrap().bridge)
     }
     fn executable(&self) -> Result<std::ffi::OsString, String> {
         crate::provider_paths::resolve_from_file(&self.executable_file, "cursor")?
@@ -229,7 +310,7 @@ impl CursorService {
         cursor: Option<String>,
         archived: bool,
     ) -> Result<ThreadPage, String> {
-        let bridge = Bridge::start(&self.executable()?, path)?;
+        self.with_bridge(path, |bridge| {
         let result = bridge.call("SdkAgentService/ListAgents", json!({"options":{"runtime":"RUNTIME_LOCAL","cwd":path,"limit":30,"cursor":cursor.unwrap_or_default(),"includeArchived":archived}}))?;
         let mut data: Vec<_> = result["items"]
             .as_array()
@@ -261,22 +342,24 @@ impl CursorService {
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
         })
+        })
     }
     pub fn archive_thread(&self, path: &Path, id: &str, archived: bool) -> Result<(), String> {
         if id.starts_with("editor:") { return Err("Cursor editor conversations do not expose archive controls to this app".into()); }
-        let bridge = Bridge::start(&self.executable()?, path)?;
+        self.with_bridge(path, |bridge| {
         let agent = bridge.call("SdkAgentService/GetAgent", json!({"agentId":id,"options":{"cwd":path}}))?;
         if !same_directory(&agent, path) && !same_directory(&agent["agent"], path) {
             return Err("This Cursor conversation belongs to another repository".into());
         }
         bridge.call(if archived {"SdkAgentService/ArchiveAgent"} else {"SdkAgentService/UnarchiveAgent"}, json!({"agentId":id,"options":{"cwd":path}}))?;
         Ok(())
+        })
     }
     pub fn messages(&self, path: &Path, id: String) -> Result<MessagePage, String> {
         if id.starts_with("bc-") {
             return Err("Only local Cursor conversations are supported".into());
         }
-        let bridge = Bridge::start(&self.executable()?, path)?;
+        self.with_bridge(path, |bridge| {
         let agent = bridge.call(
             "SdkAgentService/GetAgent",
             json!({"agentId":id,"options":{"cwd":path}}),
@@ -292,11 +375,62 @@ impl CursorService {
             data: messages(&result),
             next_cursor: None,
         })
+        })
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shell_wrapper_launches_node_directly() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        std::fs::create_dir_all(bin.join("../dist/bin")).unwrap();
+        let executable = bin.join("cursor-sdk-bridge");
+        let node = bin.join("node");
+        std::fs::write(&executable, "#!/bin/sh\nexec node\n").unwrap();
+        std::fs::write(&node, "").unwrap();
+        std::fs::write(root.path().join("dist/bin/cursor-sdk-bridge.js"), "").unwrap();
+        let command = bridge_command(executable.as_os_str());
+        assert_eq!(command.get_program(), node.as_os_str());
+        let env = tempfile::tempdir().unwrap();
+        let console = env.path().join("bin/cursor-sdk-bridge");
+        std::fs::create_dir_all(console.parent().unwrap()).unwrap();
+        std::fs::write(&console, "#!/usr/bin/env python3\nfrom cursor_sdk._vendor import console_entry\n").unwrap();
+        let bundled = env.path().join("lib/python3.12/site-packages/cursor_sdk/_vendor/bridge");
+        std::fs::create_dir_all(bundled.join("bin")).unwrap();
+        std::fs::create_dir_all(bundled.join("dist/bin")).unwrap();
+        std::fs::write(bundled.join("bin/cursor-sdk-bridge"), "#!/bin/sh\n").unwrap();
+        let bundled_node = bundled.join("bin/node");
+        std::fs::write(&bundled_node, "").unwrap();
+        std::fs::write(bundled.join("dist/bin/cursor-sdk-bridge.js"), "").unwrap();
+        let command = bridge_command(console.as_os_str());
+        assert_eq!(command.get_program(), bundled_node.as_os_str());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_bridge_kills_the_wrapper_child() {
+        use std::os::unix::process::CommandExt;
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("sleep 120 & echo $!; wait")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let grandchild = line.trim();
+        let proc = PathBuf::from(format!("/proc/{grandchild}"));
+        assert!(proc.exists());
+        stop_child(&mut child);
+        let alive = std::fs::read_to_string(proc.join("stat")).ok().is_some_and(|stat| {
+            matches!(stat.rsplit(')').next().and_then(|rest| rest.split_whitespace().next()), Some("R" | "S" | "D"))
+        });
+        assert!(!alive, "wrapper child still running");
+    }
     #[test]
     fn runtime_notifications_are_not_user_prompts() {
         let notification = "<timestamp>Friday</timestamp>\n<system_notification><task>status: aborted</task></system_notification><user_query>Inform the user.</user_query>";

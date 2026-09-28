@@ -34,8 +34,8 @@ export const api = {
     if (!inTauri()) throw new Error("Cloning is available in the desktop app.");
     return invoke("clone_github_repository", { identityId, fullName, parent });
   },
-  async openCursor(repositoryId: string): Promise<void> {
-    if (inTauri()) await invoke("open_in_cursor", { repositoryId });
+  async openCursor(repositoryId: string, conversationId?: string): Promise<void> {
+    if (inTauri()) await invoke("open_in_cursor", { repositoryId, conversationId: conversationId ?? null });
   },
   async chooseCodexExecutable(): Promise<boolean> {
     if (!inTauri()) throw new Error("Open the desktop app to select the Codex executable.");
@@ -50,7 +50,7 @@ export const api = {
   },
   async codexLogin(): Promise<string> { return invoke("codex_login"); },
   async codexCancelLogin(loginId: string): Promise<void> { return invoke("codex_cancel_login", { loginId }); },
-  async installProvider(provider: "codex" | "cursor" | "cursor-agent", onOutput: (text: string) => void): Promise<void> {
+  async installProvider(provider: "codex" | "cursor" | "cursor-agent" | "copilot" | "claude", onOutput: (text: string) => void): Promise<void> {
     const output = new Channel<{text: string}>(); output.onmessage = message => onOutput(message.text);
     return invoke("install_provider", { provider, approved: true, output });
   },

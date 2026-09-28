@@ -220,6 +220,13 @@ impl CodexService {
                     if let Some(source) = value["data"].as_array().and_then(|items| items.iter().find(|item| item["id"] == thread.id)) {
                         thread.working = source["status"]["type"] == "active"
                             || source["path"].as_str().is_some_and(|file| rollout_working(Path::new(file)));
+                        // thread/list follows the rollout file clock, which also moves when Codex
+                        // rewrites settings. Sort by the last message or task instead.
+                        if let Some(file) = source["path"].as_str() {
+                            if let Some(updated) = conversation_updated_at(Path::new(file)) {
+                                thread.updated_at = updated;
+                            }
+                        }
                     }
                     thread
                 })
@@ -302,6 +309,36 @@ fn rollout_messages(file: &Path, id: &str, repository: &Path) -> Result<MessageP
     Ok(MessagePage {data, next_cursor: None})
 }
 
+fn conversation_change(record: &Value) -> bool {
+    match record["type"].as_str() {
+        Some("response_item") => record["payload"]["type"] == "message",
+        Some("event_msg") => matches!(record["payload"]["type"].as_str(), Some("task_started" | "task_complete" | "turn_aborted" | "task_cancelled")),
+        _ => false,
+    }
+}
+fn conversation_updated_at(file: &Path) -> Option<i64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut input = std::fs::File::open(file).ok()?;
+    let meta = input.metadata().ok()?;
+    let mut window = 65_536_u64;
+    loop {
+        let start = meta.len().saturating_sub(window);
+        input.seek(SeekFrom::Start(start)).ok()?;
+        let mut bytes = Vec::new();
+        input.read_to_end(&mut bytes).ok()?;
+        let tail = String::from_utf8_lossy(&bytes);
+        let mut latest = None;
+        for line in tail.lines().skip(usize::from(start > 0)) {
+            let Ok(record) = serde_json::from_str::<Value>(line) else { continue };
+            if !conversation_change(&record) { continue }
+            let Some(stamp) = record["timestamp"].as_str() else { continue };
+            let Ok(time) = chrono::DateTime::parse_from_rfc3339(stamp) else { continue };
+            latest = Some(latest.map_or(time.timestamp(), |current: i64| current.max(time.timestamp())));
+        }
+        if latest.is_some() || start == 0 || window >= 2_097_152 { return latest }
+        window = window.saturating_mul(2);
+    }
+}
 fn rollout_working(file: &Path) -> bool {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut input) = std::fs::File::open(file) else { return false };
@@ -458,6 +495,20 @@ mod tests {
         assert!(rollout_working(&file));
         std::fs::OpenOptions::new().append(true).open(&file).unwrap().write_all(b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}\n").unwrap();
         assert!(!rollout_working(&file));
+        let _ = std::fs::remove_dir_all(root);
+    }
+    #[test]
+    fn settings_rewrites_do_not_make_a_conversation_newer() {
+        let root = std::env::temp_dir().join(format!("cerberus-order-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("conversation.jsonl");
+        let rows = [
+            json!({"timestamp":"2026-09-23T06:44:51.886Z","type":"response_item","payload":{"type":"message","role":"assistant"}}),
+            json!({"timestamp":"2026-09-23T06:44:52.632Z","type":"event_msg","payload":{"type":"task_complete"}}),
+            json!({"timestamp":"2026-09-28T02:57:06.010Z","type":"event_msg","payload":{"type":"thread_settings_applied"}}),
+        ];
+        std::fs::write(&file, rows.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+        assert_eq!(conversation_updated_at(&file), Some(chrono::DateTime::parse_from_rfc3339("2026-09-23T06:44:52.632Z").unwrap().timestamp()));
         let _ = std::fs::remove_dir_all(root);
     }
     #[test]

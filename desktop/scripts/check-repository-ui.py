@@ -299,7 +299,7 @@ script = r"""
   const agentPanel = document.querySelector('.agents-panel');
   assert(!agentPanel.hidden, 'Agents navigation does not work');
   assert(agentPanel.getBoundingClientRect().right <= innerWidth + 1, 'Agent workspace overflows');
-  assert(agentPanel.querySelectorAll('.agent-card').length === 2, 'Missing agent cards');
+  assert(agentPanel.querySelectorAll('.agent-card').length === 4, 'Missing agent cards');
   assert(!agentPanel.querySelector('[aria-label="AI account"]'), 'Unexpected central account picker');
   const setupButton = agentPanel.querySelector('[aria-label="Set up Codex"]');
   setupButton.focus(); setupButton.click(); await pause();

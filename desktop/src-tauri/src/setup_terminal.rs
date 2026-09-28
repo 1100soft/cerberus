@@ -36,7 +36,7 @@ impl SetupTerminal {
         if !approved {
             return Err("Installation requires approval".into());
         }
-        if !matches!(provider, "codex" | "cursor" | "cursor-agent") {
+        if !matches!(provider, "codex" | "cursor" | "cursor-agent" | "copilot" | "claude") {
             return Err("Unknown provider".into());
         }
         if let Ok(Some(path)) = crate::provider_paths::resolve(root, provider) {
@@ -146,6 +146,19 @@ impl SetupTerminal {
             }
             native(&directory.join("node_modules/@openai"))
                 .ok_or("Installed Codex native executable was not found".into())
+        } else if matches!(provider, "copilot" | "claude") {
+            let package = if provider == "copilot" { "@github/copilot" } else { "@anthropic-ai/claude-code" };
+            #[cfg(windows)]
+            let mut command = {
+                let mut c = Command::new("cmd.exe");
+                c.args(["/d", "/c", "npm"]);
+                c
+            };
+            #[cfg(not(windows))]
+            let mut command = Command::new("npm");
+            command.arg("install").arg("--prefix").arg(&directory).args(["--no-audit", "--no-fund", package]);
+            self.run(command, &output)?;
+            prefixed_executable(&directory, provider)
         } else {
             #[cfg(windows)]
             let python = "python";
@@ -329,7 +342,39 @@ mod tests {
             .install(root.path(), "cursor-agent", false, Channel::new(|_| Ok(())))
             .is_err());
         assert!(service
+            .install(root.path(), "copilot", false, Channel::new(|_| Ok(())))
+            .is_err());
+        assert!(service
+            .install(root.path(), "claude", false, Channel::new(|_| Ok(())))
+            .is_err());
+        assert!(service
             .install(root.path(), "shell", true, Channel::new(|_| Ok(())))
             .is_err());
     }
+}
+fn prefixed_executable(directory: &Path, name: &str) -> Result<PathBuf, String> {
+    #[allow(unused_mut)]
+    let mut candidates = vec![directory.join("bin").join(name), directory.join("node_modules/.bin").join(name)];
+    #[cfg(windows)]
+    {
+        candidates.push(directory.join("bin").join(format!("{name}.cmd")));
+        candidates.push(directory.join("bin").join(format!("{name}.exe")));
+    }
+    for path in candidates {
+        if path.is_file() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = path.metadata() {
+                    let mut permissions = meta.permissions();
+                    if permissions.mode() & 0o111 == 0 {
+                        permissions.set_mode(permissions.mode() | 0o755);
+                        let _ = std::fs::set_permissions(&path, permissions);
+                    }
+                }
+            }
+            return Ok(path);
+        }
+    }
+    Err(format!("Installed {name} executable was not found. Choose its path in Advanced settings."))
 }

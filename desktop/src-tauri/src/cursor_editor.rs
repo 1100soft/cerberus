@@ -69,14 +69,16 @@ fn headers(root: &Path, path: &Path, archived: bool) -> Result<Vec<ThreadSummary
             if value["isDraft"] == true || value["isEphemeral"] == true {
                 continue;
             }
+            let (working, composer_clock) = composer_activity(&db, &id);
+            let checkpoint = value["conversationCheckpointLastUpdatedAt"].as_i64().unwrap_or(0);
             data.push(ThreadSummary {
                 id: format!("editor:{id}"),
                 name: value["name"].as_str().map(str::to_owned),
                 preview: "Cursor editor conversation".into(),
                 cwd: path.to_string_lossy().into_owned(),
-                updated_at: updated.or(created).unwrap_or(0) / 1000,
+                updated_at: checkpoint.max(composer_clock).max(updated.or(created).unwrap_or(0)) / 1000,
                 git_info: None,
-                working: false,
+                working,
             });
         }
     }
@@ -90,22 +92,14 @@ fn threads_at(root: &Path, path: &Path, archived: bool) -> Result<ThreadPage, St
     let db = open(root)?;
     let mut data = Vec::new();
     for mut thread in headers(root, path, archived)? {
-        let messages = stored_messages(&db, thread.id.strip_prefix("editor:").unwrap())?;
-        if messages.is_empty() {
-            continue;
-        }
-        // Unnamed conversations should be identifiable by their actual content.
-        thread.preview = messages
-            .iter()
-            .find(|message| message.role == "user")
-            .unwrap_or(&messages[0])
-            .text
-            .chars()
-            .take(160)
-            .collect();
+        let id = thread.id.strip_prefix("editor:").unwrap();
+        // Listing must not read every bubble. One open conversation can hold hundreds.
+        let Some(preview) = first_user_text(&db, id) else { continue };
+        thread.preview = preview.chars().take(160).collect();
         thread.name = thread.name.filter(|name| !name.trim().is_empty());
         data.push(thread);
     }
+    data.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then_with(|| a.id.cmp(&b.id)));
     Ok(ThreadPage {
         data,
         next_cursor: None,
@@ -146,6 +140,105 @@ fn bubble_edit(value: &Value) -> Option<FileEdit> {
     let params = decode(&tool["params"]); let result = decode(&tool["result"]);
     result["afterContentId"].as_str()?;
     Some(FileEdit {path:params["relativeWorkspacePath"].as_str()?.into(),kind:if result["beforeContentId"].is_string() {"update"} else {"add"}.into(),diff:None})
+}
+fn composer_activity(db: &Connection, id: &str) -> (bool, i64) {
+    let row: Option<(Option<String>, Option<i64>, Option<i64>, Option<i64>)> = db
+        .query_row(
+            "SELECT json_extract(value,'$.status'), json_extract(value,'$.conversationCheckpointLastUpdatedAt'), json_extract(value,'$.unfinishedRunAt'), json_array_length(json_extract(value,'$.generatingBubbleIds')) FROM cursorDiskKV WHERE key=?1",
+            [format!("composerData:{id}")],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    let Some((status, clock, unfinished, generating)) = row else { return (false, 0) };
+    let clock = clock.unwrap_or(0);
+    let status = status.unwrap_or_default();
+    if generating.unwrap_or(0) > 0 || matches!(status.to_ascii_lowercase().as_str(), "generating" | "running" | "in_progress") {
+        return (true, clock);
+    }
+    // Cursor often leaves status as "aborted" while it is still writing bubbles.
+    // A fresh checkpoint on an unfinished run is the stored sign that work continues.
+    if status.eq_ignore_ascii_case("completed") {
+        return (false, clock);
+    }
+    let unfinished = unfinished.unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0);
+    let working = unfinished > 0 && clock > 0 && now.saturating_sub(clock) < 180_000;
+    (working, clock)
+}
+fn first_user_text(db: &Connection, id: &str) -> Option<String> {
+    for index in 0..8 {
+        let bubble_id: Option<String> = db
+            .query_row(
+                &format!("SELECT json_extract(value,'$.fullConversationHeadersOnly[{index}].bubbleId') FROM cursorDiskKV WHERE key=?1"),
+                [format!("composerData:{id}")],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten();
+        let Some(bubble_id) = bubble_id else { break };
+        if !bubble_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            continue;
+        }
+        let kind: Option<i64> = db
+            .query_row(
+                &format!("SELECT json_extract(value,'$.fullConversationHeadersOnly[{index}].type') FROM cursorDiskKV WHERE key=?1"),
+                [format!("composerData:{id}")],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten();
+        if kind.is_some_and(|kind| kind != 1) {
+            continue;
+        }
+        let text: Option<String> = db
+            .query_row(
+                "SELECT json_extract(value,'$.text') FROM cursorDiskKV WHERE key=?1",
+                [format!("bubbleId:{id}:{bubble_id}")],
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
+            .filter(|text: &String| !text.is_empty());
+        if let Some(text) = text.filter(|text| !crate::cursor::is_system_notification(text)) {
+            return Some(text);
+        }
+        let mapped: Option<String> = db
+            .query_row(
+                "SELECT json_extract(value, ?2) FROM cursorDiskKV WHERE key=?1",
+                (format!("composerData:{id}"), format!("$.conversationMap.\"{bubble_id}\".text")),
+                |row| row.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
+            .filter(|text: &String| !text.is_empty());
+        if mapped.is_some() {
+            return mapped;
+        }
+    }
+    let length: i64 = db
+        .query_row("SELECT length(value) FROM cursorDiskKV WHERE key=?1", [format!("composerData:{id}")], |row| row.get(0))
+        .optional()
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+    // Large composers stay indexed above. Small inline transcripts are the compatibility shapes.
+    if length == 0 || length > 300_000 {
+        return None;
+    }
+    stored_messages(db, id).ok()?.into_iter().find(|message| message.role == "user" && !message.text.is_empty() && !crate::cursor::is_system_notification(&message.text)).map(|message| message.text)
 }
 fn stored_messages(db: &Connection, id: &str) -> Result<Vec<Message>, String> {
     let raw: Option<String> = db
@@ -303,6 +396,36 @@ mod tests {
             .unwrap()
             .data
             .is_empty());
+        db.execute(
+            "UPDATE composerHeaders SET value=?1, lastUpdatedAt=1000 WHERE composerId='one'",
+            [serde_json::json!({"conversationCheckpointLastUpdatedAt":5000}).to_string()],
+        ).unwrap();
+        db.execute(
+            "INSERT INTO cursorDiskKV VALUES('composerData:one',?1)",
+            [serde_json::json!({"status":"generating","generatingBubbleIds":["b"],"fullConversationHeadersOnly":[{"bubbleId":"a","type":1}],"conversationMap":{"a":{"type":1,"text":"still working"}}}).to_string()],
+        ).unwrap();
+        let working = threads_at(root.path(), repo.path(), false).unwrap();
+        assert_eq!(working.data.len(), 1);
+        assert!(working.data[0].working);
+        assert_eq!(working.data[0].updated_at, 5);
+        db.execute(
+            "UPDATE cursorDiskKV SET value=?1 WHERE key='composerData:one'",
+            [serde_json::json!({"status":"completed","generatingBubbleIds":[],"fullConversationHeadersOnly":[{"bubbleId":"a","type":1}],"conversationMap":{"a":{"type":1,"text":"finished"}}}).to_string()],
+        ).unwrap();
+        assert!(!threads_at(root.path(), repo.path(), false).unwrap().data[0].working);
+        let fresh = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+        db.execute(
+            "UPDATE cursorDiskKV SET value=?1 WHERE key='composerData:one'",
+            [serde_json::json!({"status":"aborted","unfinishedRunAt":fresh,"conversationCheckpointLastUpdatedAt":fresh,"fullConversationHeadersOnly":[{"bubbleId":"a","type":1}],"conversationMap":{"a":{"type":1,"text":"still writing"}}}).to_string()],
+        ).unwrap();
+        assert!(threads_at(root.path(), repo.path(), false).unwrap().data[0].working);
+        db.execute(
+            "UPDATE cursorDiskKV SET value=?1 WHERE key='composerData:one'",
+            [serde_json::json!({"status":"aborted","unfinishedRunAt":1,"conversationCheckpointLastUpdatedAt":1,"fullConversationHeadersOnly":[{"bubbleId":"a","type":1}],"conversationMap":{"a":{"type":1,"text":"quiet"}}}).to_string()],
+        ).unwrap();
+        assert!(!threads_at(root.path(), repo.path(), false).unwrap().data[0].working);
+        db.execute("DELETE FROM cursorDiskKV", []).unwrap();
+        db.execute("UPDATE composerHeaders SET value='{}', lastUpdatedAt=1000 WHERE composerId='one'", []).unwrap();
         for composer in [
             serde_json::json!({"conversation":[{"bubbleId":"a","type":1,"text":"inline prompt"}]}),
             serde_json::json!({"conversationMap":{"a":{"type":1,"text":"inline prompt"}}}),
