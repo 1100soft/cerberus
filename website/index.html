@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="GitCerberus is a repository-first desktop workspace for developers who use multiple Git identities."
+    />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <title>GitCerberus</title>
+    <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="script.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <button class="brand tab-link" type="button" data-tab="home" aria-label="GitCerberus home">
+        <span class="app-logo" aria-hidden="true"></span>
+        <span>GitCerberus</span>
+      </button>
+      <nav class="tab-nav" role="tablist" aria-label="Website sections">
+        <button class="tab-link active" id="tab-home" type="button" role="tab" aria-selected="true" aria-controls="panel-home" data-tab="home">Home</button>
+        <button class="tab-link" id="tab-contact" type="button" role="tab" aria-selected="false" aria-controls="panel-contact" data-tab="contact">Contact</button>
+      </nav>
+    </header>
+
+    <main class="page-frame" tabindex="-1">
+      <section class="tab-panel active" id="panel-home" role="tabpanel" aria-labelledby="tab-home" data-panel="home">
+        <div class="hero-copy">
+          <p class="eyebrow">GitCerberus</p>
+          <h2>One workspace for every Git identity.</h2>
+          <p class="lede">
+            Keep the repository, Git author, editor, browser session, and automation context together so changing projects is one deliberate action.
+          </p>
+          <div class="button-row">
+            <button class="button primary tab-action" type="button" data-tab="contact">Get in touch <span aria-hidden="true">→</span></button>
+            <a class="button secondary" href="https://1100soft.com" target="_blank" rel="noopener">1100 Software <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="panel-contact" role="tabpanel" aria-labelledby="tab-contact" data-panel="contact" hidden>
+        <div class="contact-layout">
+          <form class="contact-form" id="contact-form">
+            <label>
+              Topic
+              <select id="contact-topic" name="topic">
+                <option>General inquiry</option>
+                <option>Product feedback</option>
+                <option>Partnership</option>
+                <option>Press</option>
+                <option>Other</option>
+              </select>
+            </label>
+            <label>
+              Your name <span class="optional">Optional</span>
+              <input id="contact-name" name="name" type="text" autocomplete="name" maxlength="100" />
+            </label>
+            <label>
+              Email <span class="optional">Optional, for a reply</span>
+              <input id="contact-email" name="email" type="email" autocomplete="email" maxlength="240" />
+            </label>
+            <label>
+              Message
+              <textarea id="contact-message" name="message" rows="7" minlength="10" maxlength="6000" required placeholder="How can we help?"></textarea>
+            </label>
+            <label class="contact-honeypot" aria-hidden="true">
+              Website
+              <input name="website" type="text" tabindex="-1" autocomplete="off" />
+            </label>
+            <div class="form-actions">
+              <button class="button primary" type="submit">Send message <span aria-hidden="true">→</span></button>
+              <span class="form-status" id="contact-status" role="status"></span>
+            </div>
+            <p class="form-note">Please don’t include passwords, access keys, or other secrets. This form stores nothing yet; it only confirms the message locally.</p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>© <span id="year"></span> GitCerberus</span>
+      <button class="footer-link tab-action" type="button" data-tab="contact">Contact</button>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,922 @@
+mod terminal_text;
+mod provider_paths;
+mod agents;
+mod subscription_run;
+mod chatgpt_accounts;
+mod external_identities;
+mod identity_defaults;
+mod agent_sessions;
+mod agent_edits;
+mod codex;
+mod cursor;
+mod cursor_editor;
+mod cursor_launch;
+mod cursor_notifications;
+mod copilot;
+mod draft_runs;
+mod copilot_history;
+mod claude_history;
+mod prompt_delivery;
+mod shell_automation;
+mod automation_logs;
+mod handoffs;
+mod repository_watcher;
+mod repository_changes;
+mod setup_terminal;
+mod db;
+mod git;
+mod github;
+mod models;
+mod oauth;
+
+use db::Database;
+use git::{canonical_remote, host_type, GitService};
+use models::{GithubAuthStatus, GithubDeviceFlow, Identity, ImportResult, Repository, RepositoryUpdate};
+use serde_json::Value;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, State, WindowEvent,
+};
+
+struct AppState {
+    agents: Arc<agents::Agents>,
+    drafts: Arc<draft_runs::DraftRuns>,
+    repository_watchers: Arc<repository_watcher::RepositoryWatchers>,
+    chatgpt: Arc<chatgpt_accounts::ChatgptAccounts>,
+    db: Arc<Database>,
+    git: GitService,
+    codex: Arc<codex::CodexService>,
+    cursor: Arc<cursor::CursorService>,
+    setup_terminal: Arc<setup_terminal::SetupTerminal>,
+    data_dir: std::path::PathBuf,
+}
+
+fn scan(git: &GitService, mut repository: Repository) -> Result<Repository, String> {
+    let path = Path::new(&repository.local_path);
+    let status = git
+        .text(path, &["status", "--porcelain=v2", "--branch"])
+        .map_err(|e| e.to_string())?;
+    repository.staged_count = 0;
+    repository.modified_count = 0;
+    repository.untracked_count = 0;
+    repository.ahead = 0;
+    repository.behind = 0;
+    for line in status.lines() {
+        if let Some(branch) = line.strip_prefix("# branch.head ") {
+            repository.detached = branch == "(detached)";
+            repository.branch = (!repository.detached).then(|| branch.to_owned());
+        } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            for part in ab.split_whitespace() {
+                if let Some(v) = part.strip_prefix('+') {
+                    repository.ahead = v.parse().unwrap_or(0);
+                }
+                if let Some(v) = part.strip_prefix('-') {
+                    repository.behind = v.parse().unwrap_or(0);
+                }
+            }
+        } else if line.starts_with("? ") {
+            repository.untracked_count += 1;
+        } else if line.starts_with("1 ") || line.starts_with("2 ") || line.starts_with("u ") {
+            if let Some(xy) = line.split_whitespace().nth(1) {
+                let mut chars = xy.chars();
+                if chars.next() != Some('.') {
+                    repository.staged_count += 1;
+                }
+                if chars.next() != Some('.') {
+                    repository.modified_count += 1;
+                }
+            }
+        }
+    }
+    let log = git
+        .text(path, &["log", "-1", "--format=%s%x1f%cI"])
+        .unwrap_or_default();
+    if let Some((summary, date)) = log.split_once('\u{1f}') {
+        repository.last_commit_summary = Some(summary.to_owned());
+        repository.last_commit_at = Some(date.trim().to_owned());
+    }
+    if let Some(identity) = &repository.identity {
+        let name = git
+            .text(path, &["config", "--get", "user.name"])
+            .unwrap_or_default();
+        let email = git
+            .text(path, &["config", "--get", "user.email"])
+            .unwrap_or_default();
+        repository.identity_mismatch = (!name.is_empty() && name != identity.git_name)
+            || (!email.is_empty() && email != identity.git_email);
+    }
+    if git.root(path).is_ok() {
+        let origin = git.remote_url(path);
+        repository.canonical_remote = origin.as_deref().map(canonical_remote);
+        repository.host_type = host_type(origin.as_deref()).to_string();
+    }
+    Ok(repository)
+}
+
+#[tauri::command]
+fn provider_setup_status(provider: String, state: State<AppState>) -> Result<Vec<provider_paths::ToolStatus>, String> { provider_paths::status(&state.data_dir, &provider) }
+#[tauri::command]
+async fn set_provider_path(tool: String, path: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let (file, _, _) = provider_paths::specification(&tool)?;
+    let root = state.data_dir.clone(); let codex = state.codex.clone(); let cursor = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(path) = path {
+            if tool == "codex" { codex.configure(Path::new(&path)) }
+            else if tool == "cursor" { cursor.configure(Path::new(&path)) }
+            else { provider_paths::save(&root, &tool, Path::new(&path)) }
+        } else {
+            if tool == "codex" { codex.disconnect()?; }
+            match std::fs::remove_file(root.join(file)) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string()) }
+        }
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn chatgpt_settings(state:State<AppState>)->Result<chatgpt_accounts::AccountSettings,String>{state.chatgpt.ensure_default(&state.data_dir,&state.agents)}
+#[tauri::command]
+fn external_identities(state:State<AppState>) -> Vec<external_identities::ExternalIdentity> { external_identities::identities(&state.data_dir) }
+#[tauri::command]
+async fn copilot_repository_snapshot(identity_id:String,repository:String,state:State<'_,AppState>) -> Result<Value,String> {
+    let data_dir = state.data_dir.clone();
+    copilot::repository_snapshot(&data_dir,&identity_id,&repository).await
+}
+#[tauri::command]
+async fn external_identity_snapshot(state:State<'_,AppState>)->Result<Value,String>{
+    let root=state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        let identities=external_identities::identities(&root);
+        let settings=external_identities::settings_for(&root,&identities)?;
+        Ok(serde_json::json!({"identities":identities,"settings":settings}))
+    }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+fn external_identity_settings(state:State<AppState>) -> Result<external_identities::ProviderAccounts,String> { external_identities::settings(&state.data_dir) }
+#[tauri::command]
+fn assign_external_identity(provider:String,repository:String,account:Option<String>,inherit:bool,state:State<AppState>) -> Result<external_identities::ProviderAccounts,String> { external_identities::assign(&state.data_dir,&provider,&repository,account,inherit) }
+#[tauri::command]
+fn default_external_identity(provider:String,account:Option<String>,state:State<AppState>) -> Result<external_identities::ProviderAccounts,String> { external_identities::set_default(&state.data_dir,&provider,account) }
+#[tauri::command]
+fn login_external_identity(provider:String,state:State<AppState>) -> Result<(),String> { external_identities::login(&state.data_dir,&provider) }
+#[tauri::command]
+fn logout_external_identity(provider:String,state:State<AppState>) -> Result<(),String> { external_identities::logout(&state.data_dir,&provider) }
+#[tauri::command]
+fn assign_chatgpt_account(repository:Option<String>,account:Option<String>,inherit:bool,state:State<AppState>)->Result<chatgpt_accounts::AccountSettings,String>{
+ if inherit {state.chatgpt.inherit(&state.data_dir,repository.as_deref().ok_or("Repository required")?)}else{state.chatgpt.assign(&state.data_dir,&state.agents,repository,account)}
+}
+#[tauri::command]
+async fn begin_chatgpt_login(id:Option<String>,state:State<'_,AppState>)->Result<String,String>{let service=state.chatgpt.clone();let agents=state.agents.clone();let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||service.begin(&root,&agents,id)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn poll_chatgpt_login(id:String,state:State<'_,AppState>)->Result<Option<agents::Profile>,String>{let service=state.chatgpt.clone();let agents=state.agents.clone();let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||service.poll(&root,&agents,&id)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn cancel_chatgpt_login(id:String,state:State<'_,AppState>)->Result<(),String>{let service=state.chatgpt.clone();tauri::async_runtime::spawn_blocking(move||service.cancel(&id)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn disconnect_chatgpt(id:String,state:State<'_,AppState>)->Result<(),String>{let service=state.chatgpt.clone();let agents=state.agents.clone();let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||service.disconnect(&root,&agents,&id)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+fn agent_profiles(state: State<AppState>) -> Result<Vec<agents::Profile>, String> { state.agents.profiles(&state.data_dir) }
+#[tauri::command]
+async fn chatgpt_capabilities(profile_id:String,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+ let root=state.data_dir.clone();let agents=state.agents.clone();
+ tauri::async_runtime::spawn_blocking(move||{
+  let profile=agents.profiles(&root)?.into_iter().find(|p|p.id==profile_id && p.subscription && !p.disconnected).ok_or("Connect this ChatGPT identity first")?;
+  let client=codex::CodexService::for_account(root.join("codex-executable.txt"),chatgpt_accounts::account_home(&root,&profile.id)?);
+  let account=client.request("account/read",serde_json::json!({"refreshToken":false}))?;
+  if account["account"]["type"]!="chatgpt" || profile.email.as_deref().is_some_and(|email|account["account"]["email"].as_str()!=Some(email)){return Err("Reconnect the assigned ChatGPT account".into());}
+  let mut models=Vec::new();let mut cursor:Option<String>=None;let mut seen=std::collections::HashSet::new();
+  loop {let page=client.request("model/list",serde_json::json!({"limit":100,"cursor":cursor,"includeHidden":false}))?;if let Some(data)=page["data"].as_array(){models.extend(data.clone());}cursor=page["nextCursor"].as_str().map(String::from);match &cursor{Some(value) if seen.insert(value.clone())=>{},_=>break}}
+  let usage=client.request("account/rateLimits/read",serde_json::json!({}));
+  Ok(serde_json::json!({"models":models,"usage":usage.as_ref().ok(),"usageError":usage.err()}))
+ }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn save_agent_profile(label: String, provider: String, executable: String, key: String, state: State<'_, AppState>) -> Result<agents::Profile, String> {
+    let agents = state.agents.clone(); let root = state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || agents.save(&root, label, provider, executable, key)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn remove_agent_profile(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let agents = state.agents.clone(); let root = state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || agents.remove(&root, &id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn run_agent(profile_id: String, repository_id: String, prompt: String, mode: String, model: Option<String>, reasoning_effort: Option<String>, resume: Option<agent_sessions::ResumeTarget>, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
+    let repo = state.db.list()?.into_iter().find(|r| r.id == repository_id).ok_or("Repository not found")?;
+    let agents = state.agents.clone(); let root = state.data_dir.clone();
+    let codex = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || agents.run(&root, &profile_id, &repo, &prompt, &mode, model.as_deref(), reasoning_effort.as_deref(), resume.as_ref(), &codex, output)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn agent_resume_status(profile_id: String, repository_id: String, target: agent_sessions::ResumeTarget, state: State<'_, AppState>) -> Result<agent_sessions::ResumeStatus, String> {
+    let repo = state.db.list()?.into_iter().find(|r| r.id == repository_id).ok_or("Repository not found")?;
+    let profile = state.agents.profiles(&state.data_dir)?.into_iter().find(|p| p.id == profile_id).ok_or("API account not found")?;
+    let root = state.data_dir.clone(); let codex = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || match agent_sessions::resolve(&root, &profile, Path::new(&repo.local_path), &target, &codex) {
+        Ok(_) => agent_sessions::ResumeStatus {available:true, reason:"Continue this conversation".into()},
+        Err(reason) => agent_sessions::ResumeStatus {available:false, reason},
+    }).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn prompt_capability(repository_id:String,provider:String,thread_id:String,state:State<'_,AppState>)->Result<prompt_delivery::Capability,String>{
+    let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
+    let repo=state.db.repository_path(&repository_id)?;let key=prompt_repository_key(&record);let root=state.data_dir.clone();let codex=state.codex.clone();let cursor=state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::capability(&root,&repo,&key,&provider,&thread_id,&codex,&cursor)).await.map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+async fn submit_saved_prompt(repository_id:String,provider:String,thread_id:String,prompt:String,state:State<'_,AppState>)->Result<String,String>{
+    let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
+    let repo=state.db.repository_path(&repository_id)?;let key=prompt_repository_key(&record);let root=state.data_dir.clone();let codex=state.codex.clone();let cursor=state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::submit(&root,&repo,&key,&provider,&thread_id,&prompt,&codex,&cursor)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+    let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
+    let repo=state.db.repository_path(&repository_id)?;
+    let key=prompt_repository_key(&record);
+    let root=state.data_dir.clone();
+    let registration=request_id.map(|id|state.drafts.register(id)).transpose()?;
+    let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
+    if provider=="copilot" {
+        if record.identity.as_ref().map(|item|item.id.as_str())!=Some(identity_id.as_str()){return Err("Assign the selected GitHub identity to this repository first".into());}
+        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled).await;
+    }
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
+#[tauri::command]
+async fn run_automation_shell(repository_id:String,script:String,output:tauri::ipc::Channel<shell_automation::ShellChunk>,handoff_input_path:Option<String>,handoff_output_paths:std::collections::HashMap<String,String>,state:State<'_,AppState>)->Result<shell_automation::ShellRun,String>{
+    let repository=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||shell_automation::run_stream_with_handoffs(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
+    let mut errors=Vec::new();
+    let desired=repository_ids.into_iter().filter_map(|id|match state.db.repository_path(&id){Ok(path)=>Some((id,path)),Err(error)=>{errors.push(format!("{id}: {error}"));None}}).collect::<Vec<_>>();
+    let watchers=state.repository_watchers.clone();
+    errors.extend(tauri::async_runtime::spawn_blocking(move||watchers.sync(desired,app)).await.map_err(|error|error.to_string())??);
+    Ok(errors)
+}
+#[tauri::command]
+async fn repository_changed_lines(repository_id:String,state:State<'_,AppState>)->Result<u64,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||repository_changes::changed_lines(&path)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn repository_changed_lines_batch(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<std::collections::HashMap<String,u64>,String>{
+    let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok().map(|path|(id,path))).collect::<Vec<_>>();
+    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|(id,path)|repository_changes::changed_lines(&path).ok().map(|count|(id,count))).collect()).await.map_err(|error|error.to_string())
+}
+#[tauri::command]
+async fn repository_change_summary(repository_id:String,state:State<'_,AppState>)->Result<repository_changes::ChangeSummary,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||repository_changes::summary(&path)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn repository_commit_state(repository_id:String,state:State<'_,AppState>)->Result<repository_changes::CommitState,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||repository_changes::commit_state(&path)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn repository_commit_states_batch(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<std::collections::HashMap<String,repository_changes::CommitState>,String>{
+    let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok().map(|path|(id,path))).collect::<Vec<_>>();
+    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|(id,path)|repository_changes::commit_state(&path).ok().map(|state|(id,state))).collect()).await.map_err(|error|error.to_string())
+}
+#[tauri::command]
+fn handoff_output_path(repository_id:String,name:String,run_id:String,state:State<AppState>)->Result<String,String>{handoffs::output_path(&state.db.repository_path(&repository_id)?,&name,&run_id)}
+#[tauri::command]
+fn publish_handoff(repository_id:String,name:String,run_id:String,state:State<AppState>)->Result<bool,String>{handoffs::publish(&state.db.repository_path(&repository_id)?,&name,&run_id)}
+#[tauri::command]
+fn has_pending_handoff(repository_id:String,name:String,state:State<AppState>)->Result<bool,String>{handoffs::has_pending(&state.db.repository_path(&repository_id)?,&name)}
+#[tauri::command]
+fn claim_handoff(repository_id:String,name:String,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim(&state.db.repository_path(&repository_id)?,&name)}
+#[tauri::command]
+fn finish_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::finish(&state.db.repository_path(&repository_id)?,&name,&id)}
+#[tauri::command]
+fn release_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::release(&state.db.repository_path(&repository_id)?,&name,&id)}
+#[tauri::command]
+async fn cleanup_stale_handoffs(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<usize,String>{
+    let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok()).collect::<Vec<_>>();
+    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|path|handoffs::cleanup_stale(&path).ok()).sum()).await.map_err(|error|error.to_string())
+}
+#[tauri::command]
+fn write_automation_log(entry:automation_logs::Entry,state:State<AppState>)->Result<(),String>{automation_logs::write(&state.data_dir,&entry)}
+#[tauri::command]
+fn list_automation_logs(automation_id:String,state:State<AppState>)->Result<Vec<automation_logs::Summary>,String>{automation_logs::list(&state.data_dir,&automation_id)}
+#[tauri::command]
+fn read_automation_log(automation_id:String,repository_id:String,run_id:String,state:State<AppState>)->Result<automation_logs::Entry,String>{automation_logs::read(&state.data_dir,&automation_id,&repository_id,&run_id)}
+fn prompt_repository_key(repository:&Repository)->String{
+    repository.canonical_remote.as_deref().and_then(|remote|url::Url::parse(remote).ok()).map(|url|format!("{}{}",url.host_str().unwrap_or_default(),url.path().trim_end_matches('/').trim_end_matches(".git")).to_lowercase()).filter(|value|!value.is_empty()).unwrap_or_else(||repository.id.clone())
+}
+#[tauri::command]
+fn cancel_agent(repository_id: String, state: State<AppState>) -> Result<(), String> {
+    state.agents.cancel(&repository_id)
+}
+
+#[tauri::command]
+async fn link_repository_folder(expected_remote: String, path: String, repository_id: Option<String>, state: State<'_, AppState>) -> Result<ImportResult, String> {
+    let db = state.db.clone();
+    let git = state.git.clone();
+    tauri::async_runtime::spawn_blocking(move || github::link_existing(&db, &git, &expected_remote, Path::new(&path), repository_id.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn github_repositories(state: State<'_, AppState>) -> Result<github::Catalog, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || github::catalog(&db)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn clone_github_repository(identity_id: String, full_name: String, parent: String, state: State<'_, AppState>) -> Result<ImportResult, String> {
+    let db = state.db.clone();
+    let git = state.git.clone();
+    tauri::async_runtime::spawn_blocking(move || github::clone_repository(&db, &git, &identity_id, &full_name, Path::new(&parent))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn open_in_cursor(repository_id: String, conversation_id: Option<String>, state: State<AppState>) -> Result<(), String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let steps = cursor_launch::plan(&path, conversation_id.as_deref());
+    launch_cursor(&steps[0])?;
+    let later = steps.into_iter().skip(1).collect::<Vec<_>>();
+    std::thread::spawn(move || {
+        for step in later {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            let _ = launch_cursor(&step);
+        }
+    });
+    Ok(())
+}
+fn launch_cursor(args: &[String]) -> Result<(), String> {
+    Command::new("cursor").args(args).spawn().map(|_| ()).map_err(|e| format!("Could not launch Cursor: {e}. Install the cursor shell command and make it available on PATH."))
+}
+
+#[tauri::command]
+fn list_repositories(state: State<AppState>) -> Result<Vec<Repository>, String> { state.db.list() }
+#[tauri::command]
+async fn sync_repository_remotes(state:State<'_,AppState>)->Result<Vec<Repository>,String>{
+    let db=state.db.clone();let git=state.git.clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        for repo in db.list()?{
+            let path=Path::new(&repo.local_path);
+            if git.root(path).is_err(){continue}
+            let origin=git.remote_url(path);
+            let canonical=origin.as_deref().map(canonical_remote);
+            let host=host_type(origin.as_deref());
+            if canonical!=repo.canonical_remote || host!=repo.host_type {db.save_remote(&repo.id,canonical.as_deref(),host)?;}
+        }
+        db.list()
+    }).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+async fn configure_codex(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.configure(Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn install_provider(provider: String, approved: bool, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
+    let terminal = state.setup_terminal.clone(); let root = state.data_dir.clone();
+    let codex = state.codex.clone(); let cursor = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let executable = terminal.install(&root, &provider, approved, output)?;
+        if provider == "codex" { codex.configure(&executable) } else if provider == "cursor" { cursor.configure(&executable) } else { provider_paths::save(&root, &provider, &executable) }
+    }).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+fn cancel_provider_install(state: State<'_, AppState>) { state.setup_terminal.cancel(); }
+
+#[tauri::command]
+async fn configure_cursor(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let service = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || service.configure(Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn cursor_threads(repository_id: String, cursor: Option<String>, archived: bool, state: State<'_, AppState>) -> Result<codex::ThreadPage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let editor = cursor_editor::threads(&path, archived);
+        match service.threads(&path, cursor.clone(), archived) {
+            Ok(mut page) => { if cursor.is_none() { if let Ok(editor) = editor { page.data.extend(editor.data); } } Ok(page) }
+            Err(error) => editor.map(|page| if cursor.is_none() { page } else { codex::ThreadPage { data: vec![], next_cursor: None } }).map_err(|editor_error| format!("{error}\n{editor_error}")),
+        }
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn cursor_messages(repository_id: String, thread_id: String, state: State<'_, AppState>) -> Result<codex::MessagePage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || if let Some(id) = thread_id.strip_prefix("editor:") { cursor_editor::messages(&path, id) } else { service.messages(&path, thread_id) }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn cursor_archive_thread(repository_id: String, thread_id: String, archived: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move || service.archive_thread(&path, &thread_id, archived)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_account(state: State<'_, AppState>) -> Result<Value, String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.request("account/read", serde_json::json!({"refreshToken":false}))).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_login(state: State<'_, AppState>) -> Result<String, String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let login = service.request("account/login/start", serde_json::json!({"type":"chatgpt"}))?;
+        let url = login["authUrl"].as_str().ok_or("Codex did not return a sign-in URL")?;
+        let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
+        if parsed.scheme() != "https" || !matches!(parsed.host_str(), Some("auth.openai.com" | "auth0.openai.com" | "chatgpt.com")) {
+            return Err("Codex returned an unexpected sign-in URL".into());
+        }
+        open_url::that(url.to_owned()).map_err(|e| e.to_string())?;
+        Ok(login["loginId"].as_str().ok_or("Codex did not return a login ID")?.to_owned())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_cancel_login(login_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.request("account/login/cancel", serde_json::json!({"loginId":login_id})).map(|_| ())).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn copilot_threads(repository_id:String,archived:bool,state:State<'_,AppState>)->Result<codex::ThreadPage,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||copilot_history::threads(&path,archived)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn copilot_messages(repository_id:String,thread_id:String,state:State<'_,AppState>)->Result<codex::MessagePage,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||copilot_history::messages(&path,&thread_id)).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+async fn claude_threads(repository_id:String, archived:bool, state:State<'_,AppState>)->Result<codex::ThreadPage,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||claude_history::threads(&path,archived)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn claude_messages(repository_id:String,thread_id:String,state:State<'_,AppState>)->Result<codex::MessagePage,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||claude_history::messages(&path,&thread_id)).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_threads(repository_id: String, cursor: Option<String>, archived: bool, state: State<'_, AppState>) -> Result<codex::ThreadPage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.threads(&path, cursor, archived)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_messages(repository_id: String, thread_id: String, cursor: Option<String>, state: State<'_, AppState>) -> Result<codex::MessagePage, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.messages(&path, thread_id, cursor)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn codex_update_thread(repository_id: String, thread_id: String, action: String, name: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let service = state.codex.clone();
+    tauri::async_runtime::spawn_blocking(move || service.update_thread(&path, &thread_id, &action, name.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn list_identities(state: State<AppState>) -> Result<Vec<Identity>, String> {
+    let mut identities = state.db.identities()?;
+    let connected = std::thread::scope(|scope| {
+        let checks = identities.iter().map(|identity| {
+            let id = identity.id.clone();
+            scope.spawn(move || oauth::github_connected(&id))
+        }).collect::<Vec<_>>();
+        checks.into_iter().map(|check| check.join().unwrap_or(false)).collect::<Vec<_>>()
+    });
+    for (identity, connected) in identities.iter_mut().zip(connected) { identity.connected = connected; }
+    Ok(identities)
+}
+
+#[tauri::command]
+fn disconnect_github_identity(identity_id: String) -> Result<(), String> {
+    oauth::disconnect_github_identity(&identity_id)
+}
+
+#[tauri::command]
+fn github_auth_status() -> GithubAuthStatus {
+    oauth::auth_status()
+}
+
+#[tauri::command]
+fn begin_github_oauth(client_id: Option<String>) -> Result<GithubDeviceFlow, String> {
+    oauth::begin(client_id.as_deref().unwrap_or(""))
+}
+
+#[tauri::command]
+fn complete_github_oauth(
+    client_id: String,
+    device_code: String,
+    state: State<AppState>,
+) -> Result<Option<Identity>, String> {
+    oauth::complete(&state.db, &client_id, &device_code)
+}
+
+#[tauri::command]
+fn complete_github_token(token: String, state: State<AppState>) -> Result<Identity, String> {
+    oauth::identity_from_token(&state.db, token.trim())
+}
+
+#[tauri::command]
+fn import_github_cli_identity(state: State<AppState>) -> Result<Identity, String> {
+    let token = oauth::github_cli_token()?;
+    oauth::identity_from_token(&state.db, &token)
+}
+
+#[tauri::command]
+fn assign_repository_identity(
+    repository_id: String,
+    identity_id: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    if !identity_id.trim().is_empty() {
+        let remote = state
+            .db
+            .list()?
+            .into_iter()
+            .find(|repo| repo.id == repository_id)
+            .and_then(|repo| repo.canonical_remote);
+        github::ensure_identity_access(&identity_id, remote.as_deref())?;
+    }
+    state.db.assign_identity(&repository_id, &identity_id)
+}
+
+#[tauri::command]
+fn import_repository(path: String, state: State<AppState>) -> Result<ImportResult, String> {
+    let id = state.db.import(&state.git, Path::new(&path))?;
+    let repository = refresh_repository(id, state)?;
+    let mut warnings = Vec::new();
+    if repository.canonical_remote.is_none() {
+        warnings.push("Imported without a remote; hosted actions are unavailable.".into());
+    }
+    Ok(ImportResult {
+        repository,
+        warnings,
+    })
+}
+
+#[tauri::command]
+fn refresh_repository(repository_id: String, state: State<AppState>) -> Result<Repository, String> {
+    let repository = state
+        .db
+        .list()?
+        .into_iter()
+        .find(|r| r.id == repository_id)
+        .ok_or("Repository not found")?;
+    let previous_remote = repository.canonical_remote.clone();
+    let previous_host = repository.host_type.clone();
+    let repository = scan(&state.git, repository)?;
+    if repository.canonical_remote != previous_remote || repository.host_type != previous_host {
+        state.db.save_remote(
+            &repository_id,
+            repository.canonical_remote.as_deref(),
+            &repository.host_type,
+        )?;
+    }
+    state.db.save_snapshot(&repository_id, &repository)?;
+    Ok(repository)
+}
+
+#[tauri::command]
+fn list_branches(repository_id: String, state: State<AppState>) -> Result<Vec<String>, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    state.git.branches(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn commit_history(repository_id: String, branch: Option<String>, skip: u32, state: State<AppState>) -> Result<Vec<models::Commit>, String> {
+    let path = state.db.repository_path(&repository_id)?;
+    state.git.history(&path, branch.as_deref(), skip).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reorder_repositories(repository_ids: Vec<String>, state: State<AppState>) -> Result<(), String> {
+    state.db.reorder(&repository_ids)
+}
+
+#[tauri::command]
+fn update_repository(
+    repository_id: String,
+    update: RepositoryUpdate,
+    state: State<AppState>,
+) -> Result<Repository, String> {
+    github::ensure_identity_access(
+        update.identity_id.as_deref().unwrap_or(""),
+        update.canonical_remote.as_deref(),
+    )?;
+    state.db.update(&repository_id, &state.git, update)?;
+    refresh_repository(repository_id, state)
+}
+
+#[tauri::command]
+fn remove_repository(repository_id: String, state: State<AppState>) -> Result<(), String> {
+    state.db.remove(&repository_id)
+}
+
+#[tauri::command]
+fn create_repository(
+    update: RepositoryUpdate,
+    state: State<AppState>,
+) -> Result<ImportResult, String> {
+    if update.display_name.trim().is_empty() {
+        return Err("Display name is required".into());
+    }
+    let path = PathBuf::from(update.local_path.trim());
+    if path.as_os_str().is_empty() {
+        return Err("Local path is required".into());
+    }
+    if state.git.root(&path).is_ok() {
+        return Err("That folder is already a Git repository. Import it instead.".into());
+    }
+    let branch = update
+        .default_branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("main");
+    state.git.init(&path, branch).map_err(|e| e.to_string())?;
+    let id = state.db.import(&state.git, &path)?;
+    github::ensure_identity_access(
+        update.identity_id.as_deref().unwrap_or(""),
+        update.canonical_remote.as_deref(),
+    )?;
+    state.db.update(&id, &state.git, update)?;
+    let repository = refresh_repository(id, state)?;
+    Ok(ImportResult {
+        repository,
+        warnings: Vec::new(),
+    })
+}
+
+#[tauri::command]
+fn run_git_action(
+    repository_id: String,
+    operation: String,
+    args: Value,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let path = state.db.repository_path(&repository_id)?;
+    let owned: Vec<String> = match operation.as_str() {
+        "fetch" => vec!["fetch".into(), "--prune".into()],
+        "pull" => vec!["pull".into(), "--ff-only".into()],
+        "push" => vec!["push".into()],
+        "stage" => vec![
+            "add".into(),
+            "--".into(),
+            args.get("path")
+                .and_then(Value::as_str)
+                .ok_or("stage requires a path")?
+                .into(),
+        ],
+        "unstage" => vec![
+            "restore".into(),
+            "--staged".into(),
+            "--".into(),
+            args.get("path")
+                .and_then(Value::as_str)
+                .ok_or("unstage requires a path")?
+                .into(),
+        ],
+        "commit" => vec![
+            "commit".into(),
+            "-m".into(),
+            args.get("message")
+                .and_then(Value::as_str)
+                .ok_or("commit requires a message")?
+                .into(),
+        ],
+        other => return Err(format!("Unsupported Git operation: {other}")),
+    };
+    let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+    state.git.mutate(&path, &refs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_in_editor(repository_id: String, state: State<AppState>) -> Result<(), String> {
+    let path = state.db.repository_path(&repository_id)?;
+    Command::new("code").arg(path).spawn().map(|_|()).map_err(|e|format!("Could not launch VS Code: {e}. Configure an identity editor binding in a future settings build."))
+}
+
+#[tauri::command]
+fn open_hosted_repository(repository_id: String, state: State<AppState>) -> Result<(), String> {
+    let repo = state
+        .db
+        .list()?
+        .into_iter()
+        .find(|r| r.id == repository_id)
+        .ok_or("Repository not found")?;
+    let url = repo
+        .canonical_remote
+        .ok_or("This repository has no hosted remote")?;
+    open_url::that(url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_local_folder(repository_id: String, state: State<AppState>) -> Result<(), String> {
+    let path = state.db.repository_path(&repository_id)?;
+    open_url::that(path.to_string_lossy().into_owned()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !permitted_external_url(&url) {
+        return Err("External URL is not permitted".into());
+    }
+    open_url::that(url).map_err(|e| e.to_string())
+}
+
+fn permitted_external_url(url:&str)->bool{
+    permitted_github_url(url) || matches!(url, "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
+}
+
+#[cfg(test)]
+mod external_url_tests {
+    use super::permitted_external_url;
+    #[test]
+    fn usage_pages_are_permitted(){
+        for url in ["https://cursor.com/dashboard/spending","https://claude.ai/settings/usage","https://github.com/settings/copilot","https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli","https://code.claude.com/docs/en/setup"]{
+            assert!(permitted_external_url(url),"{url}");
+        }
+        assert!(!permitted_external_url("https://cursor.com/dashboard/spending?redirect=https://example.com"));
+    }
+}
+
+fn permitted_github_url(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
+        return false;
+    }
+    if parsed.query().is_none() && parsed.fragment().is_none() && parsed.username().is_empty() && parsed.password().is_none() {
+        let parts: Vec<_> = parsed.path().trim_matches('/').split('/').collect();
+        if parts.len() == 2 && parts.iter().all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))) {
+            return true;
+        }
+    }
+    matches!(
+        parsed.path(),
+        "/login/device" | "/login/device/" | "/settings/tokens" | "/settings/tokens/" | "/settings/tokens/new"
+    )
+}
+
+mod open_url {
+    use std::process::Command;
+    pub fn that(url: String) -> std::io::Result<()> {
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("cmd")
+                .args(["/C", "start", "", &url])
+                .spawn()?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open").arg(url).spawn()?;
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            Command::new("xdg-open").arg(url).spawn()?;
+        }
+        Ok(())
+    }
+}
+
+fn show_dashboard(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let data = app.path().app_data_dir()?;
+            let db = Database::open(data.join("gitcerberus.db")).map_err(std::io::Error::other)?;
+            cursor_notifications::start(app.handle().clone());
+            app.manage(AppState {
+                db: Arc::new(db),
+                git: GitService::default(),
+                agents: Arc::new(agents::Agents::default()),
+                drafts: Arc::new(draft_runs::DraftRuns::default()),
+                repository_watchers: Arc::new(repository_watcher::RepositoryWatchers::default()),
+                chatgpt:Arc::new(chatgpt_accounts::ChatgptAccounts::default()),
+                setup_terminal: Arc::new(setup_terminal::SetupTerminal::default()),
+                data_dir: data.clone(),
+                cursor: Arc::new(cursor::CursorService::new(data.join("cursor-executable.txt"))),
+                codex: Arc::new(codex::CodexService::new(data.join("codex-executable.txt"))),
+            });
+
+            let open = MenuItem::with_id(app, "open", "Open GitCerberus", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
+            let tray = TrayIconBuilder::with_id("main")
+                .icon(
+                    app.default_window_icon()
+                        .cloned()
+                        .expect("application icon missing"),
+                )
+                .tooltip("GitCerberus — repository guardian")
+                .menu(&menu);
+            // Linux tray hosts (including Plasma and AppIndicator-compatible GNOME
+            // extensions) own click/menu behavior. Keep the default menu-on-click
+            // there; other platforms use a direct left-click to restore the window.
+            #[cfg(not(target_os = "linux"))]
+            let tray = tray.show_menu_on_left_click(false);
+            tray.on_menu_event(|app, event| match event.id().as_ref() {
+                "open" => show_dashboard(app),
+                "quit" => app.exit(0),
+                _ => {}
+            })
+            .on_tray_icon_event(|tray, event| {
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    show_dashboard(tray.app_handle());
+                }
+            })
+            .build(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            provider_setup_status, set_provider_path,
+            chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
+            external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
+            copilot_repository_snapshot,
+            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, claim_handoff, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            install_provider,
+            cancel_provider_install,
+            configure_cursor,
+            claude_threads, claude_messages, copilot_threads, copilot_messages,
+            cursor_threads,
+            cursor_messages,
+            cursor_archive_thread,
+            configure_codex,
+            codex_account,
+            codex_login,
+            codex_cancel_login,
+            codex_threads,
+            codex_messages,
+            codex_update_thread,
+            list_repositories, sync_repository_remotes,
+            github_repositories,
+            link_repository_folder,
+            clone_github_repository,
+            open_in_cursor,
+            list_branches,
+            commit_history,
+            list_identities,
+            disconnect_github_identity,
+            begin_github_oauth,
+            complete_github_oauth,
+            complete_github_token,
+            import_github_cli_identity,
+            github_auth_status,
+            assign_repository_identity,
+            import_repository,
+            create_repository,
+            refresh_repository,
+            reorder_repositories,
+            update_repository,
+            remove_repository,
+            run_git_action,
+            open_in_editor,
+            open_hosted_repository,
+            open_local_folder,
+            open_external_url
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building GitCerberus")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) { app.state::<AppState>().agents.cancel_all(); }
+        });
+}

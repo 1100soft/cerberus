@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GitCerberus">
+  <rect width="64" height="64" rx="16" fill="#8d7bea"/>
+  <path d="M32 12 48 18v14c0 12-7 20-16 25-9-5-16-13-16-25V18L32 12Z" fill="#17151d"/>
+  <circle cx="32" cy="28" r="4.5" fill="#b7a7ff"/>
+  <circle cx="24" cy="36" r="3.5" fill="#ec8e5b"/>
+  <circle cx="40" cy="36" r="3.5" fill="#70cba0"/>
+  <path d="M32 32.5v12" fill="none" stroke="#b7a7ff" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="32" cy="46" r="3.8" fill="#b7a7ff"/>
+</svg>

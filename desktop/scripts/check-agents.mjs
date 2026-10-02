@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
+const source = await readFile(new URL('../src/lib/agentOutput.ts', import.meta.url), 'utf8');
+const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+const { agentOutput } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+assert.equal(agentOutput('null'), 'null');
+assert.equal(agentOutput('CLI missing\n'), 'CLI missing\n');
+assert.equal(agentOutput('{"type":"item.completed","item":{"type":"agent_message","text":"Done"}}'), 'Done\n');
+assert.match(agentOutput('{"type":"item.completed","item":{"type":"command_execution","command":"git diff","exit_code":0}}'), /git diff/);
+assert.equal(agentOutput('{"type":"assistant","message":{"content":[{"type":"text","text":"Cursor reply"}]}}'), 'Cursor reply\n');
+assert.equal(agentOutput('{"type":"turn.failed","error":{"message":"Authentication failed"}}'), 'Authentication failed\n');
+assert.equal(agentOutput('{"type":"result","is_error":true,"result":"Denied"}'), 'Failed: Denied\n');
+console.log('Codex and Cursor activity formatting passed');

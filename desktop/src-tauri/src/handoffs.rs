@@ -1,0 +1,151 @@
+use serde::Serialize;
+use std::{fs, path::{Path,PathBuf}, process::Command, time::{Duration,SystemTime}};
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct Claim { pub id:String, pub path:String }
+
+pub fn valid_name(name:&str)->bool{
+    !name.is_empty()&&name.len()<=64&&name.as_bytes()[0].is_ascii_alphanumeric()&&name.bytes().all(|byte|byte.is_ascii_alphanumeric()||matches!(byte,b'-'|b'_'))
+}
+fn valid_id(id:&str)->bool{!id.is_empty()&&id.len()<=128&&id.bytes().all(|byte|byte.is_ascii_alphanumeric()||matches!(byte,b'-'|b'_'))}
+fn root(repository:&Path)->Result<PathBuf,String>{
+    let output=Command::new("git").arg("-C").arg(repository).args(["rev-parse","--absolute-git-dir"]).output().map_err(|error|error.to_string())?;
+    if !output.status.success(){return Err("Handoffs require a local Git repository.".into());}
+    let git_dir=PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let root=git_dir.join("cerberus-handoffs");
+    if root.symlink_metadata().is_ok_and(|meta|meta.file_type().is_symlink()){return Err("Handoff storage is a symbolic link.".into());}
+    fs::create_dir_all(&root).map_err(|error|error.to_string())?;
+    Ok(root)
+}
+fn folder(repository:&Path,area:&str,name:&str)->Result<PathBuf,String>{
+    if !valid_name(name){return Err("Handoff names must contain 1–64 letters, numbers, hyphens, or underscores, starting with a letter or number.".into());}
+    let area_path=root(repository)?.join(area);
+    if area_path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_symlink()){return Err("Handoff storage area is a symbolic link.".into());}
+    let path=area_path.join(name);
+    if path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_symlink()){return Err("Handoff folder is a symbolic link.".into());}
+    fs::create_dir_all(&path).map_err(|error|error.to_string())?;
+    Ok(path)
+}
+fn file(repository:&Path,area:&str,name:&str,id:&str)->Result<PathBuf,String>{
+    if !valid_id(id){return Err("Invalid handoff emission ID.".into());}
+    Ok(folder(repository,area,name)?.join(format!("{id}.txt")))
+}
+pub fn output_path(repository:&Path,name:&str,run_id:&str)->Result<String,String>{
+    let path=file(repository,"outgoing",name,run_id)?;
+    if path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_symlink()){return Err("Handoff output is a symbolic link.".into());}
+    Ok(path.to_string_lossy().into_owned())
+}
+pub fn publish(repository:&Path,name:&str,run_id:&str)->Result<bool,String>{
+    let source=file(repository,"outgoing",name,run_id)?;
+    if !source.exists(){return Ok(false);}
+    if !source.symlink_metadata().map_err(|error|error.to_string())?.file_type().is_file(){return Err("Handoff payload must be a regular file.".into());}
+    if source.metadata().map_err(|error|error.to_string())?.len()>2_000_000{let _=fs::remove_file(&source);return Err("Handoff payload exceeds 2 MB.".into());}
+    let destination=file(repository,"pending",name,run_id)?;
+    if destination.exists(){return Err("Handoff emission already exists.".into());}
+    fs::rename(source,destination).map_err(|error|error.to_string())?;
+    Ok(true)
+}
+fn pending(repository:&Path,name:&str)->Result<Vec<PathBuf>,String>{
+    let directory=folder(repository,"pending",name)?;
+    let mut files=fs::read_dir(directory).map_err(|error|error.to_string())?.filter_map(Result::ok).map(|item|item.path()).filter(|path|path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file())&&path.extension().is_some_and(|extension|extension=="txt")&&path.file_stem().and_then(|stem|stem.to_str()).is_some_and(valid_id)).collect::<Vec<_>>();
+    files.sort();Ok(files)
+}
+pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
+    // A process interruption cannot cause another run of the same emission.
+    // Claims older than the 15-minute runner limit plus a safety margin are
+    // discarded, including when no automation with that name remains enabled.
+    let claimed_root=root(repository)?.join("claimed");
+    let mut removed=0;
+    if claimed_root.exists(){for namespace in fs::read_dir(claimed_root).map_err(|error|error.to_string())?.filter_map(Result::ok){
+        let name=namespace.file_name().to_string_lossy().into_owned();
+        if !valid_name(&name)||!namespace.file_type().is_ok_and(|kind|kind.is_dir()){continue;}
+        for item in fs::read_dir(namespace.path()).map_err(|error|error.to_string())?.filter_map(Result::ok){
+            let path=item.path();
+            if !path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file()){continue;}
+            let old=path.metadata().and_then(|meta|meta.modified()).ok().and_then(|time|SystemTime::now().duration_since(time).ok()).is_some_and(|age|age>Duration::from_secs(1800));
+            if !old{continue;}
+            let Some(id)=path.file_stem().and_then(|stem|stem.to_str())else{continue};
+            if !valid_id(id){continue;}
+            let consumed=file(repository,"consumed",&name,id)?;
+            if fs::rename(&path,&consumed).is_ok(){let _=fs::remove_file(consumed);removed+=1;}
+        }
+    }}
+    let consumed_root=root(repository)?.join("consumed");
+    if consumed_root.exists(){for namespace in fs::read_dir(consumed_root).map_err(|error|error.to_string())?.filter_map(Result::ok){
+        if !namespace.file_type().is_ok_and(|kind|kind.is_dir()){continue;}
+        for item in fs::read_dir(namespace.path()).map_err(|error|error.to_string())?.filter_map(Result::ok){
+            if item.file_type().is_ok_and(|kind|kind.is_file()){let _=fs::remove_file(item.path());}
+        }
+    }}
+    Ok(removed)
+}
+pub fn has_pending(repository:&Path,name:&str)->Result<bool,String>{Ok(!pending(repository,name)?.is_empty())}
+pub fn claim(repository:&Path,name:&str)->Result<Option<Claim>,String>{
+    for source in pending(repository,name)?{
+        let Some(id)=source.file_stem().and_then(|stem|stem.to_str()).map(str::to_owned)else{continue};
+        let destination=file(repository,"claimed",name,&id)?;
+        if fs::rename(&source,&destination).is_ok(){
+            // The payload may have waited in the queue for hours. Lease age
+            // begins at claim time, not at the agent's original write.
+            if let Err(error)=fs::File::open(&destination).and_then(|file|file.set_modified(SystemTime::now())){
+                let _=fs::rename(&destination,&source);
+                return Err(format!("Could not timestamp handoff claim: {error}"));
+            }
+            return Ok(Some(Claim{id,path:destination.to_string_lossy().into_owned()}));
+        }
+    }
+    Ok(None)
+}
+pub fn finish(repository:&Path,name:&str,id:&str)->Result<(),String>{
+    let source=file(repository,"claimed",name,id)?;
+    if !source.exists(){return Ok(());}
+    // Move out of the recoverable queue before deleting. A cleanup failure
+    // cannot turn a completed action back into a pending event later.
+    let consumed=file(repository,"consumed",name,id)?;
+    fs::rename(source,&consumed).map_err(|error|error.to_string())?;
+    fs::remove_file(consumed).map_err(|error|error.to_string())
+}
+pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
+    let source=file(repository,"claimed",name,id)?;
+    if source.exists(){fs::rename(source,file(repository,"pending",name,id)?).map_err(|error|error.to_string())?;}
+    Ok(())
+}
+#[cfg(test)]mod tests{
+    use super::*;
+    #[test]fn validates_names_and_claims_each_emission_once(){
+        let root=tempfile::tempdir().unwrap();assert!(Command::new("git").args(["init","-q"]).current_dir(root.path()).status().unwrap().success());
+        for bad in ["","../review","review/x",".hidden","a b"]{assert!(!valid_name(bad));}
+        for id in ["one","two"]{fs::write(output_path(root.path(),"review",id).unwrap(),id).unwrap();assert!(publish(root.path(),"review",id).unwrap());}
+        let first=claim(root.path(),"review").unwrap().unwrap();let second=claim(root.path(),"review").unwrap().unwrap();assert_ne!(first.id,second.id);assert!(claim(root.path(),"review").unwrap().is_none());
+        assert_eq!(fs::read_to_string(&first.path).unwrap(),first.id);finish(root.path(),"review",&first.id).unwrap();assert!(!Path::new(&first.path).exists());release(root.path(),"review",&second.id).unwrap();assert_eq!(claim(root.path(),"review").unwrap().unwrap().id,second.id);
+    }
+    #[test]fn concurrent_claim_has_one_winner(){
+        let root=tempfile::tempdir().unwrap();assert!(Command::new("git").args(["init","-q"]).current_dir(root.path()).status().unwrap().success());
+        fs::write(output_path(root.path(),"correction","one").unwrap(),"payload").unwrap();publish(root.path(),"correction","one").unwrap();
+        let path=root.path().to_path_buf();let threads=(0..8).map(|_|{let path=path.clone();std::thread::spawn(move||claim(&path,"correction").unwrap())}).collect::<Vec<_>>();
+        assert_eq!(threads.into_iter().filter_map(|thread|thread.join().unwrap()).count(),1);
+    }
+    #[test]fn old_pending_payload_gets_a_fresh_claim_lease(){
+        let root=tempfile::tempdir().unwrap();assert!(Command::new("git").args(["init","-q"]).current_dir(root.path()).status().unwrap().success());
+        let output=output_path(root.path(),"review","old").unwrap();fs::write(&output,"old payload").unwrap();publish(root.path(),"review","old").unwrap();
+        let pending=file(root.path(),"pending","review","old").unwrap();fs::File::open(pending).unwrap().set_modified(SystemTime::now()-Duration::from_secs(7200)).unwrap();
+        let claimed=claim(root.path(),"review").unwrap().unwrap();assert_eq!(fs::read_to_string(&claimed.path).unwrap(),"old payload");
+        assert!(!has_pending(root.path(),"review").unwrap());
+    }
+    #[test]fn handoffs_are_scoped_to_their_repository(){
+        let left=tempfile::tempdir().unwrap();let right=tempfile::tempdir().unwrap();
+        for root in [&left,&right]{assert!(Command::new("git").args(["init","-q"]).current_dir(root.path()).status().unwrap().success());}
+        fs::write(output_path(left.path(),"review","one").unwrap(),"left only").unwrap();publish(left.path(),"review","one").unwrap();
+        assert!(has_pending(left.path(),"review").unwrap());assert!(!has_pending(right.path(),"review").unwrap());
+    }
+    #[test]fn interrupted_claim_is_discarded_without_retriggering(){
+        let root=tempfile::tempdir().unwrap();assert!(Command::new("git").args(["init","-q"]).current_dir(root.path()).status().unwrap().success());
+        fs::write(output_path(root.path(),"review","one").unwrap(),"payload").unwrap();publish(root.path(),"review","one").unwrap();
+        let claimed=claim(root.path(),"review").unwrap().unwrap();
+        fs::File::open(&claimed.path).unwrap().set_modified(SystemTime::now()-Duration::from_secs(7200)).unwrap();
+        assert_eq!(cleanup_stale(root.path()).unwrap(),1);
+        assert!(!has_pending(root.path(),"review").unwrap());assert!(claim(root.path(),"review").unwrap().is_none());
+        assert!(!Path::new(&claimed.path).exists());
+    }
+}
