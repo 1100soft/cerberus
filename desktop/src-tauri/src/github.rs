@@ -172,7 +172,23 @@ pub fn catalog(db: &Database) -> Result<Catalog, String> {
             output.warnings.push(format!("Visibility unverified for {name}. Connect an account with access to this repository."));
         }
     }
+    assign_unique_catalog_identities(db,&output)?;
     Ok(output)
+}
+fn unique_catalog_identity(catalog:&Catalog,remote:&str)->Option<String>{
+    let name=github_name(remote)?;
+    let mut ids=catalog.repositories.iter().filter(|repo|repo.full_name.eq_ignore_ascii_case(&name)&&!repo.identity_id.is_empty()).map(|repo|repo.identity_id.as_str()).collect::<Vec<_>>();
+    ids.sort_unstable();ids.dedup();
+    (ids.len()==1).then(||ids[0].to_owned())
+}
+fn assign_unique_catalog_identities(db:&Database,catalog:&Catalog)->Result<(),String>{
+    for repo in db.list()?{
+        if repo.identity.is_some(){continue;}
+        if let Some(id)=repo.canonical_remote.as_deref().and_then(|remote|unique_catalog_identity(catalog,remote)){
+            db.assign_identity(&repo.id,&id)?;
+        }
+    }
+    Ok(())
 }
 pub fn ensure_identity_access(identity_id: &str, remote: Option<&str>) -> Result<(), String> {
     if identity_id.trim().is_empty() {
@@ -419,6 +435,19 @@ pub fn link_existing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unique_catalog_account_becomes_repository_assignment(){
+        let directory=tempfile::tempdir().unwrap();
+        let db=Database::open(directory.path().join("catalog.db")).unwrap();
+        let identity=db.save_github_identity("owner","Owner","owner@example.test").unwrap();
+        let git=GitService::default();
+        let checkout=directory.path().join("checkout");git.init(&checkout,"main").unwrap();
+        git.apply_origin(&checkout,Some("https://github.com/owner/repo.git")).unwrap();
+        db.import(&git,&checkout).unwrap();
+        let catalog=Catalog{repositories:vec![GithubRepository{id:1,name:"repo".into(),full_name:"owner/repo".into(),owner:"owner".into(),private:true,html_url:"https://github.com/owner/repo".into(),default_branch:Some("main".into()),updated_at:None,pushed_at:None,identity_id:identity.id.clone()}],..Default::default()};
+        assign_unique_catalog_identities(&db,&catalog).unwrap();
+        assert_eq!(db.list().unwrap()[0].identity.as_ref().map(|item|item.id.as_str()),Some(identity.id.as_str()));
+    }
     #[test]
     fn linking_validates_origin_and_reuses_missing_registration() {
         let directory = tempfile::tempdir().unwrap();

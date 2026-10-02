@@ -3,19 +3,22 @@ import { VSCodeIcon, CursorIcon, ClaudeIcon } from './Icons';
 import { OpenAILogo } from './OpenAILogo';
 import { Github } from 'lucide-react';
 import { ConversationSearch } from './ConversationSearch';
+import { readCheckpointCommitPrompt } from '../lib/checkpointPrompt';
+import { CheckpointPromptDialog } from './CheckpointPromptDialog';
 import { EditReview } from './EditReview';
 import { completeMessages, textMatches, type ConversationHit } from '../lib/conversationSearch';
 import { matchesShortcut, shortcuts, type ShortcutCommand } from '../lib/shortcuts';
 import { AgentActivity } from './AgentActivity';
 import { foldIntermediateMessages } from '../lib/conversationDisplay';
 import { ConversationContextMenu } from './ConversationContextMenu';
+import { matchingHistoryThread } from '../lib/conversationIdentity';
 import { api } from '../lib/api';
 import { useAgentChats, renameAgentChat, archiveAgentChat, type AgentChat } from '../lib/agentChats';
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { cursorDisplayText } from "../lib/conversationText";
 import { loadOlderMessages, loadOlderThreads, peekList, peekMessages, refreshMessages, refreshThreadList, subscribe, warmRepository, listKey, messageKey, providerName, updatedMillis, type Thread } from "../lib/conversationCache";
-import { MessageSquare, RefreshCw, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle } from "lucide-react";
+import { MessageSquare, RefreshCw, ClipboardCopy, Check, Pencil, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
 import { useProviderPreferences } from "../lib/providerPreferences";
 import type { CodexMessage, FileEdit, Repository } from "../types";
 
@@ -23,11 +26,19 @@ export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConver
   const [settings, setEnabled] = useProviderPreferences();
   const enabled = providers.filter(provider => settings[provider] === true);
   const [revision, setRevision] = useState(0);
+  useEffect(()=>{const finished=()=>setRevision(value=>value+1);window.addEventListener('saved-prompt-finished',finished);return()=>window.removeEventListener('saved-prompt-finished',finished);},[]);
   const [cursorConversationId, setCursorConversationId] = useState<string>();
+  const [copyStatus,setCopyStatus]=useState<'idle'|'copied'|'error'>('idle');
+  const [editCheckpoint,setEditCheckpoint]=useState(false);
+  const copyTimer=useRef<number>();
+  useEffect(()=>()=>window.clearTimeout(copyTimer.current),[]);
+  const copyCheckpointPrompt=async()=>{try{await navigator.clipboard.writeText(readCheckpointCommitPrompt());setCopyStatus('copied');}catch{setCopyStatus('error');}window.clearTimeout(copyTimer.current);copyTimer.current=window.setTimeout(()=>setCopyStatus('idle'),2500);};
   const reportCursorConversation = useCallback((id?: string) => { setCursorConversationId(id); if (repository) onCursorConversation?.(repository.id, id); }, [repository?.id, onCursorConversation]);
   return <section className="codex-panel" aria-label="Agent conversations">
     <header><div className="agent-heading"><h2><MessageSquare size={18} />Agent</h2></div><div className="codex-actions">
       {repository && <><button type="button" aria-label="Open in VS Code" title="Continue in VS Code" onClick={() => void api.openEditor(repository.id)}><VSCodeIcon/></button><button type="button" aria-label="Open in Cursor" title={cursorConversationId ? "Open this conversation in the Cursor Agents window" : "Open this repository in the Cursor Agents window"} onClick={() => void api.openCursor(repository.id, cursorConversationId)}><CursorIcon/></button></>}
+      {repository&&<button type="button" aria-label={copyStatus==='copied'?"Checkpoint prompt copied":copyStatus==='error'?"Could not copy checkpoint prompt":"Copy checkpoint commit prompt"} title={copyStatus==='copied'?"Checkpoint prompt copied":copyStatus==='error'?"Could not copy prompt":"Copy checkpoint commit prompt for the working agent"} onClick={()=>void copyCheckpointPrompt()}>{copyStatus==='copied'?<Check size={16}/>:<ClipboardCopy size={16}/>}</button>}
+      {repository&&<button type="button" aria-label="Edit checkpoint commit prompt" title="Edit checkpoint commit prompt" onClick={()=>setEditCheckpoint(true)}><Pencil size={16}/></button>}
       <IdentitySignIn />
       <button type="button" aria-label="Refresh conversations" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button>
     </div></header>
@@ -36,6 +47,7 @@ export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConver
     {repository && <ConversationBrowser key={repository.id} repository={repository} revision={revision} enabled={enabled} onCursorConversation={reportCursorConversation} />}
     {!repository && <p className="panel-copy">{unlinkedName ? "Link an existing local checkout, or clone a new one, to see its conversations." : "Select a repository to see its conversations."}</p>}
     </div>
+    {editCheckpoint&&<CheckpointPromptDialog onClose={()=>setEditCheckpoint(false)}/>}
   </section>;
 }
 
@@ -58,10 +70,10 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
   const [listError, setListError] = useState(list?.error ?? "");
   const [loading, setLoading] = useState(!list);
   const visible = threads.filter((thread) => enabled.includes(thread.provider)).map(thread=>thread.provider==='cursor' && cursorNames[thread.id]?{...thread,name:cursorNames[thread.id]}:thread);
-  const matchingThread=(chat:AgentChat)=>visible.find(thread=>chat.session?.sessionId===thread.id && chat.session.provider===thread.provider);
+  const matchingThread=(chat:AgentChat)=>matchingHistoryThread(chat,visible);
   const entries = [
     ...listedChats.map(chat=>({key:`app:${chat.id}`,time:Math.max(updatedMillis(chat.updatedAt),updatedMillis(matchingThread(chat)?.updatedAt||0)),chat,thread:undefined as Thread|undefined})),
-    ...visible.filter(thread=>!listedChats.some(chat=>chat.session?.sessionId===thread.id && chat.session.provider===thread.provider)).map(thread=>({key:thread.key,time:Math.max(updatedMillis(thread.updatedAt),...chats.filter(chat=>chat.originKey===thread.key).map(chat=>updatedMillis(chat.updatedAt))),chat:undefined as AgentChat|undefined,thread})),
+    ...visible.filter(thread=>!listedChats.some(chat=>matchingThread(chat)?.key===thread.key)).map(thread=>({key:thread.key,time:Math.max(updatedMillis(thread.updatedAt),...chats.filter(chat=>chat.originKey===thread.key).map(chat=>updatedMillis(chat.updatedAt))),chat:undefined as AgentChat|undefined,thread})),
   ].sort((a,b)=>b.time-a.time || a.key.localeCompare(b.key));
   const [selected, setSelected] = useState<string>();
   const [selectionExplicit, setSelectionExplicit] = useState(false);
@@ -79,6 +91,7 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
   const directAppChat = chats.find(chat => `app:${chat.id}` === selected);
   const selectedThread = selected === "new" ? undefined : directAppChat ? matchingThread(directAppChat) : visible.find((thread) => thread.key === selected) ?? visible[0];
   const selectedKey = selectedThread?.key;
+  const saveMessagePrompt=(message:CodexMessage)=>window.dispatchEvent(new CustomEvent('new-automation-from-prompt',{detail:{repositoryId:repository.id,provider:(appChat?.profile.provider||selectedThread?.provider||'codex') as Provider,prompt:message.text}}));
   const cursorConversationId = selected === "new" ? undefined : selectedThread?.provider === "cursor" ? selectedThread.id : directAppChat?.profile.provider === "cursor" ? directAppChat.session?.sessionId : undefined;
   useEffect(() => { onCursorConversation(cursorConversationId); }, [cursorConversationId, onCursorConversation]);
   const linkedChat = selectedKey ? chats.find(chat => chat.originKey === selectedKey) : undefined;
@@ -321,13 +334,13 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         {providers.filter((provider) => cursors[provider] && enabled.includes(provider)).map((provider) => <button key={provider} type="button" disabled={loading} onClick={() => more(provider)}>Load older {providerName(provider)} conversations</button>)}
       </div>
       <div className="chat-message-column"><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}>
-        {appChat ? <>{readError && <p className="config-error" role="alert">{readError}</p>}{renderedMessages.map((message,index) => <ConversationMessage key={message.id} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={false} finished={!appChat.running || index < renderedMessages.length-1} />)}<p className="chat-status" role="status">{continuedOutside ? 'Continued outside this app · history is available here' : appChat.status}</p></> : selected === 'new' || !selectedThread ? <p className="panel-copy">Select a conversation to read its history. Open this repository in VS Code or Cursor to continue working.</p> : <>
+        {appChat ? <>{readError && <p className="config-error" role="alert">{readError}</p>}{renderedMessages.map((message,index) => <ConversationMessage key={message.id} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={false} finished={!appChat.running || index < renderedMessages.length-1} onSavePrompt={()=>saveMessagePrompt(message)} />)}<p className="chat-status" role="status">{continuedOutside ? 'Continued outside this app · history is available here' : appChat.status}</p></> : selected === 'new' || !selectedThread ? <p className="panel-copy">Select a conversation to read its history. Open this repository in VS Code or Cursor to continue working.</p> : <>
         {messageCursor && <button type="button" disabled={reading} onClick={moreMessages}>Load older messages</button>}
         {reading && <p className="panel-copy" role="status">Loading messages…</p>}
         {readError && <p className="config-error" role="alert">{readError}</p>}
         {!selectedThread && <p className="panel-copy">Choose a conversation from the list.</p>}
         {selectedThread && !reading && !readError && !messages.length && <p className="panel-copy">No stored user or assistant messages in this conversation.</p>}
-        {renderedMessages.map((message, index) => <ConversationMessage key={`${message.id}-${index}`} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={!!selected?.startsWith("cursor:")} finished={!selectedThread.working || index < renderedMessages.length - 1} />)}
+        {renderedMessages.map((message, index) => <ConversationMessage key={`${message.id}-${index}`} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={!!selected?.startsWith("cursor:")} finished={!selectedThread.working || index < renderedMessages.length - 1} onSavePrompt={()=>saveMessagePrompt(message)} />)}
         {selectedThread.working && <p className={`chat-status provider-${selectedThread.provider}`} role="status"><LoaderCircle className="conversation-working" size={13} aria-label="Agent working" /> Working</p>}
         </>}
       </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></div>
@@ -349,10 +362,10 @@ function highlight(query:string) {
     });};visit(tree);
   };
 }
-const ConversationMessage = memo(function ConversationMessage({ message, formatCursor,query,onReview,finished=true }: { message: CodexMessage; formatCursor: boolean;query:string;onReview:(edits:FileEdit[])=>void;finished?:boolean }) {
+const ConversationMessage = memo(function ConversationMessage({ message, formatCursor,query,onReview,onSavePrompt,finished=true }: { message: CodexMessage; formatCursor: boolean;query:string;onReview:(edits:FileEdit[])=>void;onSavePrompt?:()=>void;finished?:boolean }) {
   const text = formatCursor && message.role === "user" ? cursorDisplayText(message.text) : message.text;
   const cacheKey = text+'\0'+query.trim();
   let markdown = markdownCache.get(cacheKey);
   if (!markdown) { markdown = <Markdown rehypePlugins={query.trim() ? [highlight(query.trim())] : []} components={markdownComponents}>{text}</Markdown>; if(markdownCache.size>40)markdownCache.clear();markdownCache.set(cacheKey, markdown); }
-  return <article data-message-id={message.id} className={`codex-message ${message.role}`}>{message.role === 'assistant' && <AgentActivity steps={message.steps} finished={finished} />}{!!text && <div className="conversation-markdown">{markdown}</div>}{message.edits?.length ? <button className="turn-edits-button" onClick={()=>onReview(message.edits!)}>Review {new Set(message.edits.map(edit=>edit.path)).size} changed file{message.edits.length === 1 ? '' : 's'}</button> : null}</article>;
+  return <article data-message-id={message.id} className={`codex-message ${message.role}`}>{message.role === 'assistant' && <AgentActivity steps={message.steps} finished={finished} />}{!!text && <div className="conversation-markdown">{markdown}</div>}{message.role==='user'&&!!text&&<button type="button" className="save-prompt-edge" aria-label="Save this prompt" title="Save this prompt as an automation" onClick={onSavePrompt}><BookmarkPlus size={14}/></button>}{message.edits?.length ? <button className="turn-edits-button" onClick={()=>onReview(message.edits!)}>Review {new Set(message.edits.map(edit=>edit.path)).size} changed file{message.edits.length === 1 ? '' : 's'}</button> : null}</article>;
 });

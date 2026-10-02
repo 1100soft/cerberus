@@ -9,6 +9,7 @@ The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-t
 3. `components/CodexHistory.tsx` requests only enabled providers. `lib/conversationCache.ts` caches thread lists and messages, deduplicates requests, and refreshes the selected repository on focus and a timer. `lib/conversationDisplay.ts` folds consecutive assistant updates under one final response; `components/AgentActivity.tsx` opens all updates with one disclosure.
 4. `components/IdentitiesPanel.tsx` renders GitHub identities and provider identity cards. `components/IdentitySignIn.tsx` is the single sign-in control used there and in the Agent header. Account initials are chosen and persisted by `lib/identityInitials.ts`, with the editor in `components/IdentityCard.tsx`.
 5. UI colors should refer to `src/palette.css`. Dropdowns must use `components/Select.tsx` as specified in `AGENTS.md`.
+6. `lib/savedPrompts.ts` stores automation jobs and checks due triggers while the app is running. Agent jobs start new in-app conversations per selected repository; shell jobs run scripts through `shell_automation.rs`. Older fixed Git jobs remain runnable, and exact-session jobs are disabled migration candidates. See [automation](saved-prompts.md) for recovery behavior.
 
 ## Provider capabilities
 

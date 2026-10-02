@@ -4,6 +4,10 @@ import type { CodexAccount, CodexThreadPage, CodexMessagePage, Commit, GithubCat
 import { identitiesWithRepositoryAccess } from "./repositories";
 
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
+export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git';status:'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string};
+export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'>;
+const demoAutomationLogs=new Map<string,AutomationLog>();
+const demoHandoffs=new Map<string,{id:string;path:string;claimed:boolean}[]>();
 
 let demoIdentities: Identity[] = [
   { id: "work", label: "Northstar", gitName: "Alex Morgan", gitEmail: "alex@northstar.dev", color: "var(--color-8b7cf6)", providerUsername: "octocat", connected: true },
@@ -36,6 +40,92 @@ export const api = {
   },
   async openCursor(repositoryId: string, conversationId?: string): Promise<void> {
     if (inTauri()) await invoke("open_in_cursor", { repositoryId, conversationId: conversationId ?? null });
+  },
+  async promptCapability(repositoryId:string,provider:string,threadId:string):Promise<{automatic:boolean;reason:string}>{
+    if (!inTauri()) return {automatic:false,reason:'Automatic delivery requires the desktop app.'};
+    return invoke('prompt_capability',{repositoryId,provider,threadId});
+  },
+  async submitSavedPrompt(repositoryId:string,provider:string,threadId:string,prompt:string):Promise<string>{
+    if (!inTauri()) throw new Error('Automatic delivery requires the desktop app.');
+    return invoke('submit_saved_prompt',{repositoryId,provider,threadId,prompt});
+  },
+  async runNewAgentConversation(repositoryId:string,provider:string,identityId:string,mode:string,prompt:string,sessionId?:string,requestId?:string):Promise<{text:string;sessionId?:string}>{
+    if (!inTauri()) throw new Error('Agent execution requires the desktop app.');
+    return invoke('run_new_agent_conversation',{repositoryId,provider,identityId,mode,prompt,sessionId:sessionId||null,requestId:requestId||null});
+  },
+  async cancelDraft(requestId:string):Promise<void>{
+    if (!inTauri()) return;
+    return invoke('cancel_draft',{requestId});
+  },
+  async runAutomationShell(repositoryId:string,script:string,onOutput?:(chunk:{stream:string;text:string})=>void,handoffInputPath?:string,handoffOutputPaths:Record<string,string>={}):Promise<{result:string;stdout:string;stderr:string}>{
+    if (!inTauri()) throw new Error('Shell automations require the desktop app.');
+    const output=new Channel<{stream:string;text:string}>();
+    output.onmessage=onOutput||(()=>{});
+    return invoke('run_automation_shell',{repositoryId,script,output,handoffInputPath:handoffInputPath||null,handoffOutputPaths});
+  },
+  async watchAutomationRepositories(repositoryIds:string[]):Promise<string[]>{
+    if (!inTauri()) return [];
+    return invoke('watch_automation_repositories',{repositoryIds});
+  },
+  async repositoryChangedLines(repositoryId:string):Promise<number>{
+    if (!inTauri()){const repository=demoRepositories.find(item=>item.id===repositoryId);return (repository?.stagedCount||0)+(repository?.modifiedCount||0)+(repository?.untrackedCount||0);}
+    return invoke('repository_changed_lines',{repositoryId});
+  },
+  async repositoryChangedLinesBatch(repositoryIds:string[]):Promise<Record<string,number>>{
+    if (!inTauri())return Object.fromEntries(await Promise.all(repositoryIds.map(async id=>[id,await api.repositoryChangedLines(id)] as const)));
+    return invoke('repository_changed_lines_batch',{repositoryIds});
+  },
+  async repositoryChangeSummary(repositoryId:string):Promise<{head:string;branch:string;reflog:string;changedLines:number}>{
+    if (!inTauri()){const repo=demoRepositories.find(item=>item.id===repositoryId);return {head:repo?.lastCommitAt||'demo',branch:repo?.branch||'',reflog:'commit: demo',changedLines:await this.repositoryChangedLines(repositoryId)};}
+    return invoke('repository_change_summary',{repositoryId});
+  },
+  async repositoryCommitState(repositoryId:string):Promise<{head:string;branch:string;reflog:string}>{
+    if(!inTauri()){const repo=demoRepositories.find(item=>item.id===repositoryId);return {head:repo?.lastCommitAt||'demo',branch:repo?.branch||'',reflog:'commit: demo'};}
+    return invoke('repository_commit_state',{repositoryId});
+  },
+  async repositoryCommitStatesBatch(repositoryIds:string[]):Promise<Record<string,{head:string;branch:string;reflog:string}>>{
+    if(!inTauri())return Object.fromEntries(await Promise.all(repositoryIds.map(async id=>[id,await api.repositoryCommitState(id)] as const)));
+    return invoke('repository_commit_states_batch',{repositoryIds});
+  },
+  async handoffOutputPath(repositoryId:string,name:string,runId:string):Promise<string>{
+    if(!inTauri())return `/tmp/gitcerberus-demo-handoffs/${repositoryId}/${name}/${runId}.txt`;
+    return invoke('handoff_output_path',{repositoryId,name,runId});
+  },
+  async publishHandoff(repositoryId:string,name:string,runId:string):Promise<boolean>{
+    if(!inTauri())return false;
+    return invoke('publish_handoff',{repositoryId,name,runId});
+  },
+  async hasPendingHandoff(repositoryId:string,name:string):Promise<boolean>{
+    if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>!item.claimed);
+    return invoke('has_pending_handoff',{repositoryId,name});
+  },
+  async claimHandoff(repositoryId:string,name:string):Promise<{id:string;path:string}|null>{
+    if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
+    return invoke('claim_handoff',{repositoryId,name});
+  },
+  async finishHandoff(repositoryId:string,name:string,id:string):Promise<void>{
+    if(!inTauri()){const key=`${repositoryId}:${name}`;demoHandoffs.set(key,(demoHandoffs.get(key)||[]).filter(item=>item.id!==id));return;}
+    return invoke('finish_handoff',{repositoryId,name,id});
+  },
+  async releaseHandoff(repositoryId:string,name:string,id:string):Promise<void>{
+    if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>item.id===id);if(item)item.claimed=false;return;}
+    return invoke('release_handoff',{repositoryId,name,id});
+  },
+  async cleanupStaleHandoffs(repositoryIds:string[]):Promise<number>{
+    if(!inTauri())return 0;
+    return invoke('cleanup_stale_handoffs',{repositoryIds});
+  },
+  async writeAutomationLog(entry:AutomationLog):Promise<void>{
+    if(!inTauri()){demoAutomationLogs.set(`${entry.automationId}:${entry.repositoryId}:${entry.runId}`,entry);return;}
+    return invoke('write_automation_log',{entry});
+  },
+  async listAutomationLogs(automationId:string):Promise<AutomationLogSummary[]>{
+    if(!inTauri())return [...demoAutomationLogs.values()].filter(item=>item.automationId===automationId).sort((a,b)=>b.createdAt-a.createdAt);
+    return invoke('list_automation_logs',{automationId});
+  },
+  async readAutomationLog(automationId:string,repositoryId:string,runId:string):Promise<AutomationLog>{
+    if(!inTauri()){const entry=demoAutomationLogs.get(`${automationId}:${repositoryId}:${runId}`);if(!entry)throw new Error('Automation log not found');return entry;}
+    return invoke('read_automation_log',{automationId,repositoryId,runId});
   },
   async chooseCodexExecutable(): Promise<boolean> {
     if (!inTauri()) throw new Error("Open the desktop app to select the Codex executable.");
@@ -216,7 +306,7 @@ export const api = {
   },
   async reorder(ids: string[]): Promise<void> {
     if (inTauri()) await invoke("reorder_repositories", { repositoryIds: ids });
-    demoRepositories = ids.map((id) => demoRepositories.find((repo) => repo.id === id)!);
+    demoRepositories = ids.map((id,manualOrder) => ({...demoRepositories.find((repo) => repo.id === id)!,manualOrder}));
   },
   async updateRepository(id: string, update: RepositoryUpdate): Promise<Repository> {
     if (inTauri()) return invoke("update_repository", { repositoryId: id, update });

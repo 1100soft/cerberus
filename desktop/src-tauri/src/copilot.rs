@@ -1,5 +1,49 @@
 use github_copilot_sdk::{Client, ClientOptions};
 use serde_json::{json,Value};
+use github_copilot_sdk::types::{MessageOptions, PermissionRequestData, PermissionRequestKind, SessionConfig, ResumeSessionConfig, SessionId};
+use std::{time::Duration, sync::{Arc, atomic::{AtomicBool,Ordering}}};
+
+fn response_text(data:&Value)->Option<&str>{
+    ["content","message","text"].iter().find_map(|key|data.get(*key).and_then(Value::as_str).filter(|text|!text.trim().is_empty()))
+}
+fn draft_permission_allowed(request:&PermissionRequestData)->bool{matches!(request.kind,Some(PermissionRequestKind::Read))}
+
+pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,repository:&std::path::Path,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>)->Result<Value,String>{
+    if prompt.trim().is_empty() || prompt.len()>100_000{return Err("Enter a prompt of at most 100,000 characters".into());}
+    if !matches!(mode,"analyze"|"edit"){return Err("Unsupported Copilot permission mode".into());}
+    let client=start_client(data_dir,identity_id).await?;
+    let result=async {
+        let config=SessionConfig::default().with_working_directory(repository);
+        let config=if mode=="edit"{config.approve_all_permissions()}else{config.with_available_tools(["view","read_file"]).approve_permissions_if(draft_permission_allowed)};
+        let session=if let Some(id)=session_id{
+            let resume=ResumeSessionConfig::new(SessionId::new(id)).with_working_directory(repository);
+            let resume=if mode=="edit"{resume.approve_all_permissions()}else{resume.with_available_tools(["view","read_file"]).approve_permissions_if(draft_permission_allowed)};
+            client.resume_session(resume).await.map_err(|e|e.to_string())?
+        }else{client.create_session(config).await.map_err(|e|e.to_string())?};
+        let id=session.id().as_str().to_owned();
+        let reply=if let Some(flag)=cancelled{
+            tokio::select! {
+                result=session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(900)))=>result.map_err(|e|e.to_string())?,
+                _=async {while !flag.load(Ordering::SeqCst){tokio::time::sleep(Duration::from_millis(100)).await;}}=>{let _=session.abort().await;let _=session.disconnect().await;return Err("Draft stopped".into());}
+            }
+        }else{session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(900))).await.map_err(|e|e.to_string())?};
+        let direct=reply.as_ref().and_then(|event|response_text(&event.data));
+        let (text,diagnostic)=if let Some(text)=direct{(text.to_owned(),String::new())}else{
+            let messages=session.get_events().await.map_err(|e|e.to_string())?;
+            let text=messages.iter().rev().filter(|event|event.event_type=="assistant.message").find_map(|event|response_text(&event.data)).unwrap_or("").to_owned();
+            let diagnostic=messages.iter().rev().take(8).map(|event|format!("{}({})",event.event_type,event.data.as_object().map(|item|item.keys().cloned().collect::<Vec<_>>().join(",")).unwrap_or_default())).collect::<Vec<_>>().join("; ");
+            (text,diagnostic)
+        };
+        let _=session.disconnect().await;
+        if text.trim().is_empty(){
+            eprintln!("Copilot draft had no text response; event summary: {}",if diagnostic.is_empty(){"none"}else{&diagnostic});
+            return Err(if diagnostic.contains("permission."){"Copilot could not finish the draft with the available read-only tools."}else{"Copilot completed without a text response."}.into());
+        }
+        Ok(json!({"text":text,"sessionId":id}))
+    }.await;
+    let _=client.stop().await;
+    result
+}
 
 async fn start_client(data_dir:&std::path::Path,identity_id:&str)->Result<Client,String>{
     let options=client_options(data_dir,identity_id)?;
@@ -36,6 +80,32 @@ fn event_messages(result:&Value)->Vec<crate::codex::Message>{
 }
 #[cfg(test)] mod tests {
     use super::*;
+    #[test]
+    fn extracts_copilot_final_message_shapes(){
+        assert_eq!(response_text(&json!({"message":"Draft script"})),Some("Draft script"));
+        assert_eq!(response_text(&json!({"content":"Draft prompt"})),Some("Draft prompt"));
+        assert_eq!(response_text(&json!({"content":" ","message":"Fallback"})),Some("Fallback"));
+    }
+    #[test]
+    fn drafting_allows_file_reads_only(){
+        let read=PermissionRequestData{kind:Some(PermissionRequestKind::Read),..Default::default()};
+        let write=PermissionRequestData{kind:Some(PermissionRequestKind::Write),..Default::default()};
+        let shell=PermissionRequestData{kind:Some(PermissionRequestKind::Shell),..Default::default()};
+        assert!(draft_permission_allowed(&read));
+        assert!(!draft_permission_allowed(&write));
+        assert!(!draft_permission_allowed(&shell));
+        assert!(!draft_permission_allowed(&PermissionRequestData::default()));
+    }
+    #[test]
+    #[ignore = "requires a connected GitHub identity and consumes a Copilot request"]
+    fn live_reply_shape(){
+        let root=std::env::var("CERBERUS_COPILOT_TEST_DATA").expect("data dir");
+        let identity=std::env::var("CERBERUS_COPILOT_TEST_ID").expect("identity id");
+        let repo=std::env::var("CERBERUS_COPILOT_TEST_REPO").expect("repository path");
+        let prompt=std::env::var("CERBERUS_COPILOT_TEST_PROMPT").unwrap_or_else(|_|"Reply with exactly READY.".into());
+        let result=tauri::async_runtime::block_on(new_conversation(std::path::Path::new(&root),&identity,std::path::Path::new(&repo),"analyze",&prompt,None,None));
+        assert!(result.as_ref().ok().and_then(|reply|reply["text"].as_str()).is_some_and(|text|!text.trim().is_empty()),"{result:?}");
+    }
     #[test]
     fn runtime_starts_with_the_connected_github_token() {
         let started = tauri::async_runtime::block_on(async {

@@ -20,7 +20,7 @@ export function updatedMillis(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return value > 10_000_000_000 ? value : value * 1000;
 }
-export const ordered = (threads: Thread[]) => [...threads].sort((a, b) => updatedMillis(b.updatedAt) - updatedMillis(a.updatedAt) || a.key.localeCompare(b.key));
+export const ordered = (threads: Thread[]) => [...new Map([...threads].sort((a,b)=>updatedMillis(a.updatedAt)-updatedMillis(b.updatedAt)).map(thread=>[thread.key,thread])).values()].sort((a, b) => updatedMillis(b.updatedAt) - updatedMillis(a.updatedAt) || a.key.localeCompare(b.key));
 export const listKey = (repositoryId: string, archived: boolean, enabled: Provider[]) => `${repositoryId}:${archived ? "1" : "0"}:${enabled.join(",")}`;
 export const messageKey = (repositoryId: string, threadKey: string) => `${repositoryId}:${threadKey}`;
 export const messagesAreCurrent = (cached: MessageCache | undefined, threadUpdatedAt: number) => !!cached && cached.updatedAt >= threadUpdatedAt;

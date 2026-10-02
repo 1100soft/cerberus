@@ -1,4 +1,7 @@
-import { IdentityCard } from './IdentityCard';
+import { IdentityCard, IdentityOrderContext } from './IdentityCard';
+import { useCardReorder } from '../lib/cardReorder';
+import { useChatgptAccounts } from '../lib/chatgptAccounts';
+import { externalProviders, useExternalIdentities } from '../lib/externalIdentities';
 import { ExternalIdentityCards, externalLogin } from './ExternalIdentityCards';
 import { ChatgptIdentityCards, ChatgptSettings } from './ChatgptIdentities';
 import { IdentitySignIn } from './IdentitySignIn';
@@ -58,6 +61,15 @@ function GithubDeviceDialog({ flow, copied, onCopy, onCancel }: { flow: GithubDe
 }
 
 export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId, startGithubLogin, startExternalLogin, onClose, onChanged }: Props) {
+  const chatgptAccounts=useChatgptAccounts();
+  const externalAccounts=useExternalIdentities();
+  const [identityOrder,setIdentityOrder]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem('gitcerberus.identityCardOrder')||'[]');}catch{return [];}});
+  const allCardIds=[...chatgptAccounts.profiles.filter(account=>account.subscription).map(account=>account.id),...externalProviders.flatMap(provider=>externalAccounts.identities.filter(account=>account.provider===provider.id).slice(0,1).map(account=>account.id)),...identities.map(identity=>identity.id)];
+  const orderedCardIds=[...allCardIds].sort((a,b)=>{
+    const left=identityOrder.indexOf(a),right=identityOrder.indexOf(b);
+    return (left<0?Number.MAX_SAFE_INTEGER:left)-(right<0?Number.MAX_SAFE_INTEGER:right);
+  });
+  const reorderCards=useCardReorder(orderedCardIds,ids=>{setIdentityOrder(ids);localStorage.setItem('gitcerberus.identityCardOrder',JSON.stringify(ids));});
   const [, setProviderEnabled] = useProviderPreferences();
   const [showHelp, setShowHelp] = useState(false);
   const [status, setStatus] = useState<GithubAuthStatus>({ browserSignIn: false, githubCli: false });
@@ -184,12 +196,12 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
         <IdentitySignIn onExternalLogin={externalLogin} github={{onClick: () => { void connectBrowser(); }, disabled: !statusReady || !status.browserSignIn || !!flow, message: !statusReady ? 'Checking sign-in availability…' : !status.browserSignIn ? 'GitHub sign-in is unavailable because this build has no product OAuth client ID.' : undefined}} />
       </div>
     </header>
-    <div className="identity-list"><ChatgptIdentityCards/><ExternalIdentityCards startLogin={startExternalLogin}/>
+    <IdentityOrderContext.Provider value={{reorder:reorderCards,position:id=>orderedCardIds.indexOf(id)}}><div className="identity-list"><ChatgptIdentityCards/><ExternalIdentityCards startLogin={startExternalLogin}/>
       {identities.map((identity) => {
         const connectedAccount = identity.connected !== false;
         return <IdentityCard key={identity.id} icon={<ProviderIdentityBadge provider="github" id={identity.id} label={identity.label}/>} label={identity.label} detail={`${identity.providerUsername ? `@${identity.providerUsername} · ` : ""}${identity.gitEmail}`} initialsId={identity.id} connected={connectedAccount} busy={busyId === identity.id || !!flow} onConnect={()=>reconnect(identity)} onDisconnect={()=>void disconnect(identity)}><GithubUsage identity={identity}/></IdentityCard>;
       })}
-    </div>
+    </div></IdentityOrderContext.Provider>
     <ChatgptSettings/>
     {flow && <GithubDeviceDialog flow={flow} copied={codeCopied} onCopy={() => void copyDeviceCode()} onCancel={() => { authAttempt.current++; reconnecting.current = undefined; setFlow(undefined); setMessage('GitHub sign-in was cancelled.'); }} />}
     {message && <p className="oauth-message" role="status">{message}</p>}

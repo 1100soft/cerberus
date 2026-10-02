@@ -20,6 +20,10 @@
   --surface-raised: var(--color-1d1b22);
   --surface-control: var(--color-25222b);
   --border-control: var(--color-3c3746);
+  --syntax-command: var(--color-8dd7c7);
+  --syntax-string: var(--color-f2bd98);
+  --syntax-variable: var(--color-bed0ff);
+  --syntax-comment: var(--color-aaa9b6);
 
   --color-e9e8f0: #e9e8f0;
   --color-111017: #111017;

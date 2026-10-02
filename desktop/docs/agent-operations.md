@@ -36,6 +36,7 @@ From `desktop/`:
 npm run build
 node scripts/check-conversation-display.mjs
 node scripts/check-chatgpt-capabilities.mjs
+/usr/bin/python3 scripts/check-saved-prompts.py
 /usr/bin/python3 scripts/check-viewport.py 900 620
 /usr/bin/python3 scripts/check-repository-ui.py 900 620
 ```
@@ -50,3 +51,5 @@ cargo test --quiet -- --test-threads=1
 ```
 
 The first Rust test checks usage-link allowlisting. The full suite also covers provider parsing and repository behavior. Tests use fixtures and do not start a real paid agent turn.
+
+The Agent pane header includes **Copy checkpoint commit prompt** and an adjacent editor when a repository is selected. The prompt is copied for use with an agent working in an external IDE. Its built-in wording asks the agent to account for all working-tree changes, complete the current task, update affected documentation, run relevant quality checks, inspect staged changes, make a coherent commit without pushing, and report the result. Users can edit the template; the custom text is stored locally under `gitcerberus.checkpointCommitPrompt.v1`. **Restore default** restores the built-in wording in the editor, and Save applies it. The app copies the text only; the user pastes it into the intended agent conversation.

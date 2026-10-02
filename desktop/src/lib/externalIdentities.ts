@@ -5,6 +5,7 @@ export const externalProviders=[{id:'cursor',label:'Cursor'},{id:'claude',label:
 export type ExternalIdentity = {id:string;provider:'cursor'|'claude';label:string;connected:boolean;detail:string};
 export type Settings = {defaultAccounts:Record<string,string|null>;repositories:Record<string,Record<string,string|null>>};
 let state:{identities:ExternalIdentity[];settings:Settings;error:string}={identities:[],settings:{defaultAccounts:{},repositories:{}},error:''};
+export function currentExternalIdentities(){return state;}
 let pending:Promise<void>|undefined;
 let lastUpdated=0;
 const listeners=new Set<()=>void>();

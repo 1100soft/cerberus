@@ -13,8 +13,15 @@ mod cursor_editor;
 mod cursor_launch;
 mod cursor_notifications;
 mod copilot;
+mod draft_runs;
 mod copilot_history;
 mod claude_history;
+mod prompt_delivery;
+mod shell_automation;
+mod automation_logs;
+mod handoffs;
+mod repository_watcher;
+mod repository_changes;
 mod setup_terminal;
 mod db;
 mod git;
@@ -39,6 +46,8 @@ use tauri::{
 
 struct AppState {
     agents: Arc<agents::Agents>,
+    drafts: Arc<draft_runs::DraftRuns>,
+    repository_watchers: Arc<repository_watcher::RepositoryWatchers>,
     chatgpt: Arc<chatgpt_accounts::ChatgptAccounts>,
     db: Arc<Database>,
     git: GitService,
@@ -210,6 +219,100 @@ async fn agent_resume_status(profile_id: String, repository_id: String, target: 
         Ok(_) => agent_sessions::ResumeStatus {available:true, reason:"Continue this conversation".into()},
         Err(reason) => agent_sessions::ResumeStatus {available:false, reason},
     }).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn prompt_capability(repository_id:String,provider:String,thread_id:String,state:State<'_,AppState>)->Result<prompt_delivery::Capability,String>{
+    let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
+    let repo=state.db.repository_path(&repository_id)?;let key=prompt_repository_key(&record);let root=state.data_dir.clone();let codex=state.codex.clone();let cursor=state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::capability(&root,&repo,&key,&provider,&thread_id,&codex,&cursor)).await.map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+async fn submit_saved_prompt(repository_id:String,provider:String,thread_id:String,prompt:String,state:State<'_,AppState>)->Result<String,String>{
+    let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
+    let repo=state.db.repository_path(&repository_id)?;let key=prompt_repository_key(&record);let root=state.data_dir.clone();let codex=state.codex.clone();let cursor=state.cursor.clone();
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::submit(&root,&repo,&key,&provider,&thread_id,&prompt,&codex,&cursor)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+    let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
+    let repo=state.db.repository_path(&repository_id)?;
+    let key=prompt_repository_key(&record);
+    let root=state.data_dir.clone();
+    let registration=request_id.map(|id|state.drafts.register(id)).transpose()?;
+    let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
+    if provider=="copilot" {
+        if record.identity.as_ref().map(|item|item.id.as_str())!=Some(identity_id.as_str()){return Err("Assign the selected GitHub identity to this repository first".into());}
+        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled).await;
+    }
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
+#[tauri::command]
+async fn run_automation_shell(repository_id:String,script:String,output:tauri::ipc::Channel<shell_automation::ShellChunk>,handoff_input_path:Option<String>,handoff_output_paths:std::collections::HashMap<String,String>,state:State<'_,AppState>)->Result<shell_automation::ShellRun,String>{
+    let repository=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||shell_automation::run_stream_with_handoffs(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
+    let mut errors=Vec::new();
+    let desired=repository_ids.into_iter().filter_map(|id|match state.db.repository_path(&id){Ok(path)=>Some((id,path)),Err(error)=>{errors.push(format!("{id}: {error}"));None}}).collect::<Vec<_>>();
+    let watchers=state.repository_watchers.clone();
+    errors.extend(tauri::async_runtime::spawn_blocking(move||watchers.sync(desired,app)).await.map_err(|error|error.to_string())??);
+    Ok(errors)
+}
+#[tauri::command]
+async fn repository_changed_lines(repository_id:String,state:State<'_,AppState>)->Result<u64,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||repository_changes::changed_lines(&path)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn repository_changed_lines_batch(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<std::collections::HashMap<String,u64>,String>{
+    let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok().map(|path|(id,path))).collect::<Vec<_>>();
+    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|(id,path)|repository_changes::changed_lines(&path).ok().map(|count|(id,count))).collect()).await.map_err(|error|error.to_string())
+}
+#[tauri::command]
+async fn repository_change_summary(repository_id:String,state:State<'_,AppState>)->Result<repository_changes::ChangeSummary,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||repository_changes::summary(&path)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn repository_commit_state(repository_id:String,state:State<'_,AppState>)->Result<repository_changes::CommitState,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||repository_changes::commit_state(&path)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn repository_commit_states_batch(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<std::collections::HashMap<String,repository_changes::CommitState>,String>{
+    let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok().map(|path|(id,path))).collect::<Vec<_>>();
+    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|(id,path)|repository_changes::commit_state(&path).ok().map(|state|(id,state))).collect()).await.map_err(|error|error.to_string())
+}
+#[tauri::command]
+fn handoff_output_path(repository_id:String,name:String,run_id:String,state:State<AppState>)->Result<String,String>{handoffs::output_path(&state.db.repository_path(&repository_id)?,&name,&run_id)}
+#[tauri::command]
+fn publish_handoff(repository_id:String,name:String,run_id:String,state:State<AppState>)->Result<bool,String>{handoffs::publish(&state.db.repository_path(&repository_id)?,&name,&run_id)}
+#[tauri::command]
+fn has_pending_handoff(repository_id:String,name:String,state:State<AppState>)->Result<bool,String>{handoffs::has_pending(&state.db.repository_path(&repository_id)?,&name)}
+#[tauri::command]
+fn claim_handoff(repository_id:String,name:String,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim(&state.db.repository_path(&repository_id)?,&name)}
+#[tauri::command]
+fn finish_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::finish(&state.db.repository_path(&repository_id)?,&name,&id)}
+#[tauri::command]
+fn release_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::release(&state.db.repository_path(&repository_id)?,&name,&id)}
+#[tauri::command]
+async fn cleanup_stale_handoffs(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<usize,String>{
+    let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok()).collect::<Vec<_>>();
+    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|path|handoffs::cleanup_stale(&path).ok()).sum()).await.map_err(|error|error.to_string())
+}
+#[tauri::command]
+fn write_automation_log(entry:automation_logs::Entry,state:State<AppState>)->Result<(),String>{automation_logs::write(&state.data_dir,&entry)}
+#[tauri::command]
+fn list_automation_logs(automation_id:String,state:State<AppState>)->Result<Vec<automation_logs::Summary>,String>{automation_logs::list(&state.data_dir,&automation_id)}
+#[tauri::command]
+fn read_automation_log(automation_id:String,repository_id:String,run_id:String,state:State<AppState>)->Result<automation_logs::Entry,String>{automation_logs::read(&state.data_dir,&automation_id,&repository_id,&run_id)}
+fn prompt_repository_key(repository:&Repository)->String{
+    repository.canonical_remote.as_deref().and_then(|remote|url::Url::parse(remote).ok()).map(|url|format!("{}{}",url.host_str().unwrap_or_default(),url.path().trim_end_matches('/').trim_end_matches(".git")).to_lowercase()).filter(|value|!value.is_empty()).unwrap_or_else(||repository.id.clone())
 }
 #[tauri::command]
 fn cancel_agent(repository_id: String, state: State<AppState>) -> Result<(), String> {
@@ -715,6 +818,8 @@ pub fn run() {
                 db: Arc::new(db),
                 git: GitService::default(),
                 agents: Arc::new(agents::Agents::default()),
+                drafts: Arc::new(draft_runs::DraftRuns::default()),
+                repository_watchers: Arc::new(repository_watcher::RepositoryWatchers::default()),
                 chatgpt:Arc::new(chatgpt_accounts::ChatgptAccounts::default()),
                 setup_terminal: Arc::new(setup_terminal::SetupTerminal::default()),
                 data_dir: data.clone(),
@@ -767,7 +872,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent,
+            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, claim_handoff, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,

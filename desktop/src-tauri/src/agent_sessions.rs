@@ -95,6 +95,7 @@ fn cursor_store(id: &str) -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(|root| PathBuf::from(root).join(".cursor")))?;
     cursor_store_in(&config, id)
 }
+pub fn cursor_session_exists(id: &str) -> bool { valid_id(id) && cursor_store(id).is_some() }
 pub fn resolve(root: &Path, profile: &Profile, repository: &Path, target: &ResumeTarget, codex: &CodexService) -> Result<PathBuf, String> {
     if target.provider != profile.provider { return Err("Choose an account for this conversation’s agent to continue it".into()); }
     if target.source != "app" && target.source != "codex-history" { return Err("This Cursor history entry is not a resumable CLI session. Start a new chat with the loaded messages".into()); }

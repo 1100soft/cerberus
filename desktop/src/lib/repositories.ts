@@ -76,7 +76,7 @@ export function selectRepositoryControl(repositories: Repository[], repositoryId
 
 export const repositoryVisibility = (repo: Repository) => repo.github ? (repo.github.private ? 'private' : 'public') : 'unverified';
 export function associatedIdentity(repo: Repository, identities: Identity[]): Identity | undefined {
-  return repo.identity || identities.find(identity => identity.id === repo.github?.identityId);
+  return repo.identity ? identities.find(identity=>identity.id===repo.identity?.id)||repo.identity : undefined;
 }
 export type StatusFilter = 'all' | 'dirty' | 'ahead' | 'behind' | 'mismatch';
 export type RepositoryFilters = { owners: string[]; ownersExplicit?: boolean; visibility: string; presence: string; status: StatusFilter; sort: string };

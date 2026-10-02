@@ -182,6 +182,38 @@ impl CodexService {
             .and_then(|path| path.parent()).map(Path::to_path_buf).ok_or_else(|| "The Codex session storage location is unsupported".into())
     }
 
+    pub fn can_append(&self, repository:&Path, id:&str) -> Result<bool,String> {
+        let value=self.request("thread/read",json!({"threadId":id,"includeTurns":false}))?;
+        if !value["thread"]["cwd"].as_str().is_some_and(|cwd|same_directory(repository,Path::new(cwd))){return Err("This Codex conversation belongs to another repository".into());}
+        Ok(value["thread"]["status"]["type"]=="active")
+    }
+
+    pub fn submit_saved_turn(&self,repository:&Path,id:&str,prompt:&str)->Result<(),String>{
+        let executable=crate::provider_paths::resolve_from_file(&self.executable_file,"codex")?.ok_or("Codex is not installed")?;
+        let mut client=Client::start(executable.as_os_str(),self.home.as_deref())?;
+        client.capture_events();
+        let info=client.request("thread/read",json!({"threadId":id,"includeTurns":false}))?;
+        if !info["thread"]["cwd"].as_str().is_some_and(|cwd|same_directory(repository,Path::new(cwd))){return Err("This Codex conversation belongs to another repository".into());}
+        if info["thread"]["status"]["type"]=="active" {return Err("This Codex thread is still working".into());}
+        let resumed=client.request("thread/resume",json!({"threadId":id,"excludeTurns":true,"cwd":repository,"approvalPolicy":"never","sandbox":"workspace-write"}))?;
+        if resumed["thread"]["id"].as_str()!=Some(id){return Err("Codex resumed a different conversation; nothing was sent".into());}
+        let started=client.request("turn/start",json!({"threadId":id,"input":[{"type":"text","text":prompt}],"cwd":repository,"approvalPolicy":"never","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[repository],"networkAccess":false}}))?;
+        let turn=started["turn"]["id"].as_str().ok_or("Codex returned no turn ID")?.to_owned();
+        let deadline=Instant::now()+Duration::from_secs(900);
+        loop {
+            if Instant::now()>=deadline {client.interrupt(id,&turn);return Err("Codex timed out after 15 minutes. Inspect the conversation before retrying.".into());}
+            let Some(event)=client.next_event()? else {continue};
+            if let Some(request_id)=event.get("id") {if event.get("method").is_some(){client.reject_request(request_id.clone())?;}continue;}
+            let params=&event["params"];
+            if params["threadId"].as_str().is_some_and(|thread|thread!=id)||params["turnId"].as_str().is_some_and(|value|value!=turn){continue;}
+            match event["method"].as_str().unwrap_or("") {
+                "error" if !params["willRetry"].as_bool().unwrap_or(false)=>return Err(params["error"]["message"].as_str().unwrap_or("Codex turn failed").into()),
+                "turn/completed" if params["turn"]["id"].as_str()==Some(&turn)=>return match params["turn"]["status"].as_str(){Some("completed")=>Ok(()),_=>Err(params["turn"]["error"]["message"].as_str().unwrap_or("Codex turn did not complete").into())},
+                _=>{}
+            }
+        }
+    }
+
     pub fn update_thread(&self, repository: &Path, id: &str, action: &str, name: Option<&str>) -> Result<(), String> {
         let value = self.request("thread/read", json!({"threadId":id,"includeTurns":false}))?;
         if !value["thread"]["cwd"].as_str().is_some_and(|cwd| same_directory(repository, Path::new(cwd))) {
