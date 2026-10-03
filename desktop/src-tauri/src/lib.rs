@@ -251,9 +251,9 @@ async fn run_new_agent_conversation(repository_id:String,provider:String,identit
 #[tauri::command]
 fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
 #[tauri::command]
-async fn run_automation_shell(repository_id:String,script:String,output:tauri::ipc::Channel<shell_automation::ShellChunk>,handoff_input_path:Option<String>,handoff_output_paths:std::collections::HashMap<String,String>,state:State<'_,AppState>)->Result<shell_automation::ShellRun,String>{
+async fn run_automation_shell(repository_id:String,script:String,output:tauri::ipc::Channel<shell_automation::ShellChunk>,handoff_input_path:Option<String>,handoff_output_paths:std::collections::HashMap<String,String>,context:Option<std::collections::HashMap<String,String>>,state:State<'_,AppState>)->Result<shell_automation::ShellRun,String>{
     let repository=state.db.repository_path(&repository_id)?;
-    tauri::async_runtime::spawn_blocking(move||shell_automation::run_stream_with_handoffs(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths)).await.map_err(|error|error.to_string())?
+    tauri::async_runtime::spawn_blocking(move||shell_automation::run_stream_with_context(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context.unwrap_or_default())).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
 async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
@@ -291,7 +291,7 @@ async fn repository_commit_states_batch(repository_ids:Vec<String>,state:State<'
 #[tauri::command]
 fn handoff_output_path(repository_id:String,name:String,run_id:String,state:State<AppState>)->Result<String,String>{handoffs::output_path(&state.db.repository_path(&repository_id)?,&name,&run_id)}
 #[tauri::command]
-fn publish_handoff(repository_id:String,name:String,run_id:String,state:State<AppState>)->Result<bool,String>{handoffs::publish(&state.db.repository_path(&repository_id)?,&name,&run_id)}
+fn publish_handoff(repository_id:String,name:String,run_id:String,payload:Option<String>,state:State<AppState>)->Result<bool,String>{let repository=state.db.repository_path(&repository_id)?;if let Some(payload)=payload{handoffs::write_payload(&repository,&name,&run_id,&payload)?;}handoffs::publish(&repository,&name,&run_id)}
 #[tauri::command]
 fn has_pending_handoff(repository_id:String,name:String,state:State<AppState>)->Result<bool,String>{handoffs::has_pending(&state.db.repository_path(&repository_id)?,&name)}
 #[tauri::command]

@@ -37,7 +37,7 @@ script = r"""
  const repos=['1','2'].map(id=>({id,displayName:'repo-'+id,localPresent:true,localPath:'/virtual/'+id,canonicalRemote:'https://github.com/example/repo-'+id,identity:{id:'github',providerUsername:'example'}}));
  api.repositories=async()=>repos;
  api.codexThreads=async()=>({data:[]});api.cursorThreads=async()=>({data:[]});
- const calls=[];api.runAutomationShell=async(repo,script)=>{calls.push({repo,script});return {result:'done',stdout:'done',stderr:''};};
+ const calls=[];api.runAutomationShell=async(repo,script,onOutput,incoming,outgoing,context)=>{calls.push({repo,script,context});return {result:'done',stdout:'done',stderr:''};};
  const passId='ci-pass-'+crypto.randomUUID(),failId='ci-fail-'+crypto.randomUUID();
  const now=Date.now();
  const base={repositoryId:'1',repositoryIds:['1','2'],provider:'codex',threadId:'',prompt:'echo ci',minutes:60,enabled:true,nextAt:now+60000,editor:'vscode',kind:'shell',ciSince:now-1000};
@@ -79,6 +79,7 @@ script = r"""
  await pause(100);assert(calls.length===3,'CI completion before automation creation triggered');
  automation.recordAutomationCiRuns('2',[run(104,'success',1,new Date(now).toISOString(),'release/1')]);await pause(100);
  assert(calls.length===3,'CI completion on an excluded branch triggered');
+ assert(calls[0].context?.CERBERUS_REPOSITORY_ID==='2'&&calls[0].context?.CERBERUS_BRANCH==='main'&&calls[0].context?.CERBERUS_COMMIT_SHA==='a'.repeat(40)&&calls[0].context?.CERBERUS_CI_CONCLUSION==='success','CI shell context was not forwarded');
  automation.recordAutomationCiRuns('2',[run(105,'success',1,new Date(now).toISOString(),'feature/new')]);
  await wait(()=>calls.length===4);await wait(()=>automation.savedPrompts().find(job=>job.id===passId)?.state==='completed');
  automation.savePrompt({...automation.savedPrompts().find(job=>job.id===passId),enabled:false});

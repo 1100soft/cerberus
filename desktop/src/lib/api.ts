@@ -67,11 +67,11 @@ export const api = {
     if (!inTauri()) return;
     return invoke('cancel_draft',{requestId});
   },
-  async runAutomationShell(repositoryId:string,script:string,onOutput?:(chunk:{stream:string;text:string})=>void,handoffInputPath?:string,handoffOutputPaths:Record<string,string>={}):Promise<{result:string;stdout:string;stderr:string}>{
+  async runAutomationShell(repositoryId:string,script:string,onOutput?:(chunk:{stream:string;text:string})=>void,handoffInputPath?:string,handoffOutputPaths:Record<string,string>={},context:Record<string,string>={}):Promise<{result:string;stdout:string;stderr:string}>{
     if (!inTauri()) throw new Error('Shell automations require the desktop app.');
     const output=new Channel<{stream:string;text:string}>();
     output.onmessage=onOutput||(()=>{});
-    return invoke('run_automation_shell',{repositoryId,script,output,handoffInputPath:handoffInputPath||null,handoffOutputPaths});
+    return invoke('run_automation_shell',{repositoryId,script,output,handoffInputPath:handoffInputPath||null,handoffOutputPaths,context});
   },
   async watchAutomationRepositories(repositoryIds:string[]):Promise<string[]>{
     if (!inTauri()) return [];
@@ -101,9 +101,9 @@ export const api = {
     if(!inTauri())return `/tmp/gitcerberus-demo-handoffs/${repositoryId}/${name}/${runId}.txt`;
     return invoke('handoff_output_path',{repositoryId,name,runId});
   },
-  async publishHandoff(repositoryId:string,name:string,runId:string):Promise<boolean>{
+  async publishHandoff(repositoryId:string,name:string,runId:string,payload?:string):Promise<boolean>{
     if(!inTauri())return false;
-    return invoke('publish_handoff',{repositoryId,name,runId});
+    return invoke('publish_handoff',{repositoryId,name,runId,payload:payload??null});
   },
   async hasPendingHandoff(repositoryId:string,name:string):Promise<boolean>{
     if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>!item.claimed);

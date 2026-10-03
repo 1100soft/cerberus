@@ -986,8 +986,6 @@ input[type="number"] { text-align: right; }
 .checkpoint-prompt-dialog textarea { width: 100%; min-height: 0; resize: none; padding: 12px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--surface-control); color: var(--text-primary); font: inherit; line-height: 1.55; }
 .checkpoint-prompt-dialog > footer .automation-validation-hint { margin-right: auto; }
 .automation-branch input[role="combobox"] { width: 100%; min-width: 0; box-sizing: border-box; }
-.automation-model-row { display: flex; gap: 8px; }
-.automation-model-row .app-select { flex: 1; min-width: 0; }
 .automation-branch .handoff-name-suggestions { max-height: min(180px, 30dvh); }
 .automation-dialog .automation-output textarea, .automation-dialog .automation-draft textarea, .automation-dialog .shell-editor, .automation-dialog .shell-editor .shell-editor-highlight, .automation-dialog .shell-editor textarea { min-height: 60px; }
 .automation-dialog > header { gap: 10px; }
@@ -1028,3 +1026,18 @@ input[type="number"] { text-align: right; }
 
 .automation-page .saved-prompt-list { flex: 1; min-height: 0; overflow: auto; align-content: start; }
 .automation-editor-grid.automation-editor-solo { grid-template-columns: minmax(0,1fr); }
+
+.automation-ai-feature { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.automation-ai-feature > button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--surface-control); color: var(--text-primary); }
+.automation-ai-feature > button[aria-pressed="true"] { border-color: var(--accent-codex-border); color: var(--accent-codex); }
+.automation-ai-feature > small { color: var(--text-secondary); }
+.automation-output .automation-field-heading { justify-content: flex-start; flex-wrap: wrap; gap: 6px; }
+.automation-output .automation-field-heading > span:last-child { margin-left: auto; }
+.automation-output .automation-field-heading .app-select { min-width: 0; max-width: 190px; margin-left: 0; }
+.automation-model-controls { flex-wrap: wrap; min-width: 0; }
+.automation-emits { flex-wrap: wrap; }
+.automation-emits > .handoff-name-input { flex: 1 1 160px; }
+.info-popover-button { display: inline-flex; align-items: center; justify-content: center; padding: 3px; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.info-popover { position: fixed; z-index: 100; box-sizing: border-box; overflow: auto; padding: 12px; border: 1px solid var(--border-control); border-radius: 8px; background: var(--surface-raised); color: var(--text-primary); box-shadow: 0 8px 24px #0006; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.info-popover p { margin: 0 0 8px; }
+.info-popover p:last-child { margin-bottom: 0; }
