@@ -6,6 +6,7 @@ import type { Provider } from './conversationCache';
 import { getAgentChat, latestAgentChat, runExternalAutomation, sendAgentMessage, waitForAgentChat, type AgentProfile } from './agentChats';
 import { automationAccount } from './automationAccounts';
 import { appendAutomationOutput, beginAutomationOutput, endAutomationOutput } from './automationOutput';
+import { isGithubRemote } from './repositories';
 import { repositoryHistoryWorking } from './conversationCache';
 import { currentChatgptAccounts, refreshChatgptAccounts } from './chatgptAccounts';
 import { currentExternalIdentities, refreshExternalIdentities } from './externalIdentities';
@@ -332,16 +333,52 @@ async function pollGithubEvents(){
   }catch(error){console.warn('Could not list repositories for GitHub events:',error);}
   finally{checkingGithubEvents=false;}
 }
-const ciPollErrors=new Map<string,string>();
-async function pollCi(){
-  if(checkingCi||!jobs.some(job=>job.enabled&&automationConditions(job).some(condition=>condition==='ciPass'||condition==='ciFail')))return;
+type CiPollFailure={kind:string;message:string;retryAfterSeconds?:number|null};
+type CiPollHealth={failures:number;retryAt:number;error:CiPollFailure;notified:boolean};
+const ciPollHealth=new Map<string,CiPollHealth>();
+let ciOutageNotified=false;
+function ciFailure(error:unknown):CiPollFailure{
+  if(error&&typeof error==='object'&&'kind' in error&&'message' in error)return error as CiPollFailure;
+  return {kind:'transport',message:String(error)};
+}
+function transientCiError(error:CiPollFailure){return !['authentication','access','configuration'].includes(error.kind);}
+export async function pollAutomationCi(now?:number){
+  const pollTime=()=>now??Date.now();
+  if(checkingCi)return;
+  const ciJobs=jobs.filter(job=>job.enabled&&automationConditions(job).some(condition=>condition==='ciPass'||condition==='ciFail'));
+  if(!ciJobs.length){ciPollHealth.clear();ciOutageNotified=false;return;}
   checkingCi=true;
   try{
-    const repositories=(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath);
-    for(const repo of repositories){
-      if(!jobs.some(job=>job.enabled&&automationConditions(job).some(condition=>condition==='ciPass'||condition==='ciFail')&&(job.includeFutureRepositories||(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repo.id))))continue;
-      try{recordAutomationCiRuns(repo.id,await api.githubCiRuns(repo.id));ciPollErrors.delete(repo.id);}
-      catch(error){const message=String(error);if(ciPollErrors.get(repo.id)!==message){ciPollErrors.set(repo.id,message);addAutomationNotice({automationId:'ci-monitor',repositoryId:repo.id,title:`CI monitoring unavailable · ${repo.displayName}`,message,status:'failed'});}console.warn(`CI monitoring for ${repo.displayName}:`,error);}
+    const repositories=(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath&&isGithubRemote(repo.canonicalRemote)&&repo.identity?.providerUsername&&ciJobs.some(job=>job.includeFutureRepositories||(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repo.id)));
+    const ids=new Set(repositories.map(repo=>repo.id));
+    for(const id of ciPollHealth.keys())if(!ids.has(id))ciPollHealth.delete(id);
+    // A slow or inaccessible repository must not block checks for every other repository.
+    let nextRepository=0;
+    await Promise.allSettled(Array.from({length:Math.min(4,repositories.length)},async()=>{
+      while(nextRepository<repositories.length){
+        const repo=repositories[nextRepository++];
+        const previous=ciPollHealth.get(repo.id);if(previous&&pollTime()<previous.retryAt)continue;
+        try{recordAutomationCiRuns(repo.id,await api.githubCiRuns(repo.id));ciPollHealth.delete(repo.id);}
+        catch(error){
+          const failure=ciFailure(error),failures=(previous?.failures||0)+1;
+          const backoff=Math.min(900,60*2**Math.min(failures-1,4));
+          const retryDelay=Math.max(backoff,Number.isFinite(failure.retryAfterSeconds)?Math.max(0,failure.retryAfterSeconds!):0);
+          ciPollHealth.set(repo.id,{failures,retryAt:pollTime()+retryDelay*1000,error:failure,notified:previous?.error.kind===failure.kind&&previous.notified||false});
+          console.warn(`CI checks for ${repo.displayName} will retry:`,failure.message);
+        }
+      }
+    }));
+    const outages=repositories.filter(repo=>{const health=ciPollHealth.get(repo.id);return health&&transientCiError(health.error);});
+    if(!outages.length)ciOutageNotified=false;
+    const persistent=outages.filter(repo=>ciPollHealth.get(repo.id)!.failures>=3);
+    if(persistent.length&&!ciOutageNotified){
+      ciOutageNotified=true;
+      addAutomationNotice({automationId:'ci-monitor',title:'CI checks delayed',message:`GitHub monitoring is delayed for ${persistent.map(repo=>repo.displayName).join(', ')}. This is a monitoring problem, not a failed workflow. Checks retry automatically. ${ciPollHealth.get(persistent[0].id)!.error.message}`,status:'message'});
+    }
+    const denied=repositories.filter(repo=>{const health=ciPollHealth.get(repo.id);return health&&!transientCiError(health.error)&&!health.notified;});
+    if(denied.length){
+      for(const repo of denied)ciPollHealth.get(repo.id)!.notified=true;
+      addAutomationNotice({automationId:'ci-monitor',title:'CI access needs attention',message:denied.map(repo=>`${repo.displayName}: ${ciPollHealth.get(repo.id)!.error.message}`).join('\n'),status:'message'});
     }
   }catch(error){console.warn('Could not list repositories for CI monitoring:',error);}
   finally{checkingCi=false;}
@@ -402,8 +439,8 @@ export function startSavedPromptScheduler(){
   void syncFileWatchers();
   let watcherScope=JSON.stringify(jobs.map(job=>[job.id,job.trigger,job.repositoryIds,job.repositoryId,job.includeFutureRepositories]));
   const unsubscribe=subscribeSavedPrompts(()=>{const next=JSON.stringify(jobs.map(job=>[job.id,job.trigger,job.repositoryIds,job.repositoryId,job.includeFutureRepositories]));if(next!==watcherScope){watcherScope=next;void syncFileWatchers();}});
-  void tick();void pollCi();void pollGithubEvents();const timer=window.setInterval(()=>{void tick();void syncFileWatchers();},30_000);
-  const ciTimer=window.setInterval(()=>void pollCi(),60_000);
+  void tick();void pollAutomationCi();void pollGithubEvents();const timer=window.setInterval(()=>{void tick();void syncFileWatchers();},30_000);
+  const ciTimer=window.setInterval(()=>void pollAutomationCi(),60_000);
   const githubEventTimer=window.setInterval(()=>void pollGithubEvents(),60_000);
   const handoffTimer=window.setInterval(()=>{if(jobs.some(job=>job.enabled&&automationConditions(job).includes('handoff')))void tick();},2000);
   return()=>{stopped=true;unlisten?.();unlistenGit?.();unsubscribe();window.clearInterval(timer);window.clearInterval(ciTimer);window.clearInterval(githubEventTimer);window.clearInterval(handoffTimer);for(const timeout of debounceTimers.values())window.clearTimeout(timeout);debounceTimers.clear();};
