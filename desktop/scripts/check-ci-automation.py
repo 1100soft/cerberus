@@ -25,7 +25,7 @@ script = r"""
  const conditionOptions=[...document.querySelectorAll('[role="option"]')];
  assert(conditionOptions.some(node=>node.textContent==='When CI passes')&&conditionOptions.some(node=>node.textContent==='When CI fails'),'CI conditions are missing from the dialog');
  conditionOptions.find(node=>node.textContent==='When CI passes').click();await pause();
- assert(document.querySelector('.automation-scope-note').textContent.includes('only for their repository'),'CI repository scope is unclear');
+ assert(!document.querySelector('.automation-repositories').open,'Repository picker expanded by default');document.querySelector('.automation-repositories summary').click();await pause();assert(document.querySelector('.automation-repositories .automation-scope-note').textContent.includes('only where the event occurs'),'CI repository scope is unclear');
  assert(document.querySelector('[aria-label="Branch patterns"]')?.value==='*'&&document.querySelector('[aria-label="All except"]'),'CI branch selector did not default to all branches');
  document.querySelector('[aria-label="Close new automation"]').click();
  window.__ciStage='scheduler setup';

@@ -985,17 +985,9 @@ input[type="number"] { text-align: right; }
 .checkpoint-prompt-dialog .automation-dialog-content { display: flex; flex: 1; min-height: 0; }
 .checkpoint-prompt-dialog textarea { width: 100%; min-height: 0; resize: none; padding: 12px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--surface-control); color: var(--text-primary); font: inherit; line-height: 1.55; }
 .checkpoint-prompt-dialog > footer .automation-validation-hint { margin-right: auto; }
-.automation-target-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 28%); gap: 10px; align-items: start; }
-.automation-branch { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.automation-branch .handoff-name-input { flex: 1; min-width: 0; }
 .automation-branch input[role="combobox"] { width: 100%; min-width: 0; box-sizing: border-box; }
-.automation-branch label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .automation-model-row { display: flex; gap: 8px; }
 .automation-model-row .app-select { flex: 1; min-width: 0; }
-@media (max-width: 680px) { .automation-target-row { grid-template-columns: minmax(0, 1fr); } }
-.automation-target-row { grid-template-columns: minmax(0, 1fr) minmax(0, 220px); }
-.automation-branch { flex-wrap: wrap; }
-.automation-branch .handoff-name-input { flex-basis: 100%; }
 .automation-branch .handoff-name-suggestions { max-height: min(180px, 30dvh); }
 .automation-dialog .automation-output textarea, .automation-dialog .automation-draft textarea, .automation-dialog .shell-editor, .automation-dialog .shell-editor .shell-editor-highlight, .automation-dialog .shell-editor textarea { min-height: 60px; }
 .automation-dialog > header { gap: 10px; }
@@ -1016,9 +1008,7 @@ input[type="number"] { text-align: right; }
 .automation-condition-parameter label { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .automation-condition-parameter input[type="number"] { width: 5.5em; }
 .automation-condition-parameter .handoff-name-input { width: 170px; flex: none; }
-.automation-branch { align-items: center; }
 .automation-branch > strong { flex: none; color: var(--text-secondary); }
-.automation-branch .handoff-name-input { flex-basis: auto; }
 @media (max-width: 680px) { .automation-dialog > header { flex-wrap: wrap; } .automation-header-name { order: 3; flex-basis: 100%; max-width: none; } .automation-condition-parameter { padding-left: 0; } }
 .automation-dialog-content { padding-top: 5px; padding-bottom: 5px; }
 .automation-dialog-content .saved-prompt-form { gap: 4px; }
@@ -1030,11 +1020,8 @@ input[type="number"] { text-align: right; }
 .automation-condition-parameter label { width: 100%; }
 .automation-condition-parameter .handoff-name-input { flex: 1; width: auto; }
 .automation-condition-dialog input[type="number"] { margin-left: auto; }
-.automation-target-row { grid-template-columns: minmax(250px, 0.9fr) minmax(380px, 1.1fr); }
-.automation-branch { flex-wrap: nowrap; }
-.automation-branch .handoff-name-input { flex: 1 1 auto; min-width: 140px; }
-.automation-branch label { flex: none; }
-@media (max-width: 760px) { .automation-target-row { grid-template-columns: minmax(0, 1fr); } }
-.automation-target-row { display: flex; flex-wrap: wrap; }
-.automation-target-row > .automation-scope { flex: 1 1 255px; }
-.automation-target-row > .automation-branch { flex: 1 1 380px; }
+.automation-target-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: start; }
+.automation-target-row > .automation-scope, .automation-target-row > .automation-branch { flex: 1 1 350px; min-width: 0; }
+.automation-branch { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.automation-branch .handoff-name-input { flex: 1 1 auto; min-width: 120px; }
+.automation-branch label { display: flex; align-items: center; gap: 4px; flex: none; white-space: nowrap; }

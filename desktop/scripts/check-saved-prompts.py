@@ -62,12 +62,14 @@ script = r"""
  assert(!document.querySelector('.automation-condition-dialog')&&!document.querySelector('.automation-dialog[inert]'),'Escape did not restore the main form');
  assert(document.querySelector('[data-condition="interval"] .automation-condition-edit')===document.activeElement,'Focus did not return to the condition chip');
  const scopeBounds=document.querySelector('.automation-scope').getBoundingClientRect(),branchBounds=document.querySelector('.automation-branch').getBoundingClientRect();
- assert(Math.abs(scopeBounds.top-branchBounds.top)<2&&branchBounds.width>scopeBounds.width,'Repository and branch controls are not sharing the row');
+ assert(Math.abs(scopeBounds.top-branchBounds.top)<2&&Math.abs(branchBounds.width-scopeBounds.width)<3,'Repository and branch controls are not sharing the row equally: '+[scopeBounds.top,branchBounds.top,scopeBounds.width,branchBounds.width].join('/'));
  assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'Folded interval dialog requires scrolling: '+document.querySelector('.automation-dialog-content').scrollHeight+'/'+document.querySelector('.automation-dialog-content').clientHeight);
  const repoIds=[...document.querySelectorAll('.automation-repository-choices > div input')].map((node,index)=>node.closest('label').textContent.trim());
  assert(!document.querySelector('.automation-repositories').open,'Repositories expanded by default');
+ assert(!document.querySelector('.automation-scope > .automation-scope-note'),'Repository help occupies collapsed space');
  assert(document.querySelector('.automation-conditions').compareDocumentPosition(document.querySelector('.automation-repositories'))&Node.DOCUMENT_POSITION_FOLLOWING,'Condition must precede repositories');
  document.querySelector('.automation-repositories summary').click();
+ assert(document.querySelector('.automation-repository-choices .automation-scope-note')?.textContent.includes('Runs once per repository'),'Expanded repository help is missing');
  const all=document.querySelector('[aria-label="Select all repositories"]');assert(all,'Select all missing');all.click();await pause();
  const selectedCount=[...document.querySelectorAll('.automation-repository-choices > div input')].filter(node=>node.checked).length;
  assert(selectedCount>=2,'Select all did not select multiple repositories');
