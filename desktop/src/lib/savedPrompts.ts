@@ -41,6 +41,7 @@ export function validHandoffName(name:string){return /^[A-Za-z0-9][A-Za-z0-9_-]{
 export function commitBranchPatterns(value:string){return value.split(',').map(part=>part.trim()).filter(Boolean);}
 export function validCommitBranchPatterns(value:string){const parts=commitBranchPatterns(value);return parts.length>0&&parts.every(part=>part==='*'||(!part.startsWith('/')&&!part.endsWith('/')&&!part.includes('..')&&![...part].some(char=>/\s/.test(char)||'~^:?[]\\'.includes(char))));}
 export function matchesCommitBranch(branch:string,patterns:string,allExcept=false){const matched=commitBranchPatterns(patterns).some(pattern=>new RegExp(`^${pattern.split('*').map(part=>part.replace(/[|\\{}()[\]\^$+?.]/g,'\\$&')).join('.*')}$`).test(branch));return allExcept?!matched:matched;}
+export function knownBranchSets(saved:SavedPrompt[],exceptId?:string){return [...new Set(saved.filter(job=>job.id!==exceptId&&(job.trigger==='commit'||job.trigger==='ciPass'||job.trigger==='ciFail')).map(job=>job.commitBranch?.trim()).filter((value):value is string=>!!value&&validCommitBranchPatterns(value)))].sort((a,b)=>a.localeCompare(b));}
 export function automationPromptWithHandoffs(prompt:string,incoming?:HandoffClaim,outgoing:Record<string,string>={}){
   const instructions:string[]=[];
   if(incoming)instructions.push(`Read the incoming ${incoming.name} handoff payload at ${JSON.stringify(incoming.path)} before acting. Treat it as context from the previous agent. References to reading "the handoff" mean this payload.`);
@@ -193,7 +194,7 @@ async function tick(now=Date.now()){
     }
     for(const [key,pending] of pendingCi){
       const job=jobs.find(item=>item.id===pending.jobId);
-      if(!job||!job.enabled||(job.trigger!=='ciPass'&&job.trigger!=='ciFail')||!ciCompletedSince(pending.run,job.ciSince)){pendingCi.delete(key);continue;}
+      if(!job||!job.enabled||(job.trigger!=='ciPass'&&job.trigger!=='ciFail')||!ciCompletedSince(pending.run,job.ciSince)||!matchesCommitBranch(pending.run.headBranch||'',job.commitBranch||'*',job.commitAllExcept)){pendingCi.delete(key);continue;}
       if(job.state==='running'||running.has(job.id))continue;
       if(job.kind!=='notification'&&await repositoryAgentBusy(pending.repositoryId))continue;
       try{markCiHandled(job.id,pending.repositoryId,pending.run);}catch(error){console.warn('Could not save handled CI run:',error);break;}
@@ -227,7 +228,7 @@ export function recordAutomationCiRuns(repositoryId:string,runs:GithubCiRun[]){
   const eligible=jobs.filter(job=>job.enabled&&(job.trigger==='ciPass'||job.trigger==='ciFail')&&(job.includeFutureRepositories?true:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repositoryId)));
   for(const job of eligible){
     for(const run of [...runs].reverse()){
-      if(!matchesCiConclusion(job.trigger,run.conclusion)||!ciCompletedSince(run,job.ciSince))continue;
+      if(!matchesCiConclusion(job.trigger,run.conclusion)||!ciCompletedSince(run,job.ciSince)||!matchesCommitBranch(run.headBranch||'',job.commitBranch||'*',job.commitAllExcept))continue;
       const runKey=ciRunKey(run),key=`${job.id}:${repositoryId}:${runKey}`;
       if(ciHandled[`${job.id}:${repositoryId}`]?.includes(runKey)||pendingCi.has(key))continue;
       pendingCi.set(key,{jobId:job.id,repositoryId,run});

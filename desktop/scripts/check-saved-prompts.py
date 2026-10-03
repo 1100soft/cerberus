@@ -258,7 +258,7 @@ script = r"""
  assert(!document.querySelector('.automation-draft'),'Notification editor should not show agent drafting');
  const commitSelect=document.querySelector('[aria-label="Condition"]');commitSelect.click();await pause();
  const commitOption=[...document.querySelectorAll('[role="option"]')].find(node=>node.textContent.includes('When a commit is made'));assert(commitOption,'Commit condition missing');commitOption.click();await pause();
- assert(document.querySelector('[aria-label="Commit branches"]')&&document.querySelector('[aria-label="All except"]'),'Commit branch pattern controls missing');
+ assert(document.querySelector('[aria-label="Branch patterns"]')&&document.querySelector('[aria-label="All except"]'),'Commit branch pattern controls missing');
  assert(!document.querySelector('.automation-dialog-content .automation-pair-warnings'),'Pair warning is taking dialog content space');
  commitSelect.click();await pause();
  const handoffOption=[...document.querySelectorAll('[role="option"]')].find(node=>node.textContent==='Handoff');assert(handoffOption,'Handoff condition missing');handoffOption.click();await pause();
