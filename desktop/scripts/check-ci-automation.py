@@ -43,15 +43,15 @@ script = r"""
  const base={repositoryId:'1',repositoryIds:['1','2'],provider:'codex',threadId:'',prompt:'echo ci',minutes:60,enabled:true,nextAt:now+60000,editor:'vscode',kind:'shell',ciSince:now-1000};
  automation.savePrompt({...base,id:passId,title:'CI passed',trigger:'ciPass',commitBranch:'main, feature/*'});
  automation.savePrompt({...base,id:failId,title:'CI failed',trigger:'ciFail',commitBranch:'main, feature/*'});
- automation.savePrompt({...base,id:'branch-set-'+crypto.randomUUID(),title:'Branch set',trigger:'commit',commitBranch:'release/*, hotfix',enabled:false});
+ automation.savePrompt({...base,id:'branch-set-'+crypto.randomUUID(),title:'Branch set',trigger:'commit',commitBranch:'release/*, hotfix',commitAllExcept:true,enabled:false});
  automation.savePrompt({...base,id:'plain-branch-set-'+crypto.randomUUID(),title:'Plain branch set',trigger:'commit',commitBranch:'main, wip',enabled:false});
- assert(automation.knownBranchSets(automation.savedPrompts()).includes('release/*, hotfix'),'Saved branch set missing from suggestions');
+ assert(automation.knownBranchSets(automation.savedPrompts()).includes('All except: release/*, hotfix'),'Saved branch set missing from suggestions');
  window.__ciStage='branch suggestions';
  document.querySelector('.automation-list-header button').click();await wait(()=>document.querySelector('[aria-label="New automation"]'));
  document.querySelector('[aria-label="Add condition"]').click();await pause();
  [...document.querySelectorAll('[role="option"]')].find(node=>node.textContent==='When CI fails').click();await pause();
  const branchInput=document.querySelector('[aria-label="Branch patterns"]');branchInput.blur();await pause(140);branchInput.focus();await pause();
- assert([...document.querySelectorAll('[aria-label="Branch patterns suggestions"] [role="option"]')].some(node=>node.textContent==='release/*, hotfix'),'Saved branch set was not suggested');
+ assert([...document.querySelectorAll('[aria-label="Branch patterns suggestions"] [role="option"]')].some(node=>node.textContent==='All except: release/*, hotfix'),'Saved branch set was not suggested');
  assert([...document.querySelectorAll('[aria-label="Branch patterns suggestions"] [role="option"]')].some(node=>node.textContent==='main, wip'),'Focusing did not show branch sets without wildcards');
  branchInput.blur();branchInput.focus();await pause(150);
  assert(document.querySelector('[aria-label="Branch patterns suggestions"]'),'Refocusing closed branch suggestions');
@@ -59,8 +59,8 @@ script = r"""
  document.documentElement.style.setProperty('--ui-zoom',1);
  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(branchInput,'release/');branchInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  const suggestions=[...document.querySelectorAll('[aria-label="Branch patterns suggestions"] [role="option"]')];
- assert(suggestions.length===1&&suggestions[0].textContent==='release/*, hotfix','Typing did not narrow branch-set suggestions');
- branchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await pause();assert(branchInput.value==='release/*, hotfix','Keyboard selection did not fill the branch set');
+ assert(suggestions.length===1&&suggestions[0].textContent==='All except: release/*, hotfix','Typing did not narrow branch-set suggestions');
+ branchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await pause();assert(branchInput.value==='release/*, hotfix'&&document.querySelector('[aria-label="All except"]').checked,'Keyboard selection did not fill the branch set');
  document.documentElement.style.setProperty('--ui-zoom',1);
  document.querySelector('[aria-label="Close new automation"]').click();
  const run=(id,conclusion,attempt=1,updatedAt=new Date(now).toISOString(),branch='main')=>({id,runAttempt:attempt,name:'Build',headBranch:branch,headSha:'a'.repeat(40),conclusion,updatedAt,htmlUrl:'https://github.com/example/repo-2/actions/runs/'+id});
@@ -117,6 +117,16 @@ script = r"""
  assert(calls.length===beforeIdle,'Idle condition ran before quiet period');
  await automation.checkSavedPromptSchedule(Date.now()+3000);
  await wait(()=>calls.length===beforeIdle+1);
+ window.__ciStage='list scrolling';
+ for(let i=0;i<30;i++)automation.savePrompt({...base,id:'scroll-'+i,title:'Scroll '+i,trigger:'manual',enabled:false});
+ await pause();
+ for(const zoom of [1,1.4,1.5]){
+  document.documentElement.style.setProperty('--ui-zoom',zoom);await pause();
+  const list=document.querySelector('.saved-prompt-list'),bounds=list.getBoundingClientRect();
+  assert(bounds.bottom<=innerHeight+1&&bounds.top>=0,'Automation list exceeds viewport at '+zoom);
+  assert(list.scrollHeight>list.clientHeight,'Automation list has no contained overflow at '+zoom);
+  list.scrollTop=list.scrollHeight;assert(list.scrollTop>0,'Automation list cannot scroll at '+zoom);
+ }
  window.__ciCheck={passed:true,calls,polled};
 })().catch(error=>window.__ciCheck={passed:false,error:String(error),stage:window.__ciStage});
 """

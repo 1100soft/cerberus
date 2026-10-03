@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 
-type Props={value:string;onChange:(value:string)=>void;names:string[];multiple?:boolean;label:string;placeholder?:string;maxLength?:number;showAllOnFocus?:boolean};
-export function SuggestedTextInput({value,onChange,names,multiple=false,label,placeholder,maxLength,showAllOnFocus=false}:Props){
+type Props={value:string;onChange:(value:string)=>void;names:string[];multiple?:boolean;label:string;placeholder?:string;maxLength?:number;onChoose?:(value:string)=>void;showAllOnFocus?:boolean};
+export function SuggestedTextInput({value,onChange,names,multiple=false,label,placeholder,maxLength,showAllOnFocus=false,onChoose}:Props){
   const input=useRef<HTMLInputElement>(null);
   const blurTimer=useRef<number|undefined>(undefined);
   const [open,setOpen]=useState(false);
@@ -14,7 +14,7 @@ export function SuggestedTextInput({value,onChange,names,multiple=false,label,pl
   const suggestions=names.filter(name=>name.toLowerCase().includes(query)&&(!multiple||!selected.has(name)||name===value.slice(start,end).trim().toLowerCase())).slice(0,12);
   const choose=(name:string)=>{
     if(multiple){const prefix=value.slice(0,start).replace(/\s+$/,'');const suffix=value.slice(end).replace(/^\s+/,'');const next=`${prefix}${prefix&&!prefix.endsWith(',')?', ':prefix?' ':''}${name}${suffix?`, ${suffix.replace(/^,\s*/,'')}`:''}`;onChange(next);requestAnimationFrame(()=>{input.current?.focus();input.current?.setSelectionRange(next.length,next.length);});}
-    else onChange(name);
+    else (onChoose||onChange)(name);
     setOpen(false);
   };
   const keyDown=(event:KeyboardEvent<HTMLInputElement>)=>{

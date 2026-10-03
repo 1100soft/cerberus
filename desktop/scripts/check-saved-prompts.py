@@ -42,6 +42,9 @@ script = r"""
  assert(!document.querySelector('.automation-dialog [aria-label="Permission"]'),'Permission dropdown still present');
  assert(document.querySelector('[aria-label="Paste from clipboard"]'),'Paste action missing');
  assert(document.querySelector('[aria-label="Copy output"]'),'Copy action missing');
+ assert(!document.querySelector('[aria-label="Describe automation task"]'),'Draft should start hidden');
+ assert(!document.querySelector('.automation-condition-chip'),'New automation should start without conditions');
+ document.querySelector('[aria-label="Toggle draft"]').click();await pause();
  assert(document.querySelector('[aria-label="Describe automation task"]'),'Draft instruction missing');
  assert(!document.querySelector('.automation-repositories'),'Manual automation asks for repositories before run');
  assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'Default dialog requires scrolling: '+document.querySelector('.automation-dialog-content').scrollHeight+'/'+document.querySelector('.automation-dialog-content').clientHeight);
@@ -51,8 +54,8 @@ script = r"""
  assert(document.querySelector('.automation-conditions > strong')?.textContent==='Conditions','Conditions row is not labeled');
  assert(document.querySelector('.automation-condition-chip').textContent.includes('60 min'),'Interval parameter is missing from its chip');
  assert(document.querySelector('.automation-condition-dialog')&&document.querySelector('.automation-dialog[inert]'),'Condition dialog did not block the automation form');
- document.querySelector('.automation-condition-dialog footer button').click();await pause();
- assert(!document.querySelector('.automation-condition-dialog'),'Condition dialog did not close');
+ document.querySelector('[aria-label="Interval minutes"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await pause();
+ assert(!document.querySelector('.automation-condition-dialog'),'Enter did not close the condition dialog');
  document.querySelector('.automation-condition-chip .automation-condition-edit').click();await pause();
  const intervalInput=document.querySelector('[aria-label="Interval minutes"]');
  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(intervalInput,'30');intervalInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();
@@ -111,7 +114,7 @@ script = r"""
  assert(document.querySelector('.automation-condition-chip').textContent.includes('Every interval'),'Edit did not prefill condition');
  assert(document.querySelector('.automation-target-summary').textContent==='All','Edit did not prefill future repository scope');
  api.runNewAgentConversation=async(repo,agent,identity,mode,request,sessionId)=>{editDraftCalls.push({repo,agent,request,sessionId});return {text:'printf "revised shell"',sessionId:'edit-draft-session'};};
- await choose('Draft agent','copilot');
+ if(!document.querySelector('[aria-label="Draft agent"]')){document.querySelector('[aria-label="Toggle draft"]').click();await pause();}await choose('Draft agent','copilot');
  const editInstruction=document.querySelector('textarea[aria-label="Describe automation task"]');
  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(editInstruction,'Add a revised message');editInstruction.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  editInstruction.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));
@@ -135,10 +138,12 @@ script = r"""
  (await wait(()=>document.querySelector('[aria-label="Close automation details"]'))).click();await pause();
  window.__automationStage='manual runtime target';
  document.querySelector('.automation-list-header button').click();await wait(()=>document.querySelector('.automation-dialog'));
- assert(!document.querySelector('.automation-repositories'),'Manual target selection visible');
+ await choose('Condition','manual');
+ assert(!document.querySelector('.automation-repositories')&&!document.querySelector('.automation-branch'),'Manual target or branch selection visible');
+ document.querySelector('[aria-label="Add condition"]').click();await pause();assert(!document.querySelector('[role="option"]'),'Manual allowed another condition');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
  document.querySelector('.automation-type button:nth-child(2)').click();await pause();
  const draftCalls=[];api.runNewAgentConversation=async(repo,agent,identity,mode,request,sessionId,requestId)=>{draftCalls.push({repo,agent,identity,mode,request,sessionId,requestId});return {text:sessionId?'printf "revised"':'```bash\nprintf "generated"\n```',sessionId:'draft-session-1'};};
- await choose('Draft agent','copilot');await choose('Draft context repository',jobs[0].repositoryIds[0]);
+ if(!document.querySelector('[aria-label="Draft agent"]')){document.querySelector('[aria-label="Toggle draft"]').click();await pause();}await choose('Draft agent','copilot');await choose('Draft context repository',jobs[0].repositoryIds[0]);
  await choose('Draft context repository','');assert(document.querySelector('[aria-label="Draft context repository"]').textContent.includes('backend-api'),'Auto context does not reveal chosen repository');
  const instruction=document.querySelector('textarea[aria-label="Describe automation task"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(instruction,'commit and push to an autosave branch');instruction.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  instruction.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));
@@ -266,6 +271,7 @@ script = r"""
  const prefilled=await wait(()=>document.querySelector('.automation-dialog textarea[aria-label="Prompt to save"]'));
  assert(prefilled.value==='Start','Prompt text was not prefilled');
  assert(document.querySelector('.automation-dialog [aria-label="Execution agent"]').textContent.includes('Codex'),'Provider was not prefilled');
+ document.querySelector('[aria-label="Toggle draft"]').click();await pause();
  assert(document.querySelector('.automation-dialog [aria-label="Draft context repository"]').textContent.includes('backend-api'),'Prompt source repository was not used as draft context');
  window.__automationStage='notification and commit';
  document.querySelector('[aria-label="Close new automation"]').click();
