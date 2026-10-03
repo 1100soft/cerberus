@@ -735,6 +735,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, .repo-row:foc
 .automation-repositories summary strong { flex: none; font-weight: 600; }
 .automation-target-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 .automation-repositories summary small { flex: none; color: var(--text-secondary); }
+.automation-scope { min-width: 0; }
+.automation-scope-note { display: block; margin: 4px 12px 0; color: var(--text-secondary); }
 .automation-repository-choices { margin-top: 9px; border-top: 1px solid var(--border-control); }
 .automation-repository-choices > div { max-height: 180px; overflow-y: auto; }
 .automation-editor-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; min-width: 0; }

@@ -73,13 +73,14 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
   let incomingStarted=false;
   try{
     change(id,{state:'running',lastResult:'Running automation…'});
-    let repositories=job.includeFutureRepositories?await api.repositories():[];
+    const useLiveRepositories=job.includeFutureRepositories||(manual&&job.trigger==='manual');
+    let repositories=useLiveRepositories?await api.repositories():[];
     if(job.includeFutureRepositories&&job.kind==='prompt'&&job.provider==='copilot'){
       try{await api.githubRepositories();repositories=await api.repositories();}
       catch{/* Explicit repository assignments can still run when catalog refresh fails. */}
     }
-    const targets=[...new Set(job.includeFutureRepositories?repositories.filter(item=>item.localPresent!==false&&item.localPath).map(item=>item.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]))];
-    if(job.runtimeTarget&&manual&&!runtimeRepositoryId)throw new Error('Choose a repository for this run.');
+    const targets=[...new Set(useLiveRepositories?repositories.filter(item=>item.localPresent!==false&&item.localPath).map(item=>item.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]))];
+    if(manual&&!runtimeRepositoryId)throw new Error('Choose one repository for this manual run.');
     if(runtimeRepositoryId){if(!targets.includes(runtimeRepositoryId))throw new Error('The selected repository is outside this automation’s target scope.');targets.splice(0,targets.length,runtimeRepositoryId);}
     if(!targets.length)throw new Error('Select at least one repository.');
     if(job.kind==='prompt'&&job.includeFutureRepositories){await Promise.all([refreshChatgptAccounts(),refreshExternalIdentities(true)]);}
