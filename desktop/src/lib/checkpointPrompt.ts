@@ -1,8 +1,23 @@
-export const checkpointCommitPrompt = `Create a checkpoint commit for the work in this repository. Follow the repository's agent instructions and complete every step below before committing:
+export const defaultCheckpointCommitPrompt = `Create a checkpoint commit for the work you have been performing in this task. Use your existing task context together with the repository state to prepare the repository for a coherent checkpoint.
 
-1. Review the current task, working tree, Git status, and diff. Identify the files that belong to this work and inspect them for unfinished edits, errors, secrets, generated artifacts, and unrelated changes.
-2. Finish or correct the implementation as needed. Update all documentation affected by the changes, including relevant README, usage, architecture, and handoff notes. Keep examples and descriptions consistent with the code.
-3. Ensure code quality: format changed files, run the project's applicable lint and type checks, and review the diff for clarity, consistency, and accidental changes.
-4. Run the relevant automated tests and build or validation commands for the changed behavior. Add or update meaningful tests where needed. Resolve failures and rerun the affected checks. If a check cannot run, explain why and do not claim it passed.
-5. Review Git status and the final diff again. Stage only the files for this checkpoint, inspect the staged diff, and create a concise commit message describing the change.
-6. Report the commit hash, commit message, checks run with their results, and any remaining limitations or unstaged changes.`;
+Before committing:
+
+1. Review the work you performed, the complete working tree, Git status, and diff. Account for every modified, deleted, and untracked file. Check for unfinished edits, errors, secrets, generated artifacts, and accidental changes. Investigate changes you do not recognize rather than silently excluding them.
+2. Complete any remaining work necessary for the current task to form a coherent checkpoint. Do not expand the scope with unrelated improvements.
+3. Update documentation affected by the changes where necessary. Keep documentation, examples, and descriptions consistent with the implementation.
+4. Run the repository's applicable formatting, linting, type checking, tests, build, and other validation relevant to the changes. Address failures caused by the work. Do not claim a check passed if it could not be run.
+5. Review the final Git status and diff. Resolve or explicitly account for anything that should not be committed, then stage all remaining intended changes. Inspect the staged diff and commit it with a concise message that accurately describes the checkpoint.
+6. Do not push. Report the commit hash and message, validation performed and results, and anything deliberately left uncommitted with the reason.
+
+Treat the repository state as authoritative if it differs from your recollection of the work.`;
+
+const storageKey='gitcerberus.checkpointCommitPrompt.v1';
+export function readCheckpointCommitPrompt(){try{return localStorage.getItem(storageKey)||defaultCheckpointCommitPrompt;}catch{return defaultCheckpointCommitPrompt;}}
+export function saveCheckpointCommitPrompt(value:string){
+  const next=value.trim();
+  if(!next)throw new Error('Enter a checkpoint prompt.');
+  if(next===defaultCheckpointCommitPrompt)localStorage.removeItem(storageKey);
+  else localStorage.setItem(storageKey,next);
+  if(readCheckpointCommitPrompt()!==next)throw new Error('The checkpoint prompt could not be saved on this device.');
+  return next;
+}

@@ -979,3 +979,7 @@ input[type="number"] { text-align: right; }
 .automation-commit-branches label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
 .automation-commit-branches label:last-child { flex: 1; }
 .automation-commit-branches label:last-child input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--surface-control); color: var(--text-primary); }
+.checkpoint-prompt-dialog { width: min(760px, 100%); height: min(88dvh, 740px); }
+.checkpoint-prompt-dialog .automation-dialog-content { display: flex; flex: 1; min-height: 0; }
+.checkpoint-prompt-dialog textarea { width: 100%; min-height: 0; resize: none; padding: 12px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--surface-control); color: var(--text-primary); font: inherit; line-height: 1.55; }
+.checkpoint-prompt-dialog > footer .automation-validation-hint { margin-right: auto; }

@@ -3,7 +3,8 @@ import { VSCodeIcon, CursorIcon, ClaudeIcon } from './Icons';
 import { OpenAILogo } from './OpenAILogo';
 import { Github } from 'lucide-react';
 import { ConversationSearch } from './ConversationSearch';
-import { checkpointCommitPrompt } from '../lib/checkpointPrompt';
+import { readCheckpointCommitPrompt } from '../lib/checkpointPrompt';
+import { CheckpointPromptDialog } from './CheckpointPromptDialog';
 import { EditReview } from './EditReview';
 import { completeMessages, textMatches, type ConversationHit } from '../lib/conversationSearch';
 import { matchesShortcut, shortcuts, type ShortcutCommand } from '../lib/shortcuts';
@@ -17,7 +18,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import Markdown from "react-markdown";
 import { cursorDisplayText } from "../lib/conversationText";
 import { loadOlderMessages, loadOlderThreads, peekList, peekMessages, refreshMessages, refreshThreadList, subscribe, warmRepository, listKey, messageKey, providerName, updatedMillis, type Thread } from "../lib/conversationCache";
-import { MessageSquare, RefreshCw, ClipboardCopy, Check, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
+import { MessageSquare, RefreshCw, ClipboardCopy, Check, Pencil, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
 import { useProviderPreferences } from "../lib/providerPreferences";
 import type { CodexMessage, FileEdit, Repository } from "../types";
 
@@ -28,14 +29,16 @@ export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConver
   useEffect(()=>{const finished=()=>setRevision(value=>value+1);window.addEventListener('saved-prompt-finished',finished);return()=>window.removeEventListener('saved-prompt-finished',finished);},[]);
   const [cursorConversationId, setCursorConversationId] = useState<string>();
   const [copyStatus,setCopyStatus]=useState<'idle'|'copied'|'error'>('idle');
+  const [editCheckpoint,setEditCheckpoint]=useState(false);
   const copyTimer=useRef<number>();
   useEffect(()=>()=>window.clearTimeout(copyTimer.current),[]);
-  const copyCheckpointPrompt=async()=>{try{await navigator.clipboard.writeText(checkpointCommitPrompt);setCopyStatus('copied');}catch{setCopyStatus('error');}window.clearTimeout(copyTimer.current);copyTimer.current=window.setTimeout(()=>setCopyStatus('idle'),2500);};
+  const copyCheckpointPrompt=async()=>{try{await navigator.clipboard.writeText(readCheckpointCommitPrompt());setCopyStatus('copied');}catch{setCopyStatus('error');}window.clearTimeout(copyTimer.current);copyTimer.current=window.setTimeout(()=>setCopyStatus('idle'),2500);};
   const reportCursorConversation = useCallback((id?: string) => { setCursorConversationId(id); if (repository) onCursorConversation?.(repository.id, id); }, [repository?.id, onCursorConversation]);
   return <section className="codex-panel" aria-label="Agent conversations">
     <header><div className="agent-heading"><h2><MessageSquare size={18} />Agent</h2></div><div className="codex-actions">
       {repository && <><button type="button" aria-label="Open in VS Code" title="Continue in VS Code" onClick={() => void api.openEditor(repository.id)}><VSCodeIcon/></button><button type="button" aria-label="Open in Cursor" title={cursorConversationId ? "Open this conversation in the Cursor Agents window" : "Open this repository in the Cursor Agents window"} onClick={() => void api.openCursor(repository.id, cursorConversationId)}><CursorIcon/></button></>}
       {repository&&<button type="button" aria-label={copyStatus==='copied'?"Checkpoint prompt copied":copyStatus==='error'?"Could not copy checkpoint prompt":"Copy checkpoint commit prompt"} title={copyStatus==='copied'?"Checkpoint prompt copied":copyStatus==='error'?"Could not copy prompt":"Copy checkpoint commit prompt for the working agent"} onClick={()=>void copyCheckpointPrompt()}>{copyStatus==='copied'?<Check size={16}/>:<ClipboardCopy size={16}/>}</button>}
+      {repository&&<button type="button" aria-label="Edit checkpoint commit prompt" title="Edit checkpoint commit prompt" onClick={()=>setEditCheckpoint(true)}><Pencil size={16}/></button>}
       <IdentitySignIn />
       <button type="button" aria-label="Refresh conversations" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button>
     </div></header>
@@ -44,6 +47,7 @@ export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConver
     {repository && <ConversationBrowser key={repository.id} repository={repository} revision={revision} enabled={enabled} onCursorConversation={reportCursorConversation} />}
     {!repository && <p className="panel-copy">{unlinkedName ? "Link an existing local checkout, or clone a new one, to see its conversations." : "Select a repository to see its conversations."}</p>}
     </div>
+    {editCheckpoint&&<CheckpointPromptDialog onClose={()=>setEditCheckpoint(false)}/>}
   </section>;
 }
 

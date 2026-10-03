@@ -46,7 +46,7 @@ script = r"""
  assert(automationCards[1].classList.contains('card-drop-after'),'Automation drop indicator is missing');
  automationCards[1].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:cardTransfer,clientY:cardBox.bottom-2}));
  assert(savedPrompts().findIndex(job=>job.id==='drag-one')>savedPrompts().findIndex(job=>job.id==='drag-two'),'Automation order was not saved');
- 
+
  (await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Identities')))).click();
  const identityCards=await wait(()=>{const cards=[...document.querySelectorAll('.identity-card')];return cards.length>=2?cards:null;});
  const firstIdentity=identityCards[0];
