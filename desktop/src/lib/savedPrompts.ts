@@ -1,4 +1,4 @@
-import { api, inTauri } from './api';
+import { api, inTauri, type GithubCiRun } from './api';
 import { listen } from '@tauri-apps/api/event';
 import { useSyncExternalStore } from 'react';
 import { addAutomationNotice } from './automationNotifications';
@@ -10,10 +10,10 @@ import { repositoryHistoryWorking } from './conversationCache';
 import { currentChatgptAccounts, refreshChatgptAccounts } from './chatgptAccounts';
 import { currentExternalIdentities, refreshExternalIdentities } from './externalIdentities';
 
-export type Trigger = 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'handoff';
+export type Trigger = 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;handoffName?:string;emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 const key='gitcerberus.savedPrompts.v1';
 const listeners=new Set<()=>void>();
 const running=new Set<string>();
@@ -22,6 +22,20 @@ const debounceTimers=new Map<string,number>();
 const lastTriggeredCounts=new Map<string,{head:string;count:number}>();
 const commitHeads=new Map<string,string>();
 const pendingCommits=new Map<string,number>();
+const pendingCi=new Map<string,{jobId:string;repositoryId:string;run:GithubCiRun}>();
+const ciHandledKey='gitcerberus.automationCiHandled.v1';
+function readCiHandled():Record<string,string[]>{try{const value=JSON.parse(localStorage.getItem(ciHandledKey)||'{}');return value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.entries(value).filter((entry):entry is [string,string[]]=>Array.isArray(entry[1])&&entry[1].every(item=>typeof item==='string'))):{};}catch{return {};}}
+const ciHandled=readCiHandled();
+let checkingCi=false;
+function ciRunKey(run:GithubCiRun){return `${run.id}:${run.runAttempt||1}`;}
+function matchesCiConclusion(trigger:Trigger,conclusion:string|null|undefined){return trigger==='ciPass'?conclusion==='success':trigger==='ciFail'&&(conclusion==='failure'||conclusion==='timed_out'||conclusion==='startup_failure');}
+function ciCompletedSince(run:GithubCiRun,since=0){const updated=Date.parse(run.updatedAt);return Number.isFinite(updated)&&updated>=Math.floor(since/1000)*1000;}
+function markCiHandled(jobId:string,repositoryId:string,run:GithubCiRun){
+  const key=`${jobId}:${repositoryId}`,previous=ciHandled[key]||[];
+  const next={...ciHandled,[key]:[...previous,ciRunKey(run)].slice(-200)};
+  localStorage.setItem(ciHandledKey,JSON.stringify(next));
+  Object.assign(ciHandled,next);
+}
 export type HandoffClaim={id:string;path:string;name:string;repositoryId:string};
 export function validHandoffName(name:string){return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name);}
 export function commitBranchPatterns(value:string){return value.split(',').map(part=>part.trim()).filter(Boolean);}
@@ -52,7 +66,7 @@ function publish(next:SavedPrompt[]){const serialized=JSON.stringify(next);local
 export function subscribeSavedPrompts(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function savedPrompts(){return jobs;}
 export function savePrompt(job:SavedPrompt){publish(jobs.some(item=>item.id===job.id)?jobs.map(item=>item.id===job.id?job:item):[...jobs,job]);}
-export function removePrompt(id:string){publish(jobs.filter(item=>item.id!==id));}
+export function removePrompt(id:string){publish(jobs.filter(item=>item.id!==id));for(const key of pendingCi.keys())if(key.startsWith(`${id}:`))pendingCi.delete(key);for(const key of Object.keys(ciHandled))if(key.startsWith(`${id}:`))delete ciHandled[key];try{localStorage.setItem(ciHandledKey,JSON.stringify(ciHandled));}catch{/* The removed job cannot run again. */}}
 export function reorderSavedPrompts(ids:string[]){
   if(ids.length!==jobs.length||new Set(ids).size!==jobs.length||ids.some(id=>!jobs.some(job=>job.id===id)))throw new Error('Automation order is out of date.');
   const byId=new Map(jobs.map(job=>[job.id,job]));publish(ids.map(id=>byId.get(id)!));
@@ -65,7 +79,7 @@ async function repositoryAgentBusy(repositoryId:string){
   return status.every(item=>item.status==='fulfilled')?false:repositoryHistoryWorking(repositoryId);
 }
 
-export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim):Promise<void>{
+export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun):Promise<void>{
   const job=jobs.find(item=>item.id===id);if(!job||job.handoffOnly||running.has(id)||job.state==='running'){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
   if(!manual&&!job.enabled){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
   if(job.kind!=='git'&&job.kind!=='shell'&&job.kind!=='notification'&&job.target!=='new'){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);change(id,{state:'error',enabled:false,lastResult:'Existing-conversation delivery was retired. Create a new in-app automation from this prompt.'});return;}
@@ -100,7 +114,8 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       const runId=crypto.randomUUID(),createdAt=Date.now();
       const outgoing:Record<string,string>={};
       for(const name of job.emitsHandoffs||[])outgoing[name]=await api.handoffOutputPath(repositoryId,name,runId);
-      const actionPrompt=automationPromptWithHandoffs(job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing);
+      const ciContext=ciRun?`GitHub Actions ${ciRun.conclusion==='success'?'passed':'failed'}: ${ciRun.name}. Branch: ${ciRun.headBranch||'unknown'}. Commit: ${ciRun.headSha}. Run: ${ciRun.htmlUrl}.\n\n`:'';
+      const actionPrompt=automationPromptWithHandoffs(ciContext+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing);
       let stdout='',stderr='',response='',activity='',result='',failure='',agentStarted=false;
       try{
         if(job.kind==='shell'){incomingStarted=true;const shell=await api.runAutomationShell(repositoryId,job.prompt,chunk=>{
@@ -176,6 +191,15 @@ async function tick(now=Date.now()){
         pendingCommits.delete(key);void runSavedPrompt(job.id,false,repositoryId);break;
       }
     }
+    for(const [key,pending] of pendingCi){
+      const job=jobs.find(item=>item.id===pending.jobId);
+      if(!job||!job.enabled||(job.trigger!=='ciPass'&&job.trigger!=='ciFail')||!ciCompletedSince(pending.run,job.ciSince)){pendingCi.delete(key);continue;}
+      if(job.state==='running'||running.has(job.id))continue;
+      if(job.kind!=='notification'&&await repositoryAgentBusy(pending.repositoryId))continue;
+      try{markCiHandled(job.id,pending.repositoryId,pending.run);}catch(error){console.warn('Could not save handled CI run:',error);break;}
+      pendingCi.delete(key);
+      void runSavedPrompt(job.id,false,pending.repositoryId,undefined,pending.run);
+    }
     let futureHandoffTargets:string[]|undefined;
     for(const job of jobs.filter(item=>item.enabled&&item.trigger==='handoff'&&validHandoffName(item.handoffName||'')&&item.state!=='running'&&!running.has(item.id))){
       if(job.includeFutureRepositories&&!futureHandoffTargets)futureHandoffTargets=inTauri()?[...watchedRepositoryIds]:(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id);
@@ -199,6 +223,32 @@ async function tick(now=Date.now()){
   }finally{checking=false;}
 }
 export function checkSavedPromptSchedule(now?:number){return tick(now);}
+export function recordAutomationCiRuns(repositoryId:string,runs:GithubCiRun[]){
+  const eligible=jobs.filter(job=>job.enabled&&(job.trigger==='ciPass'||job.trigger==='ciFail')&&(job.includeFutureRepositories?true:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repositoryId)));
+  for(const job of eligible){
+    for(const run of [...runs].reverse()){
+      if(!matchesCiConclusion(job.trigger,run.conclusion)||!ciCompletedSince(run,job.ciSince))continue;
+      const runKey=ciRunKey(run),key=`${job.id}:${repositoryId}:${runKey}`;
+      if(ciHandled[`${job.id}:${repositoryId}`]?.includes(runKey)||pendingCi.has(key))continue;
+      pendingCi.set(key,{jobId:job.id,repositoryId,run});
+    }
+  }
+  void tick();
+}
+const ciPollErrors=new Map<string,string>();
+async function pollCi(){
+  if(checkingCi||!jobs.some(job=>job.enabled&&(job.trigger==='ciPass'||job.trigger==='ciFail')))return;
+  checkingCi=true;
+  try{
+    const repositories=(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath);
+    for(const repo of repositories){
+      if(!jobs.some(job=>job.enabled&&(job.trigger==='ciPass'||job.trigger==='ciFail')&&(job.includeFutureRepositories||(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repo.id))))continue;
+      try{recordAutomationCiRuns(repo.id,await api.githubCiRuns(repo.id));ciPollErrors.delete(repo.id);}
+      catch(error){const message=String(error);if(ciPollErrors.get(repo.id)!==message){ciPollErrors.set(repo.id,message);addAutomationNotice({automationId:'ci-monitor',repositoryId:repo.id,title:`CI monitoring unavailable · ${repo.displayName}`,message,status:'failed'});}console.warn(`CI monitoring for ${repo.displayName}:`,error);}
+    }
+  }catch(error){console.warn('Could not list repositories for CI monitoring:',error);}
+  finally{checkingCi=false;}
+}
 export function recordAutomationFileChange(repositoryId:string,occurredAt=Date.now()){
   for(const job of jobs){
     if(!job.enabled||(job.trigger!=='fileChange'&&job.trigger!=='changeCount')||job.state==='running'||running.has(job.id))continue;
@@ -243,7 +293,8 @@ export function startSavedPromptScheduler(){
   void syncFileWatchers();
   let watcherScope=JSON.stringify(jobs.map(job=>[job.id,job.trigger,job.repositoryIds,job.repositoryId,job.includeFutureRepositories]));
   const unsubscribe=subscribeSavedPrompts(()=>{const next=JSON.stringify(jobs.map(job=>[job.id,job.trigger,job.repositoryIds,job.repositoryId,job.includeFutureRepositories]));if(next!==watcherScope){watcherScope=next;void syncFileWatchers();}});
-  void tick();const timer=window.setInterval(()=>{void tick();void syncFileWatchers();},30_000);
+  void tick();void pollCi();const timer=window.setInterval(()=>{void tick();void syncFileWatchers();},30_000);
+  const ciTimer=window.setInterval(()=>void pollCi(),60_000);
   const handoffTimer=window.setInterval(()=>{if(jobs.some(job=>job.enabled&&job.trigger==='handoff'))void tick();},2000);
-  return()=>{stopped=true;unlisten?.();unlistenGit?.();unsubscribe();window.clearInterval(timer);window.clearInterval(handoffTimer);for(const timeout of debounceTimers.values())window.clearTimeout(timeout);debounceTimers.clear();};
+  return()=>{stopped=true;unlisten?.();unlistenGit?.();unsubscribe();window.clearInterval(timer);window.clearInterval(ciTimer);window.clearInterval(handoffTimer);for(const timeout of debounceTimers.values())window.clearTimeout(timeout);debounceTimers.clear();};
 }

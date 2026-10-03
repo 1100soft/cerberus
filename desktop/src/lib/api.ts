@@ -6,6 +6,7 @@ import { identitiesWithRepositoryAccess } from "./repositories";
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
 export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git';status:'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string};
 export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'>;
+export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 const demoAutomationLogs=new Map<string,AutomationLog>();
 const demoHandoffs=new Map<string,{id:string;path:string;claimed:boolean}[]>();
 
@@ -33,6 +34,10 @@ export const api = {
       { id: 103, name: "design-system", fullName: "northstar/design-system", owner: "northstar", private: true, htmlUrl: "https://github.com/northstar/design-system", defaultBranch: "main", identityId: "work" },
       { id: 104, name: "garden", fullName: "alex/garden", owner: "alex", private: false, htmlUrl: "https://github.com/alex/garden", defaultBranch: "main", identityId: "personal" }
     ], warnings: [] };
+  },
+  async githubCiRuns(repositoryId:string):Promise<GithubCiRun[]> {
+    if(inTauri())return invoke('github_ci_runs',{repositoryId});
+    return [];
   },
   async cloneGithubRepository(identityId: string, fullName: string, parent: string): Promise<ImportResult> {
     if (!inTauri()) throw new Error("Cloning is available in the desktop app.");

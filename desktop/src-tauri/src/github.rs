@@ -48,6 +48,34 @@ struct Remote {
     #[serde(default)]
     pushed_at: Option<String>,
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct CiRun {
+    pub id: u64,
+    #[serde(default = "first_attempt")]
+    pub run_attempt: u32,
+    pub name: String,
+    pub head_branch: Option<String>,
+    pub head_sha: String,
+    pub conclusion: Option<String>,
+    pub updated_at: String,
+    pub html_url: String,
+}
+fn first_attempt() -> u32 { 1 }
+#[derive(Deserialize)]
+struct CiRunsResponse { workflow_runs: Vec<CiRun> }
+
+pub fn ci_runs(db: &Database, repository_id: &str) -> Result<Vec<CiRun>, String> {
+    let repository = db.list()?.into_iter().find(|repo| repo.id == repository_id)
+        .ok_or_else(|| "Repository is not linked on this device.".to_owned())?;
+    let name = repository.canonical_remote.as_deref().and_then(github_name)
+        .ok_or_else(|| "CI conditions require a GitHub repository.".to_owned())?;
+    let identity = repository.identity.ok_or_else(|| "Assign a GitHub identity to check CI runs.".to_owned())?;
+    if identity.provider_username.is_none() { return Err("Assign a connected GitHub identity to check CI runs.".into()); }
+    let response = get(&client()?, &token(&identity.id)?, &format!("/repos/{name}/actions/runs?event=push&status=completed&per_page=100"))?;
+    let runs: CiRunsResponse = response.json().map_err(|e| format!("Invalid GitHub workflow response: {e}"))?;
+    Ok(runs.workflow_runs)
+}
 impl Remote {
     fn catalog(self, identity_id: &str) -> GithubRepository {
         GithubRepository {
@@ -435,6 +463,14 @@ pub fn link_existing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn parses_completed_push_workflow_attempts() {
+        let response: CiRunsResponse = serde_json::from_str(r#"{"workflow_runs":[{"id":42,"run_attempt":2,"name":"CI","head_branch":"main","head_sha":"abc","conclusion":"failure","updated_at":"2026-10-03T12:00:00Z","html_url":"https://github.com/example/repo/actions/runs/42"}]}"#).unwrap();
+        let run=&response.workflow_runs[0];
+        assert_eq!((run.id,run.run_attempt),(42,2));
+        assert_eq!(run.conclusion.as_deref(),Some("failure"));
+        assert_eq!(run.head_branch.as_deref(),Some("main"));
+    }
     #[test]
     fn unique_catalog_account_becomes_repository_assignment(){
         let directory=tempfile::tempdir().unwrap();
