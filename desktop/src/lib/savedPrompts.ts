@@ -405,6 +405,6 @@ export function startSavedPromptScheduler(){
   void tick();void pollCi();void pollGithubEvents();const timer=window.setInterval(()=>{void tick();void syncFileWatchers();},30_000);
   const ciTimer=window.setInterval(()=>void pollCi(),60_000);
   const githubEventTimer=window.setInterval(()=>void pollGithubEvents(),60_000);
-  const handoffTimer=window.setInterval(()=>{if(jobs.some(job=>job.enabled&&job.trigger==='handoff'))void tick();},2000);
+  const handoffTimer=window.setInterval(()=>{if(jobs.some(job=>job.enabled&&automationConditions(job).includes('handoff')))void tick();},2000);
   return()=>{stopped=true;unlisten?.();unlistenGit?.();unsubscribe();window.clearInterval(timer);window.clearInterval(ciTimer);window.clearInterval(githubEventTimer);window.clearInterval(handoffTimer);for(const timeout of debounceTimers.values())window.clearTimeout(timeout);debounceTimers.clear();};
 }

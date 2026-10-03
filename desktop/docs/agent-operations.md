@@ -37,6 +37,9 @@ npm run build
 node scripts/check-conversation-display.mjs
 node scripts/check-chatgpt-capabilities.mjs
 /usr/bin/python3 scripts/check-saved-prompts.py
+/usr/bin/python3 scripts/check-ci-automation.py
+/usr/bin/python3 scripts/check-handoffs.py
+/usr/bin/python3 scripts/check-card-reorder.py
 /usr/bin/python3 scripts/check-viewport.py 900 620
 /usr/bin/python3 scripts/check-repository-ui.py 900 620
 ```
