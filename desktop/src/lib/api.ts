@@ -6,6 +6,8 @@ import { identitiesWithRepositoryAccess } from "./repositories";
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
 export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git';status:'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string};
 export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'>;
+export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
+export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
 const demoAutomationLogs=new Map<string,AutomationLog>();
 const demoHandoffs=new Map<string,{id:string;path:string;claimed:boolean}[]>();
 
@@ -34,6 +36,14 @@ export const api = {
       { id: 104, name: "garden", fullName: "alex/garden", owner: "alex", private: false, htmlUrl: "https://github.com/alex/garden", defaultBranch: "main", identityId: "personal" }
     ], warnings: [] };
   },
+  async githubCiRuns(repositoryId:string):Promise<GithubCiRun[]> {
+    if(inTauri())return invoke('github_ci_runs',{repositoryId});
+    return [];
+  },
+  async githubRepositoryEvents(repositoryId:string):Promise<GithubRepositoryEvent[]> {
+    if(inTauri())return invoke('github_repository_events',{repositoryId});
+    return [];
+  },
   async cloneGithubRepository(identityId: string, fullName: string, parent: string): Promise<ImportResult> {
     if (!inTauri()) throw new Error("Cloning is available in the desktop app.");
     return invoke("clone_github_repository", { identityId, fullName, parent });
@@ -57,11 +67,11 @@ export const api = {
     if (!inTauri()) return;
     return invoke('cancel_draft',{requestId});
   },
-  async runAutomationShell(repositoryId:string,script:string,onOutput?:(chunk:{stream:string;text:string})=>void,handoffInputPath?:string,handoffOutputPaths:Record<string,string>={}):Promise<{result:string;stdout:string;stderr:string}>{
+  async runAutomationShell(repositoryId:string,script:string,onOutput?:(chunk:{stream:string;text:string})=>void,handoffInputPath?:string,handoffOutputPaths:Record<string,string>={},context:Record<string,string>={}):Promise<{result:string;stdout:string;stderr:string}>{
     if (!inTauri()) throw new Error('Shell automations require the desktop app.');
     const output=new Channel<{stream:string;text:string}>();
     output.onmessage=onOutput||(()=>{});
-    return invoke('run_automation_shell',{repositoryId,script,output,handoffInputPath:handoffInputPath||null,handoffOutputPaths});
+    return invoke('run_automation_shell',{repositoryId,script,output,handoffInputPath:handoffInputPath||null,handoffOutputPaths,context});
   },
   async watchAutomationRepositories(repositoryIds:string[]):Promise<string[]>{
     if (!inTauri()) return [];
@@ -91,9 +101,9 @@ export const api = {
     if(!inTauri())return `/tmp/gitcerberus-demo-handoffs/${repositoryId}/${name}/${runId}.txt`;
     return invoke('handoff_output_path',{repositoryId,name,runId});
   },
-  async publishHandoff(repositoryId:string,name:string,runId:string):Promise<boolean>{
+  async publishHandoff(repositoryId:string,name:string,runId:string,payload?:string):Promise<boolean>{
     if(!inTauri())return false;
-    return invoke('publish_handoff',{repositoryId,name,runId});
+    return invoke('publish_handoff',{repositoryId,name,runId,payload:payload??null});
   },
   async hasPendingHandoff(repositoryId:string,name:string):Promise<boolean>{
     if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>!item.claimed);

@@ -36,6 +36,13 @@ pub fn output_path(repository:&Path,name:&str,run_id:&str)->Result<String,String
     if path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_symlink()){return Err("Handoff output is a symbolic link.".into());}
     Ok(path.to_string_lossy().into_owned())
 }
+pub fn write_payload(repository:&Path,name:&str,run_id:&str,payload:&str)->Result<(),String>{
+    use std::io::Write;
+    if payload.len()>2_000_000{return Err("Handoff payload exceeds 2 MB.".into());}
+    let path=output_path(repository,name,run_id)?;
+    let mut output=fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|error|error.to_string())?;
+    output.write_all(payload.as_bytes()).map_err(|error|error.to_string())
+}
 pub fn publish(repository:&Path,name:&str,run_id:&str)->Result<bool,String>{
     let source=file(repository,"outgoing",name,run_id)?;
     if !source.exists(){return Ok(false);}
@@ -110,6 +117,17 @@ pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
     let source=file(repository,"claimed",name,id)?;
     if source.exists(){fs::rename(source,file(repository,"pending",name,id)?).map_err(|error|error.to_string())?;}
     Ok(())
+}
+#[cfg(test)] mod notification_tests {
+    #[test] fn notification_payload_publishes_once(){
+        let root=tempfile::tempdir().unwrap();
+        std::process::Command::new("git").args(["init","-q"]).arg(root.path()).status().unwrap();
+        super::write_payload(root.path(),"notice","run","Ready to review").unwrap();
+        assert!(super::write_payload(root.path(),"notice","run","Overwrite").is_err());
+        assert!(super::publish(root.path(),"notice","run").unwrap());
+        assert!(!super::publish(root.path(),"notice","run").unwrap());
+        assert!(super::write_payload(root.path(),"../bad","run","Payload").is_err());
+    }
 }
 #[cfg(test)]mod tests{
     use super::*;

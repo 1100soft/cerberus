@@ -49,7 +49,7 @@ script = r"""
  api.codexThreads=async()=>({data:[]});api.cursorThreads=async()=>({data:[]});
  api.runAutomationShell=async(repo,script,onOutput,inputPath,outgoing)=>{calls.push({repo,script,inputPath,outgoing});if(script==='emit review')outputPaths.set(outgoing.review,'payload '+calls.length);else assert(pending.find(item=>item.path===inputPath)?.payload,'Triggered shell did not receive the claimed payload path');return {result:'done',stdout:'done',stderr:''};};
  for(let emission=1;emission<=2;emission++){
-   await module.runSavedPrompt('producer',true);
+   await module.runSavedPrompt('producer',true,'1');
    await Promise.all([module.checkSavedPromptSchedule(),module.checkSavedPromptSchedule()]);
    await wait(()=>calls.filter(item=>item.script==='read review').length===emission);
    await wait(()=>pending.length===0);
@@ -59,7 +59,7 @@ script = r"""
  }
  const normalRun=api.runAutomationShell;
  api.runAutomationShell=async(repo,script,onOutput,inputPath,outgoing)=>{if(script==='read review'){calls.push({repo,script,inputPath,outgoing});throw Error('Fixture consumer failure');}return normalRun(repo,script,onOutput,inputPath,outgoing);};
- await module.runSavedPrompt('producer',true);
+ await module.runSavedPrompt('producer',true,'1');
  await wait(()=>module.savedPrompts().find(item=>item.id==='consumer')?.state==='error');
  assert(finishes===3&&pending.length===0,'Failed action left a claimed handoff that could replay');
  await module.checkSavedPromptSchedule();await pause();
