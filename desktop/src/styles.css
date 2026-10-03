@@ -992,13 +992,34 @@ input[type="number"] { text-align: right; }
 .automation-branch label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .automation-model-row { display: flex; gap: 8px; }
 .automation-model-row .app-select { flex: 1; min-width: 0; }
-.automation-condition-chip { display: inline-flex; align-items: center; gap: 3px; }
 @media (max-width: 680px) { .automation-target-row { grid-template-columns: minmax(0, 1fr); } }
 .automation-target-row { grid-template-columns: minmax(0, 1fr) minmax(0, 220px); }
 .automation-branch { flex-wrap: wrap; }
 .automation-branch .handoff-name-input { flex-basis: 100%; }
 .automation-branch .handoff-name-suggestions { max-height: min(180px, 30dvh); }
-.automation-dialog .automation-output textarea, .automation-dialog .automation-draft textarea, .automation-dialog .shell-editor, .automation-dialog .shell-editor .shell-editor-highlight, .automation-dialog .shell-editor textarea { min-height: 78px; }
-.automation-dialog-content { padding-top: 8px; padding-bottom: 8px; }
-.automation-dialog .automation-type button { padding-top: 6px; padding-bottom: 6px; }
 .automation-dialog .automation-output textarea, .automation-dialog .automation-draft textarea, .automation-dialog .shell-editor, .automation-dialog .shell-editor .shell-editor-highlight, .automation-dialog .shell-editor textarea { min-height: 60px; }
+.automation-dialog > header { gap: 10px; }
+.automation-dialog > header h2 { flex: none; }
+.automation-header-name { flex: 1; min-width: 0; max-width: 420px; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-control); border-radius: 6px; background: var(--surface-control); color: var(--text-primary); font: inherit; }
+.automation-dialog > header > button:last-child { flex: none; margin-left: auto; }
+.automation-conditions { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.automation-conditions > strong { flex: none; color: var(--text-secondary); }
+.automation-condition-list { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+.automation-condition-chip { display: inline-flex; align-items: stretch; gap: 0; max-width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--border-control); border-radius: 6px; background: var(--surface-control); }
+.automation-condition-chip.active { border-color: var(--accent-codex-border); }
+.automation-condition-chip > button { flex: none; border: 0; background: transparent; color: var(--text-primary); font: inherit; cursor: pointer; }
+.automation-condition-edit { min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 7px; }
+.automation-condition-remove { display: grid; place-items: center; padding: 0 5px; color: var(--text-secondary) !important; }
+.automation-condition-chip > button:hover { background: var(--surface-raised); }
+.automation-condition-add.app-select { display: grid; place-items: center; width: 30px; min-width: 30px; height: 30px; padding: 0; border: 1px dashed var(--border-control); border-radius: 6px; }
+.automation-condition-parameter { display: flex; align-items: center; min-width: 0; padding-left: 86px; }
+.automation-condition-parameter label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.automation-condition-parameter input[type="number"] { width: 5.5em; }
+.automation-condition-parameter .handoff-name-input { width: 170px; flex: none; }
+.automation-branch { align-items: center; }
+.automation-branch > strong { flex: none; color: var(--text-secondary); }
+.automation-branch .handoff-name-input { flex-basis: auto; }
+@media (max-width: 680px) { .automation-dialog > header { flex-wrap: wrap; } .automation-header-name { order: 3; flex-basis: 100%; max-width: none; } .automation-condition-parameter { padding-left: 0; } }
+.automation-dialog-content { padding-top: 5px; padding-bottom: 5px; }
+.automation-dialog-content .saved-prompt-form { gap: 4px; }
+.automation-dialog .automation-type button { padding-top: 5px; padding-bottom: 5px; }

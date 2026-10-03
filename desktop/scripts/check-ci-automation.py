@@ -21,7 +21,7 @@ script = r"""
  (await wait(()=>document.querySelector('.automation-list-header button'))).click();
  await wait(()=>document.querySelector('[aria-label="New automation"]'));
  window.__ciStage='condition options';
- document.querySelector('[aria-label="Condition"]').click();await pause();
+ document.querySelector('[aria-label="Add condition"]').click();await pause();
  const conditionOptions=[...document.querySelectorAll('[role="option"]')];
  assert(conditionOptions.some(node=>node.textContent==='When CI passes')&&conditionOptions.some(node=>node.textContent==='When CI fails'),'CI conditions are missing from the dialog');
  conditionOptions.find(node=>node.textContent==='When CI passes').click();await pause();
@@ -48,7 +48,7 @@ script = r"""
  assert(automation.knownBranchSets(automation.savedPrompts()).includes('release/*, hotfix'),'Saved branch set missing from suggestions');
  window.__ciStage='branch suggestions';
  document.querySelector('.automation-list-header button').click();await wait(()=>document.querySelector('[aria-label="New automation"]'));
- document.querySelector('[aria-label="Condition"]').click();await pause();
+ document.querySelector('[aria-label="Add condition"]').click();await pause();
  [...document.querySelectorAll('[role="option"]')].find(node=>node.textContent==='When CI fails').click();await pause();
  const branchInput=document.querySelector('[aria-label="Branch patterns"]');branchInput.blur();await pause(140);branchInput.focus();await pause();
  assert([...document.querySelectorAll('[aria-label="Branch patterns suggestions"] [role="option"]')].some(node=>node.textContent==='release/*, hotfix'),'Saved branch set was not suggested');
