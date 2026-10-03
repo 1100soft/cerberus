@@ -61,6 +61,17 @@ pub struct CiRun {
     pub updated_at: String,
     pub html_url: String,
 }
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryEvent {
+    pub id: String,
+    pub kind: String,
+    pub branch: String,
+    pub sha: Option<String>,
+    pub action: Option<String>,
+    pub created_at: String,
+    pub html_url: String,
+}
 fn first_attempt() -> u32 { 1 }
 #[derive(Deserialize)]
 struct CiRunsResponse { workflow_runs: Vec<CiRun> }
@@ -75,6 +86,34 @@ pub fn ci_runs(db: &Database, repository_id: &str) -> Result<Vec<CiRun>, String>
     let response = get(&client()?, &token(&identity.id)?, &format!("/repos/{name}/actions/runs?event=push&status=completed&per_page=100"))?;
     let runs: CiRunsResponse = response.json().map_err(|e| format!("Invalid GitHub workflow response: {e}"))?;
     Ok(runs.workflow_runs)
+}
+pub fn repository_events(db:&Database,repository_id:&str)->Result<Vec<RepositoryEvent>,String>{
+    let repository=db.list()?.into_iter().find(|repo|repo.id==repository_id).ok_or("Repository is not linked on this device")?;
+    let name=repository.canonical_remote.as_deref().and_then(github_name).ok_or("GitHub events require a GitHub repository")?;
+    let identity=repository.identity.ok_or("Assign a GitHub identity to check repository events")?;
+    if identity.provider_username.is_none(){return Err("Assign a connected GitHub identity to check repository events".into());}
+    let response=get(&client()?,&token(&identity.id)?,&format!("/repos/{name}/events?per_page=100"))?;
+    let values:Vec<serde_json::Value>=response.json().map_err(|error|format!("Invalid GitHub events response: {error}"))?;
+    Ok(values.into_iter().filter_map(|value|{
+        let id=value["id"].as_str()?.to_owned();
+        let created_at=value["created_at"].as_str()?.to_owned();
+        let payload=&value["payload"];
+        match value["type"].as_str()?{
+            "PushEvent"=>{
+                let branch=payload["ref"].as_str()?.strip_prefix("refs/heads/")?.to_owned();
+                let sha=payload["head"].as_str().map(String::from);
+                let html_url=sha.as_ref().map(|sha|format!("https://github.com/{name}/commit/{sha}")).unwrap_or_else(||format!("https://github.com/{name}"));
+                Some(RepositoryEvent{id,kind:"push".into(),branch,sha,action:None,created_at,html_url})
+            }
+            "PullRequestEvent"=>{
+                let branch=payload["pull_request"]["head"]["ref"].as_str()?.to_owned();
+                let sha=payload["pull_request"]["head"]["sha"].as_str().map(String::from);
+                let html_url=payload["pull_request"]["html_url"].as_str()?.to_owned();
+                Some(RepositoryEvent{id,kind:"pullRequest".into(),branch,sha,action:payload["action"].as_str().map(String::from),created_at,html_url})
+            }
+            _=>None,
+        }
+    }).collect())
 }
 impl Remote {
     fn catalog(self, identity_id: &str) -> GithubRepository {

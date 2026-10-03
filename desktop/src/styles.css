@@ -985,3 +985,20 @@ input[type="number"] { text-align: right; }
 .checkpoint-prompt-dialog .automation-dialog-content { display: flex; flex: 1; min-height: 0; }
 .checkpoint-prompt-dialog textarea { width: 100%; min-height: 0; resize: none; padding: 12px; border: 1px solid var(--border-control); border-radius: 7px; background: var(--surface-control); color: var(--text-primary); font: inherit; line-height: 1.55; }
 .checkpoint-prompt-dialog > footer .automation-validation-hint { margin-right: auto; }
+.automation-target-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 28%); gap: 10px; align-items: start; }
+.automation-branch { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.automation-branch .handoff-name-input { flex: 1; min-width: 0; }
+.automation-branch input[role="combobox"] { width: 100%; min-width: 0; box-sizing: border-box; }
+.automation-branch label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.automation-model-row { display: flex; gap: 8px; }
+.automation-model-row .app-select { flex: 1; min-width: 0; }
+.automation-condition-chip { display: inline-flex; align-items: center; gap: 3px; }
+@media (max-width: 680px) { .automation-target-row { grid-template-columns: minmax(0, 1fr); } }
+.automation-target-row { grid-template-columns: minmax(0, 1fr) minmax(0, 220px); }
+.automation-branch { flex-wrap: wrap; }
+.automation-branch .handoff-name-input { flex-basis: 100%; }
+.automation-branch .handoff-name-suggestions { max-height: min(180px, 30dvh); }
+.automation-dialog .automation-output textarea, .automation-dialog .automation-draft textarea, .automation-dialog .shell-editor, .automation-dialog .shell-editor .shell-editor-highlight, .automation-dialog .shell-editor textarea { min-height: 78px; }
+.automation-dialog-content { padding-top: 8px; padding-bottom: 8px; }
+.automation-dialog .automation-type button { padding-top: 6px; padding-bottom: 6px; }
+.automation-dialog .automation-output textarea, .automation-dialog .automation-draft textarea, .automation-dialog .shell-editor, .automation-dialog .shell-editor .shell-editor-highlight, .automation-dialog .shell-editor textarea { min-height: 60px; }

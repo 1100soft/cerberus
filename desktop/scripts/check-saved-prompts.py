@@ -44,7 +44,7 @@ script = r"""
  assert(document.querySelector('[aria-label="Copy output"]'),'Copy action missing');
  assert(document.querySelector('[aria-label="Describe automation task"]'),'Draft instruction missing');
  assert(!document.querySelector('.automation-repositories'),'Manual automation asks for repositories before run');
- assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'Default dialog requires scrolling');
+ assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'Default dialog requires scrolling: '+document.querySelector('.automation-dialog-content').scrollHeight+'/'+document.querySelector('.automation-dialog-content').clientHeight);
  const choose=async(label,value)=>{const button=document.querySelector('.automation-dialog [aria-label="'+label+'"]');assert(button,'Missing '+label+': '+document.querySelector('.automation-dialog').innerHTML.slice(0,3000));button.click();await pause(0);const option=[...document.querySelectorAll('[role="option"]')].find(node=>node.dataset.value===value);assert(option,'Missing '+label+' option '+value+': '+document.querySelector('.automation-dialog-content').scrollHeight+'/'+document.querySelector('.automation-dialog-content').clientHeight+' '+document.querySelector('[aria-label="Condition"]').outerHTML);option.click();await pause();};
  await choose('Condition','interval');
  assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'Folded interval dialog requires scrolling: '+document.querySelector('.automation-dialog-content').scrollHeight+'/'+document.querySelector('.automation-dialog-content').clientHeight);
@@ -184,7 +184,7 @@ script = r"""
  await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');
  savePrompt({...savedPrompts().find(job=>job.id==='commit-scope-fixture'),enabled:false});
  window.__automationStage='interval repository scope';
- savePrompt({...jobs[0],id:'interval-scope-fixture',title:'Interval scope fixture',repositoryIds:targetIds,repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'interval',nextAt:0,enabled:true,state:undefined});
+ savePrompt({...jobs[0],id:'interval-scope-fixture',title:'Interval scope fixture',repositoryIds:targetIds,repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'interval',conditions:undefined,nextAt:0,enabled:true,state:undefined});
  const beforeIntervalRuns=shellCalls.length;
  await checkSavedPromptSchedule();
  await wait(()=>shellCalls.length===beforeIntervalRuns+targetIds.length);
@@ -202,7 +202,7 @@ script = r"""
  await wait(()=>shellCalls.length===beforeThresholdRuns+1);
  window.__automationStage='dialog layout';
  document.querySelector('.automation-list-header button').click();await wait(()=>document.querySelector('.automation-dialog'));
- await choose('Condition','fileChange');assert(document.querySelector('[aria-label="Wait seconds after file changes"]').value==='300','File change wait default is not five minutes');assert(document.querySelector('.automation-dialog > footer .automation-validation-hint')?.textContent.includes('Select at least one repository')&&document.querySelector('.automation-dialog > footer .automation-primary-action').disabled,'Missing footer validation and disabled Save');assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'File change dialog requires scrolling at default size');
+ await choose('Condition','fileChange');await choose('Add condition','idleTime');assert(document.querySelector('[aria-label="Idle time minutes"]').value==='5','Idle time default is not five minutes');assert(document.querySelector('.automation-dialog > footer .automation-validation-hint')?.textContent.includes('Select at least one repository')&&document.querySelector('.automation-dialog > footer .automation-primary-action').disabled,'Missing footer validation and disabled Save');assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'File change dialog requires scrolling at default size');
  await choose('Condition','changeCount');assert(document.querySelector('[aria-label="Changed lines threshold"]').value==='10','Changed-lines threshold default is not ten');assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'Changed-lines dialog requires scrolling at default size');
  await choose('Condition','manual');
  assert(document.querySelector('.automation-output [aria-label="Execution agent"]'),'Execution agent selector is detached from the Agent prompt');
@@ -257,7 +257,7 @@ script = r"""
  assert(document.querySelector('[aria-label="Notification message"]'),'Notification message field missing');
  assert(!document.querySelector('.automation-draft'),'Notification editor should not show agent drafting');
  const commitSelect=document.querySelector('[aria-label="Condition"]');commitSelect.click();await pause();
- const commitOption=[...document.querySelectorAll('[role="option"]')].find(node=>node.textContent.includes('When a commit is made'));assert(commitOption,'Commit condition missing');commitOption.click();await pause();
+ const commitOption=[...document.querySelectorAll('[role="option"]')].find(node=>node.textContent.includes('On commit'));assert(commitOption,'Commit condition missing');commitOption.click();await pause();
  assert(document.querySelector('[aria-label="Branch patterns"]')&&document.querySelector('[aria-label="All except"]'),'Commit branch pattern controls missing');
  assert(!document.querySelector('.automation-dialog-content .automation-pair-warnings'),'Pair warning is taking dialog content space');
  commitSelect.click();await pause();

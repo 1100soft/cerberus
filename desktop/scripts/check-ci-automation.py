@@ -98,6 +98,25 @@ script = r"""
  const stop=automation.startSavedPromptScheduler();
  await wait(()=>calls.length===6);stop();
  assert(calls[5].repo==='1'&&polled>0,'Scheduler did not poll GitHub CI for the watched repository');
+ window.__ciStage='combined conditions';
+ const comboId='combo-'+crypto.randomUUID();
+ automation.savePrompt({...base,id:comboId,title:'Push and CI',trigger:'push',conditions:['push','ciPass'],commitBranch:'*',ciSince:now-1000});
+ const event=(id,sha)=>({id,kind:'push',branch:'main',sha,createdAt:new Date(now).toISOString(),htmlUrl:'https://github.com/example/repo-2/commit/'+sha});
+ const beforeCombo=calls.length;
+ automation.recordAutomationGithubEvents('2',[event('push-a','a'.repeat(40))]);await pause(80);
+ assert(calls.length===beforeCombo,'Push ran before CI was observed');
+ automation.recordAutomationCiRuns('2',[run(201,'success',1,new Date(now).toISOString(),'main')]);
+ await wait(()=>calls.length===beforeCombo+1);
+ assert(calls.at(-1).repo==='2','Combined conditions ran for the wrong repository');
+ automation.recordAutomationGithubEvents('2',[event('push-a','a'.repeat(40))]);await pause(80);
+ assert(calls.length===beforeCombo+1,'A polled push event repeated');
+ const idleId='idle-'+crypto.randomUUID();
+ automation.savePrompt({...base,id:idleId,title:'File quiet',trigger:'fileChange',conditions:['fileChange','idleTime'],debounceSeconds:2,commitBranch:'*'});
+ const beforeIdle=calls.length;
+ automation.recordAutomationFileChange('1',Date.now());await automation.checkSavedPromptSchedule();
+ assert(calls.length===beforeIdle,'Idle condition ran before quiet period');
+ await automation.checkSavedPromptSchedule(Date.now()+3000);
+ await wait(()=>calls.length===beforeIdle+1);
  window.__ciCheck={passed:true,calls,polled};
 })().catch(error=>window.__ciCheck={passed:false,error:String(error),stage:window.__ciStage});
 """

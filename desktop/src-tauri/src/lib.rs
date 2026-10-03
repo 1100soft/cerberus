@@ -337,6 +337,11 @@ async fn github_ci_runs(repository_id: String, state: State<'_, AppState>) -> Re
     tauri::async_runtime::spawn_blocking(move || github::ci_runs(&db, &repository_id)).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
+async fn github_repository_events(repository_id:String,state:State<'_,AppState>)->Result<Vec<github::RepositoryEvent>,String>{
+    let db=state.db.clone();
+    tauri::async_runtime::spawn_blocking(move||github::repository_events(&db,&repository_id)).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
 async fn clone_github_repository(identity_id: String, full_name: String, parent: String, state: State<'_, AppState>) -> Result<ImportResult, String> {
     let db = state.db.clone();
     let git = state.git.clone();
@@ -895,6 +900,7 @@ pub fn run() {
             list_repositories, sync_repository_remotes,
             github_repositories,
             github_ci_runs,
+            github_repository_events,
             link_repository_folder,
             clone_github_repository,
             open_in_cursor,
