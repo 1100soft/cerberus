@@ -50,7 +50,7 @@ export function Select({ value, options, onChange, label, disabled, className = 
       ...(up ? { bottom: Math.max(8, (window.innerHeight - anchorTop) / zoom + 4) } : { top: anchorBottom / zoom + 4 }),
       maxHeight: Math.max(40, Math.min(300, up ? above : below)),
       fontSize: Math.max(12, Number.parseFloat(getComputedStyle(trigger.current).fontSize)) });
-    if (!preserveFocus.current) list.current?.focus();
+    if (!preserveFocus.current) list.current?.focus({ preventScroll: true });
   }, [open]);
 
   useEffect(() => {
@@ -64,7 +64,15 @@ export function Select({ value, options, onChange, label, disabled, className = 
     document.addEventListener("scroll", moved, true);
     return () => { observer.disconnect(); document.removeEventListener("mousedown", outside); window.removeEventListener("resize", moved); document.removeEventListener("scroll", moved, true); };
   }, [open]);
-  useEffect(() => { list.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" }); }, [active, open]);
+  useEffect(() => {
+    const menu = list.current;
+    const option = menu?.querySelector<HTMLElement>(`[data-index="${active}"]`);
+    if (!menu || !option) return;
+    // Scroll only the menu; ancestor scrolling would dismiss it.
+    if (option.offsetTop < menu.scrollTop) menu.scrollTop = option.offsetTop;
+    else if (option.offsetTop + option.offsetHeight > menu.scrollTop + menu.clientHeight)
+      menu.scrollTop = option.offsetTop + option.offsetHeight - menu.clientHeight;
+  }, [active, open]);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
   function menuKey(event: KeyboardEvent | React.KeyboardEvent) {

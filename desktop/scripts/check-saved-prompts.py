@@ -74,9 +74,14 @@ script = r"""
  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(intervalInput,'30');intervalInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  assert(document.querySelector('.automation-condition-chip').textContent.includes('30 min'),'Chip did not update after editing the interval');
  assert(document.querySelector('.automation-branch > strong')?.textContent==='Branch','Branch selector has no visible label');
- document.querySelector('.automation-condition-dialog').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
- assert(!document.querySelector('.automation-condition-dialog')&&!document.querySelector('.automation-dialog[inert]'),'Escape did not restore the main form');
- assert(document.querySelector('[data-condition="interval"] .automation-condition-edit')===document.activeElement,'Focus did not return to the condition chip');
+ // Offscreen WebKit may suspend animation frames; focus restoration must still run.
+ const requestFrame=window.requestAnimationFrame;
+ window.requestAnimationFrame=()=>0;
+ try{
+  document.querySelector('.automation-condition-dialog').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
+  assert(!document.querySelector('.automation-condition-dialog')&&!document.querySelector('.automation-dialog[inert]'),'Escape did not restore the main form');
+  assert(document.querySelector('[data-condition="interval"] .automation-condition-edit')===document.activeElement,'Focus did not return to the condition chip');
+ }finally{window.requestAnimationFrame=requestFrame;}
  const scopeBounds=document.querySelector('.automation-scope').getBoundingClientRect(),branchBounds=document.querySelector('.automation-branch').getBoundingClientRect();
  assert(Math.abs(scopeBounds.top-branchBounds.top)<2&&Math.abs(branchBounds.width-scopeBounds.width)<3,'Repository and branch controls are not sharing the row equally: '+[scopeBounds.top,branchBounds.top,scopeBounds.width,branchBounds.width].join('/'));
  assert(document.querySelector('.automation-dialog-content').scrollHeight<=document.querySelector('.automation-dialog-content').clientHeight+2,'Folded interval dialog requires scrolling: '+document.querySelector('.automation-dialog-content').scrollHeight+'/'+document.querySelector('.automation-dialog-content').clientHeight);
