@@ -619,9 +619,9 @@ async fn branch_removal_plan(repository_id:String,branch:String,state:State<'_,A
     tauri::async_runtime::spawn_blocking(move||branch_removal::plan(&path,&branch,Some(&remote))).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
-async fn remove_branch(repository_id:String,plan:branch_removal::Plan,state:State<'_,AppState>)->Result<branch_removal::ResultDetails,String>{
+async fn remove_branch(repository_id:String,plan:branch_removal::Plan,confirmed_unmerged_head:Option<String>,state:State<'_,AppState>)->Result<branch_removal::ResultDetails,String>{
     let path=state.db.repository_path(&repository_id)?;
-    tauri::async_runtime::spawn_blocking(move||branch_removal::remove(&path,plan)).await.map_err(|error|error.to_string())?
+    tauri::async_runtime::spawn_blocking(move||branch_removal::remove(&path,plan,confirmed_unmerged_head.as_deref())).await.map_err(|error|error.to_string())?
 }
 
 #[tauri::command]

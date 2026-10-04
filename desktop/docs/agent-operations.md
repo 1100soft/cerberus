@@ -43,7 +43,11 @@ The desktop `open_external_url` command accepts exact approved destinations in `
 
 Commit history's trash button removes the selected local branch after a review
 dialog lists the linked worktrees and matching remote branch. Removal uses
-`git worktree remove` without force and `git branch -d`, never `-D`. Git's merge
+`git worktree remove` without force and `git branch -d` by default. Unmerged
+branches require a second confirmation showing the branch and commit, plus an
+explicit acknowledgement, before `git branch -D` is allowed. That confirmation
+is bound to the inspected commit and merge status; changed plans require review
+again. Forced branch deletion never forces worktree removal. Git's merge
 check uses the branch's upstream when available, otherwise HEAD. The primary
 worktree and the app-linked checkout are protected; switch their checkout before
 removing their branch. Dirty and locked worktrees remain protected by Git.

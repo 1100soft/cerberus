@@ -1,4 +1,4 @@
-//! Branch removal deliberately uses Git's non-forced worktree/branch operations.
+//! Worktrees are never forced; deleting unmerged branches requires exact confirmation.
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsString,
@@ -12,11 +12,12 @@ static REMOVAL: Mutex<()> = Mutex::new(());
 pub struct Plan {
     pub branch: String,
     pub head: String,
+    pub merged: bool,
     pub worktrees: Vec<PathBuf>,
     pub remote: Option<String>,
     pub remote_head: Option<String>,
 }
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResultDetails {
     pub completed: bool,
@@ -111,7 +112,7 @@ fn remote_head(repo: &Path, remote: &str, branch: &str) -> Result<Option<String>
             (name == reference).then(|| sha.to_owned())
         }))
 }
-fn require_merged(repo: &Path, branch: &str) -> Result<(), String> {
+fn is_merged(repo: &Path, branch: &str) -> Result<bool, String> {
     let reference = format!("refs/heads/{branch}");
     let upstream = text(
         repo,
@@ -123,7 +124,15 @@ fn require_merged(repo: &Path, branch: &str) -> Result<(), String> {
         ],
     )
     .unwrap_or_else(|_| "HEAD".into());
-    checked(git(repo,&["merge-base","--is-ancestor",&reference,&upstream])?).map_err(|_|"Git considers this branch unmerged. Merge or preserve its commits before removing it; forced deletion is not available.".into()).map(|_|())
+    let result = git(
+        repo,
+        &["merge-base", "--is-ancestor", &reference, &upstream],
+    )?;
+    match result.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => checked(result).map(|_| true),
+    }
 }
 pub fn plan(repo: &Path, branch: &str, remote: Option<&str>) -> Result<Plan, String> {
     let _guard = REMOVAL
@@ -150,7 +159,7 @@ fn inspect(repo: &Path, branch: &str, remote: Option<&str>) -> Result<Plan, Stri
     )
     .map_err(|_| format!("Local branch does not exist: {branch}"))?;
     let worktrees = worktrees(&repo, branch)?;
-    require_merged(&repo, branch)?;
+    let merged = is_merged(&repo, branch)?;
     let remotes = text(&repo, &["remote"])?;
     if let Some(name) = remote {
         if name != "origin" && !remotes.lines().any(|item| item == name) {
@@ -168,18 +177,24 @@ fn inspect(repo: &Path, branch: &str, remote: Option<&str>) -> Result<Plan, Stri
     Ok(Plan {
         branch: branch.into(),
         head,
+        merged,
         worktrees,
         remote,
         remote_head,
     })
 }
-pub fn remove(repo: &Path, expected: Plan) -> Result<ResultDetails, String> {
+pub fn remove(
+    repo: &Path,
+    expected: Plan,
+    confirmed_unmerged_head: Option<&str>,
+) -> Result<ResultDetails, String> {
     let _guard = REMOVAL
         .lock()
         .map_err(|_| "Branch removal lock unavailable")?;
     let repo = repo.canonicalize().map_err(|error| error.to_string())?;
     let actual = inspect(&repo, &expected.branch, expected.remote.as_deref())?;
-    if actual.head != expected.head
+    if actual.merged != expected.merged
+        || actual.head != expected.head
         || actual.worktrees != expected.worktrees
         || actual.remote != expected.remote
         || actual.remote_head != expected.remote_head
@@ -188,6 +203,9 @@ pub fn remove(repo: &Path, expected: Plan) -> Result<ResultDetails, String> {
             "Branch, worktrees, or remote changed since confirmation. Review the removal again."
                 .into(),
         );
+    }
+    if !actual.merged && confirmed_unmerged_head != Some(actual.head.as_str()) {
+        return Err("This branch is unmerged. Forced deletion requires a second confirmation of this exact commit.".into());
     }
     let mut steps = Vec::new();
     let result = (|| -> Result<(), String> {
@@ -213,8 +231,24 @@ pub fn remove(repo: &Path, expected: Plan) -> Result<ResultDetails, String> {
         {
             return Err("Local branch changed during removal. Its ref was preserved.".into());
         }
-        checked(git(&repo, &["branch", "-d", "--", &actual.branch])?)?;
-        steps.push(format!("Deleted local branch: {}", actual.branch));
+        checked(git(
+            &repo,
+            &[
+                "branch",
+                if actual.merged { "-d" } else { "-D" },
+                "--",
+                &actual.branch,
+            ],
+        )?)?;
+        steps.push(format!(
+            "{} local branch: {}",
+            if actual.merged {
+                "Deleted"
+            } else {
+                "Force-deleted"
+            },
+            actual.branch
+        ));
         if let Some(remote) = actual.remote.as_deref() {
             if let Some(sha) = actual.remote_head.as_deref() {
                 if remote_head(&repo, remote, &actual.branch)?.as_deref() != Some(sha) {
@@ -242,6 +276,9 @@ pub fn remove(repo: &Path, expected: Plan) -> Result<ResultDetails, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn remove(repo: &Path, plan: Plan) -> Result<ResultDetails, String> {
+        super::remove(repo, plan, None)
+    }
     fn run(repo: &Path, args: &[&str]) {
         text(repo, args).unwrap();
     }
@@ -330,7 +367,9 @@ mod tests {
         run(dir.path(), &["checkout", "-q", "correction/test"]);
         run(dir.path(), &["commit", "--allow-empty", "-qm", "Unmerged"]);
         run(dir.path(), &["checkout", "-q", "main"]);
-        assert!(plan(dir.path(), "correction/test", None)
+        let unmerged = plan(dir.path(), "correction/test", None).unwrap();
+        assert!(!unmerged.merged);
+        assert!(remove(dir.path(), unmerged)
             .unwrap_err()
             .contains("unmerged"));
     }
@@ -395,6 +434,76 @@ mod tests {
         .unwrap();
         assert!(!result.completed && result.steps.is_empty());
         assert!(tree.exists());
+    }
+    #[test]
+    fn unmerged_branch_requires_exact_confirmation_and_then_can_be_deleted() {
+        let dir = fixture();
+        run(dir.path(), &["checkout", "-q", "correction/test"]);
+        run(
+            dir.path(),
+            &["commit", "--allow-empty", "-qm", "Alternate correction"],
+        );
+        run(dir.path(), &["checkout", "-q", "main"]);
+        let trees = tempfile::tempdir().unwrap();
+        let tree = trees.path().join("correction");
+        run(
+            dir.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                tree.to_str().unwrap(),
+                "correction/test",
+            ],
+        );
+        let plan = plan(dir.path(), "correction/test", None).unwrap();
+        assert!(!plan.merged);
+        assert!(super::remove(dir.path(), plan.clone(), None).is_err());
+        assert!(tree.exists());
+        assert!(super::remove(dir.path(), plan.clone(), Some("wrong commit")).is_err());
+        assert!(tree.exists());
+        let head = plan.head.clone();
+        let result = super::remove(dir.path(), plan, Some(&head)).unwrap();
+        assert!(result.completed);
+        assert!(!tree.exists());
+        assert!(text(
+            dir.path(),
+            &["show-ref", "--verify", "refs/heads/correction/test"]
+        )
+        .is_err());
+    }
+    #[test]
+    fn force_confirmation_never_forces_dirty_worktree_removal() {
+        let dir = fixture();
+        run(dir.path(), &["checkout", "-q", "correction/test"]);
+        run(
+            dir.path(),
+            &["commit", "--allow-empty", "-qm", "Alternate correction"],
+        );
+        run(dir.path(), &["checkout", "-q", "main"]);
+        let trees = tempfile::tempdir().unwrap();
+        let tree = trees.path().join("dirty");
+        run(
+            dir.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                tree.to_str().unwrap(),
+                "correction/test",
+            ],
+        );
+        std::fs::write(tree.join("untracked"), "preserve").unwrap();
+        let plan = plan(dir.path(), "correction/test", None).unwrap();
+        let head = plan.head.clone();
+        let result = super::remove(dir.path(), plan, Some(&head)).unwrap();
+        assert!(!result.completed && result.steps.is_empty());
+        assert!(tree.exists());
+        assert!(text(
+            dir.path(),
+            &["show-ref", "--verify", "refs/heads/correction/test"]
+        )
+        .is_ok());
     }
     #[test]
     fn rejected_remote_deletion_reports_partial_success() {

@@ -384,3 +384,27 @@ after successful fixture assertions/runner exit 0; Vite retains its chunk warnin
 Removed generated untracked bytecode for the two Python automation fixtures.
 No user branch/worktree/remote was removed, no GitHub push performed, and no
 project commit created. All accumulated changes remain uncommitted.
+
+## Explicit forced deletion of unmerged branches (2026-10-04)
+
+User authorized a force option for leftover alternate CI-correction branches.
+Removal plans now report merge status instead of rejecting unmerged branches.
+Merged branches retain branch -d. An unmerged plan shows its branch/full commit,
+then Continue to forced deletion opens the second confirmation, requiring an
+unchecked acknowledgement before Force delete branch is enabled. The native
+command requires confirmation of the exact inspected unmerged head; changed
+tips, merge status, worktrees, or remote tips require fresh review. Only then
+does branch -D replace -d. Worktree removal remains non-forced, with primary and
+app-linked checkouts, dirty files, and locked worktrees still protected. Results
+identify forced local deletion explicitly. The dialog height accounts for zoom
+so its warning/acknowledgement scroll internally with the footer accessible.
+
+Validation: ten native removal tests passed, including refusal without/wrong
+force confirmation, confirmed deletion of an unmerged branch with a clean linked
+worktree, and preservation of a dirty linked worktree even with confirmation.
+Production build and WebKit UI fixture passed; UI covers the second-step gate,
+unchecked acknowledgement, exact commit submission, cancellation at 100/140/150%,
+and forced-dialog bounds at 150%. New-module formatting and diff whitespace pass.
+Existing WebKit allocator and Vite chunk-size diagnostics remain. No live user
+branch was removed, no project commit or remote GitHub push performed; changes
+remain uncommitted.

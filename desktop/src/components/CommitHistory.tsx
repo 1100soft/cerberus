@@ -14,6 +14,8 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   const [removalBusy,setRemovalBusy]=useState(false);
   const [removalExecuting,setRemovalExecuting]=useState(false);
   const [removalBranch,setRemovalBranch]=useState('');
+  const [forceReview,setForceReview]=useState(false);
+  const [forceAcknowledged,setForceAcknowledged]=useState(false);
   const [removalError,setRemovalError]=useState('');
   const [removalSteps,setRemovalSteps]=useState<string[]>([]);
   useEffect(()=>{if(removalOpen)requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.branch-removal-dialog footer button')?.focus());},[removalOpen]);
@@ -106,17 +108,19 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   async function prepareRemoval(){
     if(!repository||!branch||removalBusy)return;
     const request=++removalRequest.current;
-    setRemovalOpen(true);setRemovalBranch(branch);setRemovalPlan(null);setRemovalError('');setRemovalSteps([]);setRemovalBusy(true);
+    setRemovalOpen(true);setForceReview(false);setForceAcknowledged(false);setRemovalBranch(branch);setRemovalPlan(null);setRemovalError('');setRemovalSteps([]);setRemovalBusy(true);
     try{const plan=await api.branchRemovalPlan(repository.id,branch);if(request===removalRequest.current)setRemovalPlan(plan);}
     catch(error){if(request===removalRequest.current)setRemovalError(String(error));}
     finally{if(request===removalRequest.current)setRemovalBusy(false);}
   }
   async function confirmRemoval(){
     if(!repository||!removalPlan||removalBusy)return;
+    if(!removalPlan.merged&&!forceReview){setForceReview(true);return;}
+    if(!removalPlan.merged&&!forceAcknowledged)return;
     const repositoryId=repository.id,request=++removalRequest.current;
     setRemovalBusy(true);setRemovalExecuting(true);setRemovalError('');
     try{
-      const result=await api.removeBranch(repositoryId,removalPlan);
+      const result=await api.removeBranch(repositoryId,removalPlan,!removalPlan.merged&&forceReview?removalPlan.head:undefined);
       if(request!==removalRequest.current)return;
       setRemovalSteps(result.steps);setRemovalError(result.error||'');setRemovalPlan(null);
     }catch(error){if(request===removalRequest.current){setRemovalError(String(error));setRemovalPlan(null);}}
@@ -167,10 +171,12 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     {removalOpen&&<div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)closeRemoval();}}><section className="automation-dialog branch-removal-dialog" role="dialog" aria-modal="true" aria-label="Remove branch" onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();closeRemoval();}}}><header><h2>Remove branch</h2><button type="button" aria-label="Close branch removal" disabled={removalExecuting} onClick={closeRemoval}><X size={17}/></button></header><div className="automation-dialog-content">
       <p><strong>{repository?.displayName}</strong> · <code>{removalBranch}</code></p>
       {removalBusy&&<p role="status">{removalPlan?'Removing branch…':'Checking branch and remote…'}</p>}
-      {removalPlan&&<><p>Remove this local branch{removalPlan.remoteHead?` and ${removalPlan.remote}/${removalPlan.branch}`:''}?</p><p>Git will refuse dirty or locked worktrees and unmerged branches. The primary checkout is preserved. Completed steps cannot be undone by cancelling a later step.</p>{removalPlan.worktrees.length>0&&<><strong>Worktrees to remove</strong><ul>{removalPlan.worktrees.map(path=><li key={path}><code>{path}</code></li>)}</ul></>}<p>{removalPlan.remote?`${removalPlan.remoteHead?'The remote branch will be deleted.':'No matching remote branch exists.'} ${removalPlan.remote} will be fetched and pruned.`:'No origin remote is configured. Only the local branch will be removed.'}</p><small>Commit: {removalPlan.head}</small></>}
+      {removalPlan&&<><p>Remove this local branch{removalPlan.remoteHead?` and ${removalPlan.remote}/${removalPlan.branch}`:''}?</p><p>Git will refuse dirty or locked worktrees. Unmerged branches require a second confirmation. The primary checkout is preserved. Completed steps cannot be undone by cancelling a later step.</p>{removalPlan.worktrees.length>0&&<><strong>Worktrees to remove</strong><ul>{removalPlan.worktrees.map(path=><li key={path}><code>{path}</code></li>)}</ul></>}<p>{removalPlan.remote?`${removalPlan.remoteHead?'The remote branch will be deleted.':'No matching remote branch exists.'} ${removalPlan.remote} will be fetched and pruned.`:'No origin remote is configured. Only the local branch will be removed.'}</p><small>Commit: {removalPlan.head}</small></>}
+      {removalPlan&&!removalPlan.merged&&<p className="config-error" role="alert">{forceReview?'Confirm forced deletion:':'This branch is unmerged:'} <code>{removalPlan.branch}</code> at <code>{removalPlan.head}</code>. Deleting this branch may make its commits unreachable. Another correction being merged does not prove this branch has identical changes. Worktree removal will still refuse dirty or locked worktrees.</p>}
+      {removalPlan&&!removalPlan.merged&&forceReview&&<label><input type="checkbox" aria-label="Confirm unmerged branch deletion" checked={forceAcknowledged} disabled={removalExecuting} onChange={event=>setForceAcknowledged(event.target.checked)}/> I understand that I am deleting this unmerged branch.</label>}
       {removalSteps.length>0&&<ol aria-label="Branch removal results">{removalSteps.map((step,index)=><li key={index}>{step}</li>)}</ol>}
       {removalError&&<p className="config-error" role="alert">{removalError}</p>}
       {!removalBusy&&!removalPlan&&removalSteps.length>0&&!removalError&&<p role="status">Branch removal completed.</p>}
-    </div><footer><button type="button" disabled={removalExecuting} onClick={closeRemoval}>{removalPlan?'Cancel':'Close'}</button>{removalPlan&&<button type="button" disabled={removalBusy} onClick={()=>void confirmRemoval()}>Remove branch</button>}</footer></section></div>}
+    </div><footer><button type="button" disabled={removalExecuting} onClick={closeRemoval}>{removalPlan?'Cancel':'Close'}</button>{removalPlan&&<button type="button" disabled={removalBusy||(!removalPlan.merged&&forceReview&&!forceAcknowledged)} onClick={()=>void confirmRemoval()}>{removalPlan.merged?'Remove branch':forceReview?'Force delete branch':'Continue to forced deletion'}</button>}</footer></section></div>}
   </section>;
 }
