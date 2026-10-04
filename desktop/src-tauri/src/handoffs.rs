@@ -87,19 +87,68 @@ pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
     }}
     Ok(removed)
 }
+fn matches_variables(path: &Path, variables: &[String]) -> bool {
+    if variables.is_empty() {
+        return true;
+    }
+    if !path.metadata().is_ok_and(|meta| meta.len() <= 2_000_000) {
+        return false;
+    }
+    let Ok(payload) = fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+        return false;
+    };
+    variables.iter().all(|name| {
+        value
+            .get("variables")
+            .and_then(|vars| vars.get(name))
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    })
+}
+pub fn has_pending_matching(
+    repository: &Path,
+    name: &str,
+    variables: &[String],
+) -> Result<bool, String> {
+    Ok(pending(repository, name)?
+        .iter()
+        .any(|path| matches_variables(path, variables)))
+}
 pub fn has_pending(repository:&Path,name:&str)->Result<bool,String>{Ok(!pending(repository,name)?.is_empty())}
-pub fn claim(repository:&Path,name:&str)->Result<Option<Claim>,String>{
-    for source in pending(repository,name)?{
-        let Some(id)=source.file_stem().and_then(|stem|stem.to_str()).map(str::to_owned)else{continue};
-        let destination=file(repository,"claimed",name,&id)?;
-        if fs::rename(&source,&destination).is_ok(){
+pub fn claim(repository:&Path,name:&str)->Result<Option<Claim>,String>{claim_matching(repository,name,&[])}
+pub fn claim_matching(
+    repository: &Path,
+    name: &str,
+    variables: &[String],
+) -> Result<Option<Claim>, String> {
+    for source in pending(repository, name)? {
+        if !matches_variables(&source, variables) {
+            continue;
+        }
+        let Some(id) = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let destination = file(repository, "claimed", name, &id)?;
+        if fs::rename(&source, &destination).is_ok() {
             // The payload may have waited in the queue for hours. Lease age
             // begins at claim time, not at the agent's original write.
-            if let Err(error)=fs::File::open(&destination).and_then(|file|file.set_modified(SystemTime::now())){
-                let _=fs::rename(&destination,&source);
+            if let Err(error) =
+                fs::File::open(&destination).and_then(|file| file.set_modified(SystemTime::now()))
+            {
+                let _ = fs::rename(&destination, &source);
                 return Err(format!("Could not timestamp handoff claim: {error}"));
             }
-            return Ok(Some(Claim{id,path:destination.to_string_lossy().into_owned()}));
+            return Ok(Some(Claim {
+                id,
+                path: destination.to_string_lossy().into_owned(),
+            }));
         }
     }
     Ok(None)
@@ -165,5 +214,72 @@ pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
         assert_eq!(cleanup_stale(root.path()).unwrap(),1);
         assert!(!has_pending(root.path(),"review").unwrap());assert!(claim(root.path(),"review").unwrap().is_none());
         assert!(!Path::new(&claimed.path).exists());
+    }
+}
+
+#[cfg(test)]
+mod variable_tests {
+    use super::*;
+    #[test]
+    fn strict_boolean_filters_skip_nonmatching_payloads_without_consuming_them() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(Command::new("git")
+            .args(["init", "-q"])
+            .arg(root.path())
+            .status()
+            .unwrap()
+            .success());
+        for (id, payload) in [
+            ("a", r#"{"variables":{"v":false,"ready":true}}"#),
+            ("b", r#"{"variables":{"v":"true","ready":true}}"#),
+            ("c", r#"{"variables":{"v":true}}"#),
+            ("d", "plain text"),
+            (
+                "e",
+                r#"{"variables":{"v":true,"ready":true},"details":"context"}"#,
+            ),
+        ] {
+            write_payload(root.path(), "review", id, payload).unwrap();
+            publish(root.path(), "review", id).unwrap();
+        }
+        let variables = vec!["v".into(), "ready".into()];
+        assert!(has_pending_matching(root.path(), "review", &variables).unwrap());
+        assert!(!has_pending_matching(root.path(), "review", &["V".into()]).unwrap());
+        let matched = claim_matching(root.path(), "review", &variables)
+            .unwrap()
+            .unwrap();
+        assert_eq!(matched.id, "e");
+        finish(root.path(), "review", &matched.id).unwrap();
+        assert!(!has_pending_matching(root.path(), "review", &variables).unwrap());
+        assert!(claim_matching(root.path(), "review", &variables)
+            .unwrap()
+            .is_none());
+        assert_eq!(pending(root.path(), "review").unwrap().len(), 4);
+        assert_eq!(claim(root.path(), "review").unwrap().unwrap().id, "a");
+    }
+    #[test]
+    fn concurrent_filtered_claim_has_one_winner() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(Command::new("git")
+            .args(["init", "-q"])
+            .arg(root.path())
+            .status()
+            .unwrap()
+            .success());
+        write_payload(root.path(), "review", "one", r#"{"variables":{"v":true}}"#).unwrap();
+        publish(root.path(), "review", "one").unwrap();
+        let threads = (0..8)
+            .map(|_| {
+                let path = root.path().to_path_buf();
+                std::thread::spawn(move || claim_matching(&path, "review", &["v".into()]).unwrap())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            threads
+                .into_iter()
+                .filter_map(|thread| thread.join().unwrap())
+                .count(),
+            1
+        );
     }
 }

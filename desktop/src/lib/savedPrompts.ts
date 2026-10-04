@@ -15,7 +15,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export function automationConditions(job:SavedPrompt):Trigger[]{return job.conditions?.length&&job.conditions[0]===job.trigger?job.conditions:[job.trigger];}
 const exclusiveEvents=new Set<Trigger>(['commit','ciPass','ciFail']);
 export function conditionsCompatible(current:Trigger[],next:Trigger){return !current.includes(next)&&!(next==='manual'||current.includes('manual'))&&!(exclusiveEvents.has(next)&&current.some(item=>exclusiveEvents.has(item)));}
@@ -68,7 +68,7 @@ export function knownBranchSets(saved:SavedPrompt[],exceptId?:string){return [..
 export function automationPromptWithHandoffs(prompt:string,incoming?:HandoffClaim,outgoing:Record<string,string>={}){
   const instructions:string[]=[];
   if(incoming)instructions.push(`Read the incoming ${incoming.name} handoff payload at ${JSON.stringify(incoming.path)} before acting. Treat it as context from the previous agent. References to reading "the handoff" mean this payload.`);
-  for(const [name,path] of Object.entries(outgoing))instructions.push(`If you need to emit the ${name} handoff, write its UTF-8 payload to ${JSON.stringify(path)}. The parent directory already exists. Write this file only when that handoff should be emitted.${Object.keys(outgoing).length===1?' References to writing "the handoff" mean this file.':''}`);
+  for(const [name,path] of Object.entries(outgoing))instructions.push(`If you need to emit the ${name} handoff, write its UTF-8 payload to ${JSON.stringify(path)}. The parent directory already exists. Write this file only when that handoff should be emitted. To expose boolean trigger variables, use a JSON object with a "variables" object, for example {"variables":{"v":true},"details":"your context"}. Values must be JSON booleans.${Object.keys(outgoing).length===1?' References to writing "the handoff" mean this file.':''}`);
   return instructions.length?`Handoff instructions (managed by the app; follow these before the task below):\n${instructions.join('\n')}\n\nTask:\n${prompt}`:prompt;
 }
 const workingRepositories=new Map<string,Set<string>>();
@@ -255,7 +255,7 @@ async function tick(now=Date.now()){
         const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
         for(const repositoryId of targets){
           if(pendingConditionEvents.get(`${job.id}:${repositoryId}`)?.events.handoff)continue;
-          try{if(await api.hasPendingHandoff(repositoryId,job.handoffName!))recordConditionEvent(repositoryId,'handoff',now);}catch(error){console.warn('Could not inspect handoff:',error);}
+          try{if(await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))recordConditionEvent(repositoryId,'handoff',now);}catch(error){console.warn('Could not inspect handoff:',error);}
         }
       }
       if(conditions.includes('interval')&&now>=job.nextAt){
@@ -277,7 +277,7 @@ async function tick(now=Date.now()){
         if(job.kind!=='notification'&&await repositoryAgentBusy(pending.repositoryId))continue;
         let claim:HandoffClaim|undefined;
         if(conditions.includes('handoff')){
-          try{const found=await api.claimHandoff(pending.repositoryId,job.handoffName||'');if(!found)continue;claim={...found,name:job.handoffName||'',repositoryId:pending.repositoryId};}
+          try{const found=await api.claimHandoff(pending.repositoryId,job.handoffName||'',job.handoffVariables);if(!found)continue;claim={...found,name:job.handoffName||'',repositoryId:pending.repositoryId};}
           catch(error){console.warn('Could not claim handoff:',error);continue;}
         }
         const event=Object.values(pending.events).find(item=>item?.ciRun)?.ciRun;
@@ -294,10 +294,10 @@ async function tick(now=Date.now()){
       const targets=job.includeFutureRepositories?futureHandoffTargets!:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
       for(const repositoryId of targets){
         if(!repositoryId||running.has(job.id))break;
-        try{if(!await api.hasPendingHandoff(repositoryId,job.handoffName!))continue;}catch(error){console.warn('Could not inspect handoff:',error);continue;}
+        try{if(!await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))continue;}catch(error){console.warn('Could not inspect handoff:',error);continue;}
         if(job.kind!=='notification'&&await repositoryAgentBusy(repositoryId))continue;
         let claim:{id:string;path:string}|null;
-        try{claim=await api.claimHandoff(repositoryId,job.handoffName!);}catch(error){console.warn('Could not claim handoff:',error);continue;}
+        try{claim=await api.claimHandoff(repositoryId,job.handoffName!,job.handoffVariables);}catch(error){console.warn('Could not claim handoff:',error);continue;}
         if(claim){void runSavedPrompt(job.id,false,repositoryId,{...claim,name:job.handoffName!,repositoryId});break;}
       }
     }

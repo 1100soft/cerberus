@@ -110,13 +110,13 @@ export const api = {
     if(!inTauri())return false;
     return invoke('publish_handoff',{repositoryId,name,runId,payload:payload??null});
   },
-  async hasPendingHandoff(repositoryId:string,name:string):Promise<boolean>{
-    if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>!item.claimed);
-    return invoke('has_pending_handoff',{repositoryId,name});
+  async hasPendingHandoff(repositoryId:string,name:string,variables:string[]=[]):Promise<boolean>{
+    if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>!item.claimed&&!variables.length);
+    return invoke('has_pending_handoff',{repositoryId,name,variables});
   },
-  async claimHandoff(repositoryId:string,name:string):Promise<{id:string;path:string}|null>{
-    if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
-    return invoke('claim_handoff',{repositoryId,name});
+  async claimHandoff(repositoryId:string,name:string,variables:string[]=[]):Promise<{id:string;path:string}|null>{
+    if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed&&!variables.length);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
+    return invoke('claim_handoff',{repositoryId,name,variables});
   },
   async finishHandoff(repositoryId:string,name:string,id:string):Promise<void>{
     if(!inTauri()){const key=`${repositoryId}:${name}`;demoHandoffs.set(key,(demoHandoffs.get(key)||[]).filter(item=>item.id!==id));return;}

@@ -408,3 +408,20 @@ and forced-dialog bounds at 150%. New-module formatting and diff whitespace pass
 Existing WebKit allocator and Vite chunk-size diagnostics remain. No live user
 branch was removed, no project commit or remote GitHub push performed; changes
 remain uncommitted.
+
+## Boolean handoff trigger variables (2026-10-04)
+
+Handoff condition editor now saves optional handoffVariables as comma-separated,
+case-sensitive identifiers. Every requested name must be JSON boolean true in
+the incoming payload's variables object, e.g. {"variables":{"v":true}}. Plain
+text remains compatible with triggers without requirements. Native inspection
+and atomic claiming both filter; false/missing/string/invalid payloads remain
+pending, while later matching emissions can run. Composite and standalone
+schedulers pass the same requirements. Outgoing agent instructions and help
+explain the format; scripts/notification payloads can emit the same JSON.
+
+Validation: eight native handoff tests pass, including strict matching and
+concurrent filtered claims; WebKit scheduler fixture confirms nonmatching queue
+entries are preserved. Production build passes (existing chunk-size warning).
+Automation UI fixture covers variable entry, condition chip, and dialog bounds
+at 100/140/150% zoom. Changes remain uncommitted.

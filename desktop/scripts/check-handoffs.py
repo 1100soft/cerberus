@@ -65,6 +65,16 @@ script = r"""
  assert(module.savedPrompts().find(item=>item.id==='consumer').enabled,'Failure disabled the handoff consumer');
  await module.checkSavedPromptSchedule();await pause();
  assert(calls.filter(item=>item.script==='read review').length===3,'Failed handoff was processed again');
+ module.savePrompt({...module.savedPrompts().find(item=>item.id==='consumer'),handoffVariables:['v','ready']});
+ const matching=(item,repo,name,variables)=>item.repo===repo&&item.name===name&&!item.claimed&&(!variables?.length||variables.every(key=>item.variables?.[key]===true));
+ api.hasPendingHandoff=async(repo,name,variables)=>pending.some(item=>matching(item,repo,name,variables));
+ api.claimHandoff=async(repo,name,variables)=>{const item=pending.find(item=>matching(item,repo,name,variables));if(!item)return null;item.claimed=true;claims++;return {id:item.id,path:item.path};};
+ pending.push({id:'false',path:'/virtual/false',repo:'1',name:'review',payload:'not ready',variables:{v:false,ready:true},claimed:false});
+ await module.checkSavedPromptSchedule();await pause();assert(claims===3,'False variable triggered consumer');
+ pending.push({id:'true',path:'/virtual/true',repo:'1',name:'review',payload:'ready',variables:{v:true,ready:true},claimed:false});
+ api.runAutomationShell=normalRun;
+ await module.checkSavedPromptSchedule();await wait(()=>finishes===4);
+ assert(pending.length===1&&pending[0].id==='false'&&!pending[0].claimed,'Filtered claim consumed wrong emission');
  window.__handoffCheck={passed:true,claims,finishes,calls:calls.length};
 })().catch(error=>window.__handoffCheck={passed:false,error:String(error)});
 """

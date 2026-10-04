@@ -377,7 +377,13 @@ script = r"""
  assert(!incomingName.placeholder,'Incoming handoff field has hint text');
  incomingName.focus();document.execCommand('insertText',false,'review');await pause();
  assert(incomingName.value==='review','Incoming handoff field rejected a new name');
+ const requiredVariables=document.querySelector('[aria-label="Required handoff variables"]');assert(requiredVariables,'Missing handoff variable requirements');
+ requiredVariables.focus();document.execCommand('insertText',false,'v, ready');await pause();
+ assert(requiredVariables.value==='v, ready','Variable requirements did not update');
+ for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',String(zoom));await pause();const dialog=document.querySelector('.automation-condition-dialog').getBoundingClientRect();const field=requiredVariables.getBoundingClientRect();assert(dialog.top>=-2&&dialog.bottom<=innerHeight+2&&field.right<=dialog.right+2,'Handoff variables overflow at zoom '+zoom);}
+ document.documentElement.style.setProperty('--ui-zoom','1');await pause();
  document.querySelector('.automation-condition-dialog footer button').click();await pause();
+ assert(document.querySelector('[data-condition="handoff"]').textContent.includes('v + ready true'),'Variable requirements absent from condition chip');
  [...document.querySelectorAll('.automation-type button')].find(node=>node.textContent==='Agent').click();await pause();
  assert(document.querySelector('[aria-label="Outgoing handoff names"]'),'Outgoing handoff field missing');
  const outgoingName=document.querySelector('[aria-label="Outgoing handoff names"]');

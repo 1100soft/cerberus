@@ -101,3 +101,13 @@ that choice while it remains available. With no eligible repositories, running
 is disabled. Live logs scroll to the newest output until you scroll up; scrolling
 back to the bottom resumes following. Selecting a different run starts at its
 latest output.
+
+### Boolean handoff conditions
+
+In the Handoff condition dialog, **Require variables to be true** accepts optional comma-separated variable names, such as `v, ready`. Names are case-sensitive ASCII identifiers (letters or underscore first, then letters, digits, or underscores). All listed variables must be JSON boolean `true` in the same incoming payload:
+
+```json
+{"variables":{"v":true,"ready":true},"details":"Context for the next automation"}
+```
+
+Agents receive this format in their outgoing handoff instructions. Shell scripts write the same JSON to their supplied handoff output path; a Notification automation can use JSON as its message payload. Missing variables, `false`, strings such as `"true"`, and invalid JSON do not match. Without variable requirements, ordinary text payloads still trigger as before. Nonmatching emissions remain pending and do not block a later matching emission. Matching is applied during both queue inspection and atomic claiming, including composite conditions. Queue consumption is still shared: one emission runs one consumer, rather than broadcasting to every matching automation.

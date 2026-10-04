@@ -295,9 +295,9 @@ fn handoff_output_path(repository_id:String,name:String,run_id:String,state:Stat
 #[tauri::command]
 fn publish_handoff(repository_id:String,name:String,run_id:String,payload:Option<String>,state:State<AppState>)->Result<bool,String>{let repository=state.db.repository_path(&repository_id)?;if let Some(payload)=payload{handoffs::write_payload(&repository,&name,&run_id,&payload)?;}handoffs::publish(&repository,&name,&run_id)}
 #[tauri::command]
-fn has_pending_handoff(repository_id:String,name:String,state:State<AppState>)->Result<bool,String>{handoffs::has_pending(&state.db.repository_path(&repository_id)?,&name)}
+fn has_pending_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<bool,String>{handoffs::has_pending_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
 #[tauri::command]
-fn claim_handoff(repository_id:String,name:String,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim(&state.db.repository_path(&repository_id)?,&name)}
+fn claim_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
 #[tauri::command]
 fn finish_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::finish(&state.db.repository_path(&repository_id)?,&name,&id)}
 #[tauri::command]
