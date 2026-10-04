@@ -21,6 +21,7 @@ export function historyResumeTarget(key?:string): ResumeTarget | undefined {
 }
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach(listener => listener());
+export function subscribeAgentChats(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function getAgentChat(id:string) { return chats.find(chat=>chat.id===id); }
 export function latestAgentChat(repositoryId:string) { return chats.find(chat=>chat.repositoryId===repositoryId); }
 export function useAgentChats() { return useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => chats); }
@@ -97,7 +98,7 @@ export async function runExternalAutomation(repositoryId:string,profile:AgentPro
   const messages:CodexMessage[]=[{id:crypto.randomUUID(),role:'user',text:prompt},{id:crypto.randomUUID(),role:'assistant',text:''}];
   chats=[{id,repositoryId,profile,name:prompt.slice(0,100),messages,status:'Working…',activity:'',running:true,updatedAt:Date.now()},...chats];persist();emit();
   try{
-    const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt);
+    const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt,undefined,undefined,event=>{const chat=getAgentChat(id);if(chat)update(id,{activity:(chat.activity+'\n'+JSON.stringify(event)).slice(-2_000_000)});});
     update(id,{running:false,status:'Completed',session:result.sessionId?{sessionId:result.sessionId,provider:profile.provider,source:'app'}:undefined,messages:[messages[0],{...messages[1],text:result.text||'Completed without a text response.'}]});
     window.dispatchEvent(new CustomEvent('saved-prompt-finished',{detail:{repositoryId,provider:profile.provider}}));
     return {text:result.text||'Completed',chatId:id};

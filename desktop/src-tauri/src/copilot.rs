@@ -6,27 +6,31 @@ use std::{time::Duration, sync::{Arc, atomic::{AtomicBool,Ordering}}};
 fn response_text(data:&Value)->Option<&str>{
     ["content","message","text"].iter().find_map(|key|data.get(*key).and_then(Value::as_str).filter(|text|!text.trim().is_empty()))
 }
+fn editing_permission(mode:&str)->Result<bool,String>{match mode{"analyze"=>Ok(false),"edit"|"full"=>Ok(true),_=>Err("Unsupported Copilot permission mode".into())}}
 fn draft_permission_allowed(request:&PermissionRequestData)->bool{matches!(request.kind,Some(PermissionRequestKind::Read))}
 
-pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,repository:&std::path::Path,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>)->Result<Value,String>{
+pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,repository:&std::path::Path,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>,output:Option<tauri::ipc::Channel<Value>>)->Result<Value,String>{
     if prompt.trim().is_empty() || prompt.len()>100_000{return Err("Enter a prompt of at most 100,000 characters".into());}
-    if !matches!(mode,"analyze"|"edit"){return Err("Unsupported Copilot permission mode".into());}
+    let editing=editing_permission(mode)?;
     let client=start_client(data_dir,identity_id).await?;
     let result=async {
         let config=SessionConfig::default().with_working_directory(repository);
-        let config=if mode=="edit"{config.approve_all_permissions()}else{config.with_available_tools(["view","read_file"]).approve_permissions_if(draft_permission_allowed)};
+        let config=if editing{config.approve_all_permissions()}else{config.with_available_tools(["view","read_file"]).approve_permissions_if(draft_permission_allowed)};
         let session=if let Some(id)=session_id{
             let resume=ResumeSessionConfig::new(SessionId::new(id)).with_working_directory(repository);
-            let resume=if mode=="edit"{resume.approve_all_permissions()}else{resume.with_available_tools(["view","read_file"]).approve_permissions_if(draft_permission_allowed)};
+            let resume=if editing{resume.approve_all_permissions()}else{resume.with_available_tools(["view","read_file"]).approve_permissions_if(draft_permission_allowed)};
             client.resume_session(resume).await.map_err(|e|e.to_string())?
         }else{client.create_session(config).await.map_err(|e|e.to_string())?};
         let id=session.id().as_str().to_owned();
-        let reply=if let Some(flag)=cancelled{
+        let mut events=session.subscribe();
+        let reply_future=async {let reply=if let Some(flag)=cancelled{
             tokio::select! {
                 result=session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(900)))=>result.map_err(|e|e.to_string())?,
                 _=async {while !flag.load(Ordering::SeqCst){tokio::time::sleep(Duration::from_millis(100)).await;}}=>{let _=session.abort().await;let _=session.disconnect().await;return Err("Draft stopped".into());}
             }
-        }else{session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(900))).await.map_err(|e|e.to_string())?};
+        }else{session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(900))).await.map_err(|e|e.to_string())?};Ok::<_,String>(reply)};
+        tokio::pin!(reply_future);
+        let reply=loop{tokio::select!{reply=&mut reply_future=>break reply?,event=events.recv(),if output.is_some()=>{match event{Ok(event)=>{if let Some(output)=&output{let _=output.send(serde_json::to_value(event).map_err(|error|error.to_string())?);}},Err(_)=>{tokio::time::sleep(Duration::from_millis(10)).await;}}}}};
         let direct=reply.as_ref().and_then(|event|response_text(&event.data));
         let (text,diagnostic)=if let Some(text)=direct{(text.to_owned(),String::new())}else{
             let messages=session.get_events().await.map_err(|e|e.to_string())?;
@@ -81,6 +85,11 @@ fn event_messages(result:&Value)->Vec<crate::codex::Message>{
 #[cfg(test)] mod tests {
     use super::*;
     #[test]
+    fn full_permissions_are_supported_without_widening_analyze(){
+        assert!(editing_permission("full").unwrap());assert!(editing_permission("edit").unwrap());
+        assert!(!editing_permission("analyze").unwrap());assert!(editing_permission("unknown").is_err());
+    }
+    #[test]
     fn extracts_copilot_final_message_shapes(){
         assert_eq!(response_text(&json!({"message":"Draft script"})),Some("Draft script"));
         assert_eq!(response_text(&json!({"content":"Draft prompt"})),Some("Draft prompt"));
@@ -103,7 +112,7 @@ fn event_messages(result:&Value)->Vec<crate::codex::Message>{
         let identity=std::env::var("CERBERUS_COPILOT_TEST_ID").expect("identity id");
         let repo=std::env::var("CERBERUS_COPILOT_TEST_REPO").expect("repository path");
         let prompt=std::env::var("CERBERUS_COPILOT_TEST_PROMPT").unwrap_or_else(|_|"Reply with exactly READY.".into());
-        let result=tauri::async_runtime::block_on(new_conversation(std::path::Path::new(&root),&identity,std::path::Path::new(&repo),"analyze",&prompt,None,None));
+        let result=tauri::async_runtime::block_on(new_conversation(std::path::Path::new(&root),&identity,std::path::Path::new(&repo),"analyze",&prompt,None,None,None));
         assert!(result.as_ref().ok().and_then(|reply|reply["text"].as_str()).is_some_and(|text|!text.trim().is_empty()),"{result:?}");
     }
     #[test]

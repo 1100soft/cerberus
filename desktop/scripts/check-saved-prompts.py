@@ -138,6 +138,21 @@ script = r"""
  assert([...document.querySelectorAll('.automation-log-dialog [role="status"]')].some(node=>node.textContent.includes('Clipboard denied')),'Clipboard failure was not shown');
  navigator.clipboard.writeText=async text=>{copiedLog=text;};
  api.listAutomationLogs=oldLogList;api.readAutomationLog=oldLogRead;
+ const logStore=await import(apiPath.replace('/lib/api.ts','/lib/automationLogs.ts'));
+ const runningLog={automationId:jobs[0].id,repositoryId:jobs[0].repositoryId,runId:'live-fixture',createdAt:Date.now()+1000,kind:'shell',status:'running',command:'echo live',stdout:'',stderr:'',response:'',activity:''};
+ await logStore.beginAutomationLog(runningLog);await pause();
+ assert(document.querySelector('[aria-label="Automation log run"]').textContent.includes('running'),'Active run was not selected by default');
+ logStore.updateAutomationLog(runningLog,{stdout:'live stdout',activity:'live activity'});
+ await wait(()=>document.querySelector('.automation-log-dialog').textContent.includes('live activity'));
+ assert(!document.querySelector('.automation-log-dialog').textContent.includes('fixture stdout'),'Running log mixed in the previous saved run');
+ document.querySelector('[aria-label="Automation log run"]').click();await pause();
+ assert(![...document.querySelectorAll('[role="option"]')].some(node=>node.textContent.includes('Choose')),'Log selector contains a placeholder');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
+ await logStore.finishAutomationLog({...runningLog,status:'completed',stdout:'live final',activity:'finished'});
+ await wait(()=>document.querySelector('.automation-log-dialog').textContent.includes('live final'));
+ assert(document.querySelector('[aria-label="Automation log run"]').textContent.includes('completed'),'Running entry did not transition to completed');
+ assert((await api.listAutomationLogs(jobs[0].id)).filter(log=>log.runId==='live-fixture').length===1,'Progress created duplicate saved log entries');
+
 
  assert(document.querySelector('.automation-detail-pane .shell-code').textContent.includes('printf "fixture shell"'),'Inspect view omitted script');
  document.querySelector('[aria-label="Close automation details"]').click();await pause();
@@ -377,9 +392,10 @@ window.add(view)
 window.show_all()
 exit_code=1
 started=False
+finished=False
 
 def checked(webview,result):
-    global exit_code
+    global exit_code, finished
     try:
         raw=webview.evaluate_javascript_finish(result).to_string()
         if raw in ('undefined','null'):return
@@ -387,12 +403,16 @@ def checked(webview,result):
         if value is None:return
         print(json.dumps(value))
         exit_code=0 if value['passed'] else 1
-        Gtk.main_quit()
+        finished=True
+        # Unload React and its timers before tearing down WebKit's JS context.
+        view.load_html('<!doctype html><html></html>',None)
+        GLib.timeout_add(400,lambda:(Gtk.main_quit(),False)[1])
     except Exception as error:
         print(str(error),file=sys.stderr)
         Gtk.main_quit()
 
 def poll():
+    if finished:return False
     view.evaluate_javascript('JSON.stringify(window.__savedPromptCheck || null)',-1,None,None,None,checked)
     return True
 

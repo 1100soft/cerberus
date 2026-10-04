@@ -92,11 +92,11 @@ export function Select({ value, options, onChange, label, disabled, className = 
   }, [open, active, options]);
   function choose(index: number) { if (options[index]) onChange(options[index].value); close(true); }
   return <>
-    <button data-control-index={controlIndex} tabIndex={tabIndex} onFocus={onFocus} onPointerEnter={onPointerEnter} ref={trigger} type="button" role={triggerContent ? "button" : "combobox"} aria-label={label} aria-expanded={open} aria-controls={open ? id : undefined} aria-haspopup="listbox" disabled={disabled}
+    <button data-control-index={controlIndex} tabIndex={tabIndex} onFocus={onFocus} onPointerEnter={onPointerEnter} ref={trigger} type="button" role={triggerContent ? "button" : "combobox"} aria-label={label} aria-expanded={open} aria-controls={open ? id : undefined} aria-haspopup="listbox" disabled={disabled || !options.length}
       className={`app-select ${triggerContent ? "app-select-button" : ""} ${className}`} style={style} title={title} onDoubleClick={(event) => event.stopPropagation()}
       onClick={(event) => { event.stopPropagation(); open ? close() : show(); }}
       onKeyDown={(event) => { if (openOnArrowKeys && ["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); event.stopPropagation(); show(); } }}>
-      {triggerContent || <><span>{options.find((option) => option.value === value)?.label ?? "Choose…"}</span><ChevronDown size={13} /></>}
+      {triggerContent || <><span>{options.find((option) => option.value === value)?.label ?? options[0]?.label ?? "No options available"}</span><ChevronDown size={13} /></>}
     </button>
     {open && createPortal(<div ref={list} id={id} role="listbox" aria-label={label} tabIndex={-1} aria-activedescendant={`${id}-${active}`} className="app-select-menu" style={position}
       onKeyDown={menuKey}>

@@ -227,3 +227,33 @@ viewport matrix, and diff whitespace all passed. Transport fixture now verifies
 both edit and full thread/turn policies. Saved-prompt test clears in-memory jobs
 and mocks clipboard before React mounts; the earlier host-clipboard teardown
 abort did not recur with that isolated fixture. All changes remain uncommitted.
+
+## Running log entries and provider permission adapters (2026-10-04)
+
+Automation logs now begin before each repository action, including notifications.
+The dialog selects a newly running entry and updates that same entry from shell
+streams, agent chat messages/activity, Copilot session events, and available CLI
+output. Selecting an older run shows only its own content. In-memory updates are
+immediate; serialized disk checkpoints are throttled to 500 ms and flushed at
+completion/error. Native writes atomically replace the JSON file. The running
+entry keeps its run ID when completed. In-memory completed entries are bounded.
+
+Removed the saved-run placeholder and the generic Select "Choose…" fallback.
+desktop/AGENTS.md now records the general rule: no placeholder menu options;
+empty selectors are disabled or omitted, and every option is a real behavior.
+
+The earlier full-mode change exposed adapters that rejected that mode. Copilot
+now accepts edit/full and approves its tool permission requests for both; analyze
+still permits only reading. Cursor accepts full through its force mode, and
+Claude uses bypassPermissions for full. Codex continues danger-full-access.
+This fixes Cerberus's "Unsupported Copilot permission mode" rejection; provider
+or organization policies can still constrain the underlying tool. No paid agent
+run was launched to verify provider access.
+
+Validation: production TypeScript/dropdown/Vite build passed; Rust tests passed
+(90 passed, 4 opt-in ignored); saved-prompt and CI WebKit fixtures passed with
+exit status 0. Fixtures cover running-entry selection, live updates, completion
+under the same run ID, absent placeholder options, and permission routing. The
+CI fixture's WebKit child printed an allocator diagnostic after its successful
+assertions; the fixture runner still exited 0. Vite retains its chunk-size
+warning. Diff whitespace passed. All current changes remain uncommitted.

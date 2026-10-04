@@ -77,3 +77,20 @@ when the value or clipboard changes, rather than after a fixed timer. Clipboard
 reads are checked on focus and every 400 ms while focused; platforms that deny
 reads retain known in-app copy state. Copy failures are announced and available
 in the button tooltip.
+
+
+Every executing repository run creates its log before the action starts, including
+notifications. The real running entry is selected by default when opening details
+or starting another run. Live shell streams, profile-agent messages/activity,
+Copilot session events, and available external CLI output update that same entry;
+checkpoints are serialized and saved at most every 500 ms, with a final flush on
+completion/error. Selecting history shows only that run. Atomic log replacement
+keeps reads valid during updates. An empty history omits the selector rather than
+adding a placeholder option. No placeholder options are permitted in any app
+menu; None, Automatic, and Provider default are real behaviors, not placeholders.
+
+Permission names are normalized across adapters: Copilot edit/full both approve
+its requested tool permissions, while analyze restricts tools to reading. Cursor
+full uses its force execution mode; Claude full uses bypassPermissions. These are
+provider-specific policies, not Codex's sandbox names. Codex full continues using
+danger-full-access. Logs stream only the progress a provider actually emits.

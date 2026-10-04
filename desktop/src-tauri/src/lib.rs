@@ -235,7 +235,7 @@ async fn submit_saved_prompt(repository_id:String,provider:String,thread_id:Stri
     tauri::async_runtime::spawn_blocking(move||prompt_delivery::submit(&root,&repo,&key,&provider,&thread_id,&prompt,&codex,&cursor)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
-async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,output:tauri::ipc::Channel<serde_json::Value>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
     let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
     let repo=state.db.repository_path(&repository_id)?;
     let key=prompt_repository_key(&record);
@@ -244,9 +244,9 @@ async fn run_new_agent_conversation(repository_id:String,provider:String,identit
     let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
     if provider=="copilot" {
         if record.identity.as_ref().map(|item|item.id.as_str())!=Some(identity_id.as_str()){return Err("Assign the selected GitHub identity to this repository first".into());}
-        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled).await;
+        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled,Some(output)).await;
     }
-    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled)).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled,Some(output))).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
