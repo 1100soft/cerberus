@@ -47,9 +47,49 @@ script = r"""
  assert(pollBranches,'Branch list has no independent polling fallback');
  branchNames=['main','private/agent-work','private/second-worktree'];pollBranches();
  await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.textContent==='private/second-worktree'));
- window.setInterval=nativeSetInterval;api.branches=originalBranches;api.history=originalHistory;
+ window.setInterval=nativeSetInterval;
+ const originalPlan=api.branchRemovalPlan,originalRemove=api.removeBranch;
+ const plan={branch:'private/agent-work',head:'a'.repeat(40),worktrees:['/tmp/linked tree'],remote:'origin',remoteHead:'a'.repeat(40)};
+ let removalCalls=0;
+ api.branchRemovalPlan=async(repo,branch)=>{assert(repo===sourceId&&branch===plan.branch,'Removal plan used another branch or repository');return plan;};
+ api.removeBranch=async(repo,confirmed)=>{assert(repo===sourceId&&confirmed.head===plan.head,'Confirmation lost the inspected branch tip');removalCalls++;branchNames=branchNames.filter(name=>name!==confirmed.branch);return {completed:true,steps:['Removed worktree: /tmp/linked tree','Deleted local branch: '+confirmed.branch,'Deleted remote branch: origin/'+confirmed.branch],error:null};};
+ for(const zoom of [1,1.4,1.5]){
+   document.documentElement.style.setProperty('--ui-zoom',zoom);
+   document.querySelector('[aria-label="Remove selected branch"]').click();
+   const dialog=await wait(()=>document.querySelector('[aria-label="Remove branch"]'));
+   await wait(()=>dialog.textContent.includes('/tmp/linked tree'));
+   assert(removalCalls===0,'Inspecting a removal mutated the branch');
+   const bounds=dialog.getBoundingClientRect();assert(bounds.left>=-1&&bounds.right<=innerWidth+1&&bounds.top>=-1&&bounds.bottom<=innerHeight+1,'Removal dialog exceeds viewport at '+zoom);
+   assert(dialog.textContent.includes('origin/private/agent-work'),'Confirmation omitted remote deletion');
+   dialog.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
+   assert(!document.querySelector('[aria-label="Remove branch"]'),'Escape did not cancel confirmation');
+ }
+ document.documentElement.style.setProperty('--ui-zoom',1);
+ document.querySelector('[aria-label="Remove selected branch"]').click();
+ await wait(()=>document.querySelector('.branch-removal-dialog footer button:last-child')?.textContent==='Remove branch');
+ document.querySelector('.branch-removal-dialog footer button:last-child').click();
+ await wait(()=>document.querySelector('.branch-removal-dialog').textContent.includes('Branch removal completed'));
+ assert(removalCalls===1,'Confirmation ran removal more than once');
+ await wait(()=>![...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.textContent===plan.branch));
+ assert(document.querySelector('.history-tabs [aria-selected="true"]').textContent==='main','History retained the removed branch selection');
+ document.querySelector('[aria-label="Close branch removal"]').click();await pause();
+ assert(document.querySelector('[aria-label="Remove selected branch"]').disabled,'Current checkout branch removal was enabled');
+ const remainingBranch=[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.textContent==='private/second-worktree');remainingBranch.click();await pause();
+ api.branchRemovalPlan=async()=>{throw Error('Branch is unmerged');};
+ document.querySelector('[aria-label="Remove selected branch"]').click();
+ await wait(()=>document.querySelector('.branch-removal-dialog [role="alert"]')?.textContent.includes('unmerged'));
+ assert(![...document.querySelectorAll('.branch-removal-dialog footer button')].some(button=>button.textContent==='Remove branch'),'Failed preflight still offered deletion');
+ document.querySelector('[aria-label="Close branch removal"]').click();await pause();
+ api.branchRemovalPlan=async()=>({...plan,branch:'private/second-worktree',worktrees:[]});
+ api.removeBranch=async()=>{branchNames=['main'];return {completed:false,steps:['Deleted local branch: private/second-worktree'],error:'Remote deletion refused'};};
+ document.querySelector('[aria-label="Remove selected branch"]').click();await wait(()=>document.querySelector('.branch-removal-dialog footer button:last-child')?.textContent==='Remove branch');
+ document.querySelector('.branch-removal-dialog footer button:last-child').click();await wait(()=>document.querySelector('.branch-removal-dialog [role="alert"]')?.textContent.includes('Remote deletion refused'));
+ assert(document.querySelector('.branch-removal-dialog').textContent.includes('Deleted local branch'),'Partial failure hid the completed operation');
+ document.querySelector('[aria-label="Close branch removal"]').click();await pause();
+ api.branchRemovalPlan=originalPlan;api.removeBranch=originalRemove;api.branches=originalBranches;api.history=originalHistory;
 
- const savedPath=apiPath.replace('/lib/api.ts','/lib/savedPrompts.ts');
+
+ const panelSource=await (await fetch('/src/components/SavedPromptsPanel.tsx')).text();const savedPath=panelSource.match(/from "([^"\n]*\/savedPrompts\.ts[^"\n]*)"/)[1];
  const {savePrompt,savedPrompts}=await import(savedPath);
  for(const [index,id] of ['drag-one','drag-two'].entries())savePrompt({id,repositoryId:'',repositoryIds:[],provider:'codex',threadId:'',title:'Drag fixture '+index,prompt:'true',trigger:'manual',minutes:60,enabled:false,nextAt:0,editor:'vscode',kind:'shell'});
  document.querySelector('[aria-label="Toggle navigation"]').click();

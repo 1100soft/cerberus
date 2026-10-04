@@ -41,6 +41,23 @@ The desktop `open_external_url` command accepts exact approved destinations in `
 
 ## Verification
 
+Commit history's trash button removes the selected local branch after a review
+dialog lists the linked worktrees and matching remote branch. Removal uses
+`git worktree remove` without force and `git branch -d`, never `-D`. Git's merge
+check uses the branch's upstream when available, otherwise HEAD. The primary
+worktree and the app-linked checkout are protected; switch their checkout before
+removing their branch. Dirty and locked worktrees remain protected by Git.
+
+The remote defaults to origin; the app's `REMOTE` environment variable can select
+another configured remote. If origin is not configured, removal is local only.
+Remote existence is checked by exact `refs/heads/<branch>` before confirmation;
+network/authentication failures stop preparation. The plan is revalidated before
+execution. A matching remote branch is deleted with a normal Git push, followed
+by fetch/prune. This uses Git's configured authentication. A later push or fetch
+can fail after local removal: the dialog reports completed steps and the error,
+and refreshes the branch list. Cancellation is available during preparation;
+execution runs through Git's steps once confirmed, without automatic rollback.
+
 From `desktop/`:
 
 ```bash

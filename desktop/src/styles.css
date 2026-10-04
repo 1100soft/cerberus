@@ -242,6 +242,8 @@ main { min-width: 0; container-type: inline-size; }
 .history-tabs { flex-wrap: wrap; overflow-x: visible; }
 .history-panel .history-tabs button { min-width: 0; flex-shrink: 1; }
 .history-tabs svg { flex-shrink: 0; }
+.automation-dialog.branch-removal-dialog { width: min(620px,100%); }
+.branch-removal-dialog code { overflow-wrap: anywhere; }
 .repository-workspace .row-panel { width: min(610px, 100%); grid-template-columns: minmax(0, 1fr) auto; }
 .repository-workspace .panel-details b, .repository-workspace .panel-details span { white-space: normal; overflow-wrap: anywhere; }
 @container repositories (max-width: 440px) {

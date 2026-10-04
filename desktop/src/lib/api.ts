@@ -22,6 +22,8 @@ let demoRepositories: Repository[] = [
   { id: "3", displayName: "infra-modules", localPath: "/Users/alex/work/infra-modules", canonicalRemote: "git@gitlab.com:northstar/infra-modules.git", hostType: "gitlab", defaultBranch: "main", branch: "main", detached: false, stagedCount: 0, modifiedCount: 1, untrackedCount: 2, ahead: 0, behind: 0, lastCommitSummary: "Pin provider versions", lastCommitAt: new Date(Date.now() - 86400000).toISOString(), identityMismatch: true, tags: ["infra"], manualOrder: 2 }
 ];
 
+export type BranchRemovalPlan={branch:string;head:string;worktrees:string[];remote:string|null;remoteHead:string|null};
+export type BranchRemovalResult={completed:boolean;steps:string[];error:string|null};
 export type RepositoryCommitState={head:string;branch:string;reflog:string;refs?:{key:string;head:string;branch:string;reflog:string}[]};
 
 export const api = {
@@ -210,6 +212,14 @@ export const api = {
     if (inTauri()) return invoke("list_branches", { repositoryId });
     const repo = demoRepositories.find((repo) => repo.id === repositoryId);
     return [...new Set([repo?.branch || "main", "main", "develop", "feature/offline"])];
+  },
+  async branchRemovalPlan(repositoryId:string,branch:string):Promise<BranchRemovalPlan>{
+    if(!inTauri())throw new Error('Branch removal requires the desktop app.');
+    return invoke('branch_removal_plan',{repositoryId,branch});
+  },
+  async removeBranch(repositoryId:string,plan:BranchRemovalPlan):Promise<BranchRemovalResult>{
+    if(!inTauri())throw new Error('Branch removal requires the desktop app.');
+    return invoke('remove_branch',{repositoryId,plan});
   },
   async history(repositoryId: string, branch?: string, skip = 0): Promise<Commit[]> {
     if (inTauri()) return invoke("commit_history", { repositoryId, branch: branch ?? null, skip });

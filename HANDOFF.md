@@ -351,3 +351,36 @@ The remaining suite passed with that test excluded. WebKit child again printed
 an allocator diagnostic after successful fixture assertions/runner exit 0;
 Vite retains its chunk warning. No actual OAuth flow, paid agent call, credential
 write, commit, or push was performed.
+
+## Safeguarded branch removal from commit history (2026-10-04)
+
+Commit history now has an icon button to remove the selected local branch. The
+current app checkout's branch is disabled; native checks also protect the primary
+worktree and app-linked folder. A cancellable preparation dialog lists the branch
+tip, linked worktrees, and exact remote ref. Confirmation uses a revalidated plan
+and displays completed steps plus any later error. It refreshes branches/history
+after success or partial failure and selects an available branch if needed.
+
+branch_removal.rs validates refs, parses worktree porcelain -z without losing
+spaces/newlines, checks Git's upstream-or-HEAD merge eligibility before worktree
+removal, calls worktree remove without force, then branch -d without -D. Remote
+defaults to origin, with REMOTE environment override; absent origin allows local
+only removal. Exact ls-remote distinguishes exit 2 (absent) from access failure.
+A matching remote ref is rechecked, removed using normal push --delete, and the
+remote fetched/pruned. No branch/checkout is switched or force-deleted. Changes
+since confirmation are refused; completed steps are not automatically undone.
+Remote operations use configured Git credentials, not a new app token flow.
+
+Validation: eight native tests passed using temporary repositories and local bare
+remotes, covering clean worktree/local/remote deletion, absent remote ref, dirty
+and locked worktrees, unmerged/primary branches, stale tips, remote access failure,
+and rejected remote deletion with partial success. Production build, shared card
+WebKit fixture, and four-window zoom viewport matrix passed. UI regression covers
+confirmation/cancellation at 100/140/150%, target preservation, refreshed branch
+selection, failed preflight, and partial results. Rust suite excluding the already
+failing Cursor cleanup test passed (101 passed, 4 ignored, 1 filtered). New module
+rustfmt and diff whitespace passed. WebKit printed its existing allocator warning
+after successful fixture assertions/runner exit 0; Vite retains its chunk warning.
+Removed generated untracked bytecode for the two Python automation fixtures.
+No user branch/worktree/remote was removed, no GitHub push performed, and no
+project commit created. All accumulated changes remain uncommitted.

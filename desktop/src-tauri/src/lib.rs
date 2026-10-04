@@ -27,6 +27,7 @@ mod db;
 mod git;
 mod github;
 mod github_credentials;
+mod branch_removal;
 mod models;
 mod oauth;
 
@@ -612,6 +613,18 @@ fn list_branches(repository_id: String, state: State<AppState>) -> Result<Vec<St
 }
 
 #[tauri::command]
+async fn branch_removal_plan(repository_id:String,branch:String,state:State<'_,AppState>)->Result<branch_removal::Plan,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    let remote=std::env::var("REMOTE").ok().filter(|value|!value.is_empty()).unwrap_or_else(||"origin".into());
+    tauri::async_runtime::spawn_blocking(move||branch_removal::plan(&path,&branch,Some(&remote))).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn remove_branch(repository_id:String,plan:branch_removal::Plan,state:State<'_,AppState>)->Result<branch_removal::ResultDetails,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||branch_removal::remove(&path,plan)).await.map_err(|error|error.to_string())?
+}
+
+#[tauri::command]
 fn commit_history(repository_id: String, branch: Option<String>, skip: u32, state: State<AppState>) -> Result<Vec<models::Commit>, String> {
     let path = state.db.repository_path(&repository_id)?;
     state.git.history(&path, branch.as_deref(), skip).map_err(|e| e.to_string())
@@ -905,7 +918,7 @@ pub fn run() {
             link_repository_folder,
             clone_github_repository,
             open_in_cursor,
-            list_branches,
+            list_branches, branch_removal_plan, remove_branch,
             commit_history,
             list_identities,
             disconnect_github_identity,
