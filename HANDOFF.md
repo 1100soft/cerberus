@@ -186,3 +186,14 @@ The running app uses the expected gitcerberus.db; all refs and registered worktr
 for its four linked repositories were inspected read-only and none currently
 contains a private/ branch. Asked for the repository/worktree path to locate the
 user's specific branch rather than claiming it has been found.
+
+Located the user's missing branch: `private/ci-37186394041` at
+`/tmp/cerberus-ci-37186394041`, commit
+`1bcca95178d5cbfed9c5c7a03d6a7fc2a72b99d4` (Fix desktop CI workflow lint and
+condition dialog focus). It still exists. Its common Git directory is
+`/tmp/cerberus-ci-repo-37186394041/.git`, a separate repository, not Cerberus's
+linked checkout. That separate clone has the temporary worktree registered; the
+linked checkout has neither the branch nor commit object. Repository-wide
+watching cannot see refs in another clone. A later CI-correction run failed to
+create `correction/ci-37186394041` in the primary repository due to Git metadata
+permissions. No refs were fetched, merged, pushed, or modified during diagnosis.
