@@ -20,6 +20,8 @@ script = r"""
  const cacheModule=await (await fetch('/src/lib/conversationCache.ts')).text();
  const apiPath=cacheModule.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];
  const {api}=await import(apiPath);
+ const fixtureAutomation=await import(apiPath.replace('/lib/api.ts','/lib/savedPrompts.ts'));
+ for(const job of fixtureAutomation.savedPrompts())fixtureAutomation.removePrompt(job.id);
  const savedModule=await import(apiPath.replace('/lib/api.ts','/lib/savedPrompts.ts'));
  for(const job of savedModule.savedPrompts())savedModule.removePrompt(job.id);
  const accountPath=apiPath.replace('/lib/api.ts','/lib/automationAccounts.ts');
@@ -124,10 +126,16 @@ script = r"""
  await wait(()=>document.querySelector('.automation-log-lines')?.textContent.includes('fixture activity'));
  document.querySelector('[aria-label="Copy automation log"]').click();await pause();
  assert(['fixture stdout','fixture stderr','fixture response','fixture activity'].every(value=>copiedLog.includes(value)),'Copy log omitted saved output sections');
- assert(document.querySelector('.automation-log-dialog [role="status"]')?.textContent==='Copied log.','Copy feedback missing');
+ assert(document.querySelector('[aria-label="Copy automation log"]').classList.contains('copied'),'Copy corner badge missing');
+ assert(document.querySelector('[aria-label="Copy automation log"]').textContent==='','Copy button should be icon-only');
+ let externalClipboard='different clipboard';navigator.clipboard.readText=async()=>externalClipboard;
+ window.dispatchEvent(new Event('focus'));await pause();
+ assert(!document.querySelector('[aria-label="Copy automation log"]').classList.contains('copied'),'Badge stayed after clipboard content changed');
+ delete navigator.clipboard.readText;
+
  navigator.clipboard.writeText=async()=>{throw Error('Clipboard denied');};
  document.querySelector('[aria-label="Copy automation log"]').click();await pause();
- assert(document.querySelector('.automation-log-dialog [role="status"]')?.textContent.includes('Clipboard denied'),'Clipboard failure was not shown');
+ assert([...document.querySelectorAll('.automation-log-dialog [role="status"]')].some(node=>node.textContent.includes('Clipboard denied')),'Clipboard failure was not shown');
  navigator.clipboard.writeText=async text=>{copiedLog=text;};
  api.listAutomationLogs=oldLogList;api.readAutomationLog=oldLogRead;
 
@@ -215,6 +223,7 @@ script = r"""
  await runSavedPrompt('new-fixture',true,targetIds[0]);
  await runSavedPrompt('new-fixture',true,targetIds[1]);
  assert(calls.length===2&&calls[0].identity==='claude-0'&&calls[1].identity==='claude-1','Agent did not use each repository account');
+ assert(calls.every(call=>call.mode==='full'),'Write automation did not receive Git/network permissions');
  assert(JSON.parse(localStorage.getItem('gitcerberus.agentChats')).some(chat=>chat.session?.sessionId==='session-'+targetIds[1]),'New chat not recorded in app history');
  window.__automationStage='file change debounce';
  savePrompt({...jobs[0],id:'file-change-fixture',title:'File change fixture',repositoryIds:[targetIds[0]],repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'fileChange',debounceSeconds:30,enabled:true,state:undefined});
@@ -359,7 +368,10 @@ script = r"""
 })().catch(error=>window.__savedPromptCheck={passed:false,error:String(error),stage:window.__automationStage});
 """
 window=Gtk.OffscreenWindow()
-view=WebKit2.WebView()
+# Clipboard behavior is mocked before React mounts; never touch the host clipboard.
+manager=WebKit2.UserContentManager()
+manager.add_script(WebKit2.UserScript.new("let fixtureClipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>fixtureClipboard,writeText:async value=>{fixtureClipboard=value;}}});",WebKit2.UserContentInjectedFrames.TOP_FRAME,WebKit2.UserScriptInjectionTime.START,None,None))
+view=WebKit2.WebView.new_with_user_content_manager(manager)
 view.set_size_request(900,620)
 window.add(view)
 window.show_all()

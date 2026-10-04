@@ -91,7 +91,7 @@ export function waitForAgentChat(id:string,timeoutMs=960_000):Promise<string>{
   });
 }
 
-export async function runExternalAutomation(repositoryId:string,profile:AgentProfile,prompt:string,mode:'analyze'|'edit'):Promise<{text:string;chatId:string}>{
+export async function runExternalAutomation(repositoryId:string,profile:AgentProfile,prompt:string,mode:'analyze'|'edit'|'full'):Promise<{text:string;chatId:string}>{
   if(chats.some(chat=>chat.repositoryId===repositoryId&&chat.running))throw new Error('A task is already running in this repository.');
   const id=crypto.randomUUID();
   const messages:CodexMessage[]=[{id:crypto.randomUUID(),role:'user',text:prompt},{id:crypto.randomUUID(),role:'assistant',text:''}];

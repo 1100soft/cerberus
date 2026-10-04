@@ -1,3 +1,4 @@
+import { CopyButton } from './CopyButton';
 import { IdentitySignIn } from './IdentitySignIn';
 import { VSCodeIcon, CursorIcon, ClaudeIcon } from './Icons';
 import { OpenAILogo } from './OpenAILogo';
@@ -18,7 +19,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import Markdown from "react-markdown";
 import { cursorDisplayText } from "../lib/conversationText";
 import { loadOlderMessages, loadOlderThreads, peekList, peekMessages, refreshMessages, refreshThreadList, subscribe, warmRepository, listKey, messageKey, providerName, updatedMillis, type Thread } from "../lib/conversationCache";
-import { MessageSquare, RefreshCw, ClipboardCopy, Check, Pencil, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
+import { MessageSquare, RefreshCw, Pencil, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
 import { useProviderPreferences } from "../lib/providerPreferences";
 import type { CodexMessage, FileEdit, Repository } from "../types";
 
@@ -28,16 +29,12 @@ export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConver
   const [revision, setRevision] = useState(0);
   useEffect(()=>{const finished=()=>setRevision(value=>value+1);window.addEventListener('saved-prompt-finished',finished);return()=>window.removeEventListener('saved-prompt-finished',finished);},[]);
   const [cursorConversationId, setCursorConversationId] = useState<string>();
-  const [copyStatus,setCopyStatus]=useState<'idle'|'copied'|'error'>('idle');
   const [editCheckpoint,setEditCheckpoint]=useState(false);
-  const copyTimer=useRef<number>();
-  useEffect(()=>()=>window.clearTimeout(copyTimer.current),[]);
-  const copyCheckpointPrompt=async()=>{try{await navigator.clipboard.writeText(readCheckpointCommitPrompt());setCopyStatus('copied');}catch{setCopyStatus('error');}window.clearTimeout(copyTimer.current);copyTimer.current=window.setTimeout(()=>setCopyStatus('idle'),2500);};
   const reportCursorConversation = useCallback((id?: string) => { setCursorConversationId(id); if (repository) onCursorConversation?.(repository.id, id); }, [repository?.id, onCursorConversation]);
   return <section className="codex-panel" aria-label="Agent conversations">
     <header><div className="agent-heading"><h2><MessageSquare size={18} />Agent</h2></div><div className="codex-actions">
       {repository && <><button type="button" aria-label="Open in VS Code" title="Continue in VS Code" onClick={() => void api.openEditor(repository.id)}><VSCodeIcon/></button><button type="button" aria-label="Open in Cursor" title={cursorConversationId ? "Open this conversation in the Cursor Agents window" : "Open this repository in the Cursor Agents window"} onClick={() => void api.openCursor(repository.id, cursorConversationId)}><CursorIcon/></button></>}
-      {repository&&<button type="button" aria-label={copyStatus==='copied'?"Checkpoint prompt copied":copyStatus==='error'?"Could not copy checkpoint prompt":"Copy checkpoint commit prompt"} title={copyStatus==='copied'?"Checkpoint prompt copied":copyStatus==='error'?"Could not copy prompt":"Copy checkpoint commit prompt for the working agent"} onClick={()=>void copyCheckpointPrompt()}>{copyStatus==='copied'?<Check size={16}/>:<ClipboardCopy size={16}/>}</button>}
+      {repository&&<CopyButton label="Copy checkpoint commit prompt" value={readCheckpointCommitPrompt()}/>}
       {repository&&<button type="button" aria-label="Edit checkpoint commit prompt" title="Edit checkpoint commit prompt" onClick={()=>setEditCheckpoint(true)}><Pencil size={16}/></button>}
       <IdentitySignIn />
       <button type="button" aria-label="Refresh conversations" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button>
@@ -78,6 +75,13 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
   const [selected, setSelected] = useState<string>();
   const [selectionExplicit, setSelectionExplicit] = useState(false);
   const chooseConversation = (key:string) => { setSelectionExplicit(true); setSelected(key); };
+  const copyConversationText=async()=>{
+    const target=contextMenu;if(!target)throw new Error('No conversation selected.');
+    const available=target.thread?(await completeMessages(repository.id,target.thread,()=>false)).messages:undefined;
+    const text=(target.chat?.messages||available||[]).map(message=>`${message.role}: ${message.text}`).join('\n\n');
+    if(!text)throw new Error('No conversation messages are available to copy.');
+    return text;
+  };
   const menuAction=async(action:'rename'|'archive'|'copy'|'share')=>{
     const target=contextMenu;if(!target)return;const chat=target.chat,thread=target.thread;const title=chat?.name||thread?.name||thread?.preview||'Untitled conversation';
     try {
@@ -345,7 +349,7 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         </>}
       </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></div>
     </div>
-    {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
+    {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} getCopyText={copyConversationText} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
     {reviewEdits && <EditReview edits={reviewEdits} onClose={()=>setReviewEdits(undefined)} />}
   </>;
 }

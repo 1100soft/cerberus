@@ -165,10 +165,10 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
           if(!account)throw new Error('The assigned agent account is unavailable.');
           agentStarted=true;incomingStarted=true;
           if(account.route==='profile'){
-            const chatId=await sendAgentMessage(repositoryId,account.profile,actionPrompt,job.mode||'edit',undefined,[],undefined,true,false,job.model,undefined,job.reasoningEffort);
+            const chatId=await sendAgentMessage(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',undefined,[],undefined,true,false,job.model,undefined,job.reasoningEffort);
             result=await waitForAgentChat(chatId);
             activity=getAgentChat(chatId)?.activity||'';
-          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode||'edit');result=run.text;activity=getAgentChat(run.chatId)?.activity||'';}
+          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full');result=run.text;activity=getAgentChat(run.chatId)?.activity||'';}
           response=result;
           window.dispatchEvent(new CustomEvent('saved-prompt-finished',{detail:{repositoryId,provider:job.provider}}));
         }

@@ -59,3 +59,21 @@ The automation details dialog has **Copy log**, which copies its displayed live
 output, selected saved run (stdout, stderr, response, and activity), and errors.
 It falls back to the last result when no output exists. Copy success or failure
 is reported in the dialog.
+
+
+Agent automations in edit mode now use the provider's full-access execution mode:
+this permits Git metadata writes (branches, commits, and worktrees) and network
+access for CI diagnostics and dependencies. For Codex this is `danger-full-access`
+with no interactive approval, not a workspace-scoped write grant. Existing edit
+jobs use this on their next run. Analyze-only jobs and AI drafting remain
+read-only; interactive agent conversations retain their selected permission mode.
+Prompt instructions still determine whether an agent should push or integrate
+changes; access does not add such an instruction. A completed/stopped session
+must start another run to receive the new policy.
+
+All copy controls use an icon with a green corner check badge, following
+Mountlet's clipboard-state behavior. The icon remains visible; the badge clears
+when the value or clipboard changes, rather than after a fixed timer. Clipboard
+reads are checked on focus and every 400 ms while focused; platforms that deny
+reads retain known in-app copy state. Copy failures are announced and available
+in the button tooltip.

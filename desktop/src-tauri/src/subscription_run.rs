@@ -215,9 +215,14 @@ mod transport_tests {
     use super::*;
     #[test]
     fn authenticated_process_resumes_and_keeps_early_notifications() {
+        authenticated_transport("edit");
+        authenticated_transport("full");
+    }
+    fn authenticated_transport(mode:&str) {
         let mut command = Command::new("python3");
         command.args(["-u","-c",r#"
 import sys,json
+mode=sys.argv[1]
 verified=False
 for line in sys.stdin:
  r=json.loads(line); m=r['method']; p=r.get('params',{})
@@ -227,17 +232,19 @@ for line in sys.stdin:
   verified=True;result={'account':{'type':'chatgpt','email':'fixture@example.test'}}
  elif m=='thread/resume':
   assert verified and p['threadId']=='session-test'
-  assert p['approvalPolicy']=='never' and p['sandbox']=='workspace-write' and p['model']=='recorded-model'
+  assert p['approvalPolicy']=='never' and p['sandbox']==('danger-full-access' if mode=='full' else 'workspace-write') and p['model']=='recorded-model'
   result={'thread':{'id':'session-test'}}
  elif m=='turn/start':
   assert verified and p['input'][0]['text']=='fixture prompt' and p['effort']=='high'
-  assert p['sandboxPolicy']['type']=='workspaceWrite' and p['sandboxPolicy']['networkAccess']==False
+  if mode=='full': assert p['sandboxPolicy']=={'type':'dangerFullAccess'}
+  else: assert p['sandboxPolicy']['type']=='workspaceWrite' and p['sandboxPolicy']['networkAccess']==False
   for method,params in [('item/completed',{'item':{'type':'agentMessage','id':'answer','text':'Done'}}),('item/fileChange/patchUpdated',{'itemId':'edit','changes':[{'path':'file','kind':{'type':'update'},'diff':'+test'}]}),('turn/diff/updated',{'diff':'diff --git a/file b/file\\n+test'}),('item/completed',{'item':{'type':'fileChange','id':'edit','status':'completed','changes':[{'path':'file','kind':{'type':'update'},'diff':'+test'}]}}),('turn/completed',{'turn':{'id':'turn-test','status':'completed'}})]:
    print(json.dumps({'method':method,'params':dict(threadId='session-test',turnId='turn-test',**params)}),flush=True)
   result={'turn':{'id':'turn-test'}}
  else:raise Exception('Unexpected request '+m)
  print(json.dumps({'id':r['id'],'result':result}),flush=True)
 "#]);
+        command.arg(mode);
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let capture = events.clone();
         let output = Channel::new(move |body| {
@@ -255,7 +262,7 @@ for line in sys.stdin:
             command,
             &profile,
             Path::new("/repo"),
-            "edit",
+            mode,
             "fixture prompt",
             Some("session-test"),
             Some("recorded-model"),

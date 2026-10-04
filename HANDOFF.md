@@ -197,3 +197,33 @@ linked checkout has neither the branch nor commit object. Repository-wide
 watching cannot see refs in another clone. A later CI-correction run failed to
 create `correction/ci-37186394041` in the primary repository due to Git metadata
 permissions. No refs were fetched, merged, pushed, or modified during diagnosis.
+
+## Shared copy feedback and automation write permissions (2026-10-04)
+
+Read Mountlet's license-key copy implementation in app/src/main.ts and its green
+corner badge CSS in app/src/style.css. Added shared CopyButton for automation logs,
+prompt output, checkpoint prompt, GitHub device code, repository path, and
+conversation copying. Buttons are icon-only with accessible names. The icon
+remains visible and a green corner check follows clipboard contents, checked on
+focus and every 400 ms while focused. Known in-app clipboard writes synchronize
+buttons when reads are denied. Value changes clear stale indicators; failures
+appear in accessible status and tooltip. Context-menu copy actions stay open so
+feedback remains visible. Removed old success text/timed checkpoint icon swap.
+
+The reported CI agent used edit/workspace-write with approvals disabled, so Git
+metadata was protected and outbound network was disabled. Edit agent automations
+now request the existing full execution mode on both profile and identity routes;
+Codex thread and turn receive danger-full-access. This disables the sandbox rather
+than granting narrowly scoped .git writes. Analyze-only jobs, drafting, and
+interactive conversation permission choices are preserved. Existing saved edit
+jobs get this on their next run; completed sessions need another run. The dialog
+includes agent-permissions help. No CI-fix agent was launched, paid inference used,
+Git credentials changed, or branch pushed during this work.
+
+Validation: production build (TypeScript/dropdown check), 88 Rust tests with 4
+opt-in ignored, saved-prompt WebKit (icon/badge, external clipboard change,
+clipboard failure, full automation mode), card/branch UI fixture, four-size zoom
+viewport matrix, and diff whitespace all passed. Transport fixture now verifies
+both edit and full thread/turn policies. Saved-prompt test clears in-memory jobs
+and mocks clipboard before React mounts; the earlier host-clipboard teardown
+abort did not recur with that isolated fixture. All changes remain uncommitted.

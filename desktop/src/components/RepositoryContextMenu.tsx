@@ -1,4 +1,5 @@
-import { CloudDownload, Copy, ExternalLink, FolderOpen, ArrowDownToLine, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
+import { CopyButton } from './CopyButton';
+import { CloudDownload, ExternalLink, FolderOpen, ArrowDownToLine, RefreshCw, Settings2, Trash2, Upload } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isLocal } from "../lib/repositories";
 import type { Repository } from "../types";
@@ -69,7 +70,7 @@ export function RepositoryContextMenu({ repository, x, y, busy, onAction, onClos
     <button role="menuitem" disabled={busy || !local} onClick={() => onAction("cursor")}><CursorIcon />Open in Cursor</button>
     <button role="menuitem" disabled={busy || !repository.canonicalRemote} onClick={() => onAction("hosted")}><ExternalLink />Open hosted repository</button>
     <button role="menuitem" disabled={busy || !local} onClick={() => onAction("folder")}><FolderOpen />Open local folder</button>
-    <button role="menuitem" disabled={!local} onClick={() => onAction("copy-path")}><Copy />Copy local path</button>
+    <CopyButton role="menuitem" label="Copy local path" value={repository.localPath} disabled={!local}/>
     <hr />
     <button role="menuitem" disabled={busy || !local} onClick={() => onAction("fetch")}><RefreshCw />Fetch</button>
     <button role="menuitem" disabled={busy || !local} onClick={() => onAction("pull")}><ArrowDownToLine />Pull (fast-forward)</button>

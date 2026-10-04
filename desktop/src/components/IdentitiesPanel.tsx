@@ -1,3 +1,4 @@
+import { CopyButton } from './CopyButton';
 import { IdentityCard, IdentityOrderContext } from './IdentityCard';
 import { useCardReorder } from '../lib/cardReorder';
 import { useChatgptAccounts } from '../lib/chatgptAccounts';
@@ -9,7 +10,7 @@ import { ProviderIdentityBadge } from './ProviderIdentityBadge';
 import { CopilotQuota, type CopilotQuotaResponse } from './CopilotQuota';
 import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
-import { Check, HelpCircle, Copy, ExternalLink, Github, Link2, PlugZap, ShieldCheck, Unplug, X } from "lucide-react";
+import { Check, HelpCircle, ExternalLink, Github, Link2, PlugZap, ShieldCheck, Unplug, X } from "lucide-react";
 import { api, inTauri } from "../lib/api";
 import { useProviderPreferences } from "../lib/providerPreferences";
 import { invoke } from '@tauri-apps/api/core';
@@ -23,7 +24,7 @@ function GithubUsage({identity}:{identity:Identity}){
   return <div className="identity-usage"><CopilotQuota usage={usage}/>{error && <small role="status">{error}</small>}<button type="button" className="identity-usage-link" title={`Opens your browser. Check that @${identity.providerUsername||identity.label} is the signed-in account.`} onClick={()=>void api.openExternalUrl('https://github.com/settings/copilot')}>Open Copilot usage</button></div>;
 }
 
-function GithubDeviceDialog({ flow, copied, onCopy, onCancel }: { flow: GithubDeviceFlow; copied: boolean; onCopy: () => void; onCancel: () => void }) {
+function GithubDeviceDialog({ flow, onCancel }: { flow: GithubDeviceFlow; onCancel: () => void }) {
   const dialog = useRef<HTMLElement>(null);
   const cancel = useRef(onCancel);
   cancel.current = onCancel;
@@ -49,7 +50,7 @@ function GithubDeviceDialog({ flow, copied, onCopy, onCancel }: { flow: GithubDe
       <p>GitHub is open in your browser. Enter this code there and approve GitCerberus. This dialog closes when GitHub accepts the sign-in.</p>
       <div className="device-code-controls">
         <input value={flow.userCode} readOnly aria-label="GitHub device code" />
-        <button type="button" className={copied ? "copied" : ""} onClick={onCopy} title={copied ? "Copied to clipboard." : "Copy the code."} aria-label="Copy GitHub device code"><Copy /></button>
+        <CopyButton label="Copy GitHub device code" value={flow.userCode}/>
       </div>
       <p role="status">Waiting for GitHub authorization…</p>
     </div>
@@ -75,7 +76,6 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
   const [status, setStatus] = useState<GithubAuthStatus>({ browserSignIn: false, githubCli: false });
   const [statusReady, setStatusReady] = useState(false);
   const [flow, setFlow] = useState<GithubDeviceFlow>();
-  const [codeCopied, setCodeCopied] = useState(false);
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string>();
   const helpDialog = useRef<HTMLElement>(null);
@@ -106,7 +106,6 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
       const next = await api.beginGithubOAuth();
       if (authAttempt.current !== attempt) return;
       setFlow(next);
-      setCodeCopied(false);
       await api.openExternalUrl(next.verificationUri);
       const target = reconnecting.current;
       setMessage(target
@@ -162,13 +161,6 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
     void connectBrowser();
   }
 
-  async function copyDeviceCode() {
-    if (!flow) return;
-    try {
-      await navigator.clipboard.writeText(flow.userCode);
-      setCodeCopied(true);
-    } catch (e) { setMessage(`Could not copy the code: ${String(e)}`); }
-  }
 
   useEffect(() => {
     if (!(inferredOwner || startGithubLogin) || !statusReady || autoStarted.current) return;
@@ -203,7 +195,7 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
       })}
     </div></IdentityOrderContext.Provider>
     <ChatgptSettings/>
-    {flow && <GithubDeviceDialog flow={flow} copied={codeCopied} onCopy={() => void copyDeviceCode()} onCancel={() => { authAttempt.current++; reconnecting.current = undefined; setFlow(undefined); setMessage('GitHub sign-in was cancelled.'); }} />}
+    {flow && <GithubDeviceDialog flow={flow} onCancel={() => { authAttempt.current++; reconnecting.current = undefined; setFlow(undefined); setMessage('GitHub sign-in was cancelled.'); }} />}
     {message && <p className="oauth-message" role="status">{message}</p>}
     {pendingRepositoryId && <button type="button" className="identity-back" onClick={onClose}>Back to repositories</button>}
     {showHelp && <div className="panel-backdrop dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowHelp(false); }}>
