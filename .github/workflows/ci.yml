@@ -2,8 +2,9 @@ name: Desktop CI
 
 on:
   push:
-    branches: ['**']
+    branches-ignore: ['autosave', 'autosave/**']
   pull_request:
+    branches-ignore: ['autosave', 'autosave/**']
   workflow_dispatch:
 
 permissions:
@@ -18,6 +19,9 @@ env:
 
 jobs:
   workflows:
+    if: >-
+      github.ref_name != 'autosave' && !startsWith(github.ref_name, 'autosave/') &&
+      github.head_ref != 'autosave' && !startsWith(github.head_ref, 'autosave/')
     name: Validate workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -29,6 +33,9 @@ jobs:
           args: -color
 
   desktop:
+    if: >-
+      github.ref_name != 'autosave' && !startsWith(github.ref_name, 'autosave/') &&
+      github.head_ref != 'autosave' && !startsWith(github.head_ref, 'autosave/')
     name: Check (${{ matrix.os }})
     strategy:
       fail-fast: false

@@ -2,8 +2,10 @@
 
 ## Workflows
 
-- **Desktop CI** (`.github/workflows/ci.yml`) runs on every branch push, pull
-  request, and manual dispatch. It validates workflow syntax, installs dependencies
+- **Desktop CI** (`.github/workflows/ci.yml`) runs on branch pushes, pull
+  requests, and manual dispatches, excluding `autosave` and `autosave/**` branches.
+  Push and PR target filters prevent automatic runs for those branches; job guards
+  also skip autosave PR source branches and manual dispatches. It validates workflow syntax, installs dependencies
   from the lockfiles, builds the frontend (including dropdown rules and TypeScript),
   checks release version consistency, runs frontend logic tests, and compiles the
   native application and tests on Linux, Windows, and macOS. Linux additionally
@@ -11,7 +13,7 @@
   for automations, CI recovery, handoffs, repository reordering, and viewport zoom.
   Live provider/GitHub tests stay ignored; CI requires no account credentials.
 - **Desktop packages** (`.github/workflows/desktop-packages.yml`) runs manually or
-  on `v*.*.*` tags. It builds Debian/AppImage installers for Linux x64 and ARM64,
+  on `v*.*.*` tags. Manual builds on autosave branches are skipped. It builds Debian/AppImage installers for Linux x64 and ARM64,
   an NSIS installer for Windows x64, and DMGs for Intel and Apple Silicon macOS.
   Installers are uploaded as separate architecture-named artifacts, retained for
   30 days. It does not create a GitHub release or publish to stores. macOS uses

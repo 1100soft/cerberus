@@ -6,7 +6,7 @@ if curl --fail --silent http://127.0.0.1:3000/ > /dev/null; then
   echo 'Port 3000 is already serving; stop it before running the isolated CI suite.' >&2
   exit 1
 fi
-npm run dev -- --host 127.0.0.1 --port 3000 --strictPort > /tmp/cerberus-vite-ci.log 2>&1 &
+node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 3000 --strictPort > /tmp/cerberus-vite-ci.log 2>&1 &
 vite_pid=$!
 trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
 ready=false
