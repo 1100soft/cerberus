@@ -104,3 +104,30 @@ The native CI command now returns structured timeout/transport, authentication/a
 The CI WebKit fixture now tests a slow failed poll alongside a real matching failure in another repository, transient-alert suppression, grouped persistent notices, backoff, rate-limit delays, access guidance, recovery deduplication, and eligible live-scope filtering. Native tests cover error categories, retry headers, JSON error serialization, and timeout cause retention without request URLs. The opt-in `live_ci_catalog` test reads existing workflow catalogs without running automations.
 
 Validation for this follow-up: production build (dropdown convention and TypeScript included), full `cargo test -- --test-threads=1` (86 passed, 4 opt-in tests ignored), CI recovery WebKit fixture, saved-prompt and handoff WebKit regressions, and `git diff --check`. The live catalog diagnostic was explicitly run and passed against all four assigned repositories, both before and after the native error-handling changes. Existing bundle-size and Rust dead-code warnings remain. Retry deadlines use response time so slow requests do not shorten GitHub's retry delay. These changes have not been committed.
+
+## Desktop CI and release foundations (2026-10-04)
+
+The only previous workflow was version-tag Debian publication; ordinary pushes
+had no CI workflows. Added `.github/workflows/ci.yml` for all branch pushes, PRs,
+and manual runs: actionlint, frontend build/logic/version checks, native test
+compilation on Ubuntu/Windows/macOS, plus serial Rust and mocked WebKitGTK tests
+on Linux. Added `desktop-packages.yml` for manual/version-tag artifact builds:
+Linux x64/ARM64 Debian and AppImage, Windows x64 NSIS, macOS Intel/ARM64 DMG.
+Read-only tokens, bounded jobs, caches, lockfiles, tag/app-version validation,
+ad-hoc macOS signing, and artifact retention are configured. Existing APT tag
+publication remains separate. No release/store publication or signing secrets
+were added. Nothing pushed.
+
+`docs/ci-and-releases.md` documents release verification, signing/protection needs,
+Linux baseline/ARM runner constraints, and the mobile implementation sequence.
+Android/iOS jobs are intentionally not enabled: generated projects, mobile entry,
+tray/CLI adapters, and small-screen UI are missing. Local workflow actionlint
+1.7.12, shell syntax, matching/mismatching release-tag checks, frontend production
+build, Linux Tauri debug application build, and both logic scripts passed.
+Rust tests: 86 passed, 4 opt-in ignored.
+All five configured WebKit fixtures passed individually against the existing
+local Vite server, including four viewport sizes and 75/100/140/150% zoom.
+The Xvfb orchestration script could not run locally (Xvfb not installed); its CI
+job explicitly installs it. Hosted Windows/macOS/ARM builds and installers await
+GitHub execution. Earlier uncommitted CI-monitoring reliability changes remain
+in the working tree and are preserved by this task.

@@ -44,3 +44,8 @@ GitHub tokens and agent API keys are kept in the OS credential store. Repository
 Conversation providers are opt-in. Codex, Cursor, Copilot, and Claude adapters expose different kinds of local history; [the provider matrix](desktop/docs/architecture.md#provider-capabilities) describes what each can and cannot report. A signed-in GitHub identity alone does not install or authenticate the Copilot CLI needed by the current local Copilot adapter.
 
 Provider installation is an explicit in-app action with a displayed command plan. Nothing should install a provider CLI silently.
+
+CI runs desktop checks on Linux, Windows, and macOS for pushes and pull requests.
+Manual and version-tag builds produce desktop installer artifacts. See
+[CI and releases](docs/ci-and-releases.md) for coverage, signing requirements, and
+the Android/iOS readiness plan.
