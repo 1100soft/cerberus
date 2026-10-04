@@ -62,6 +62,7 @@ script = r"""
  await module.runSavedPrompt('producer',true,'1');
  await wait(()=>module.savedPrompts().find(item=>item.id==='consumer')?.state==='error');
  assert(finishes===3&&pending.length===0,'Failed action left a claimed handoff that could replay');
+ assert(module.savedPrompts().find(item=>item.id==='consumer').enabled,'Failure disabled the handoff consumer');
  await module.checkSavedPromptSchedule();await pause();
  assert(calls.filter(item=>item.script==='read review').length===3,'Failed handoff was processed again');
  window.__handoffCheck={passed:true,claims,finishes,calls:calls.length};

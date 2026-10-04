@@ -277,3 +277,38 @@ dropdown, explicit repository selection, overflowing log following, retaining a
 scrolled-up position, and resuming at the bottom. Production build, that fixture,
 four-window viewport matrix at 75/100/140/150% zoom, and diff whitespace passed.
 Vite's existing chunk-size warning remains. No commit or push performed.
+
+## Error notifications and manual branch-filter bypass (2026-10-04)
+
+Inspected saved Post-commit review (correction) configuration read-only: commit
+condition, correction/* inclusion filter, all repositories, enabled. Cerberus's
+current checkout is wip. runSavedPrompt previously applied the saved branch
+filter to manual runs and silently continued before creating a log, so this
+combination ran no action and produced empty completion details. Manual Run once
+now bypasses trigger/branch conditions in the selected repository's current
+checkout; automatic filtering and saved repository scope remain in force. The
+runtime dialog explains that branches are not switched.
+
+Action, preparation, log, and handoff-emission errors no longer disable jobs.
+Execution completion never restores an earlier enabled snapshot, so an explicit
+disable during a run remains effective. Interval preparation failures advance
+nextAt to avoid a scheduler-tick retry loop. Preparation errors create error log
+entries too, preserving any current run output. Retired existing-conversation
+configurations still undergo their existing disabled-schedule migration on read.
+
+Failure notifications carry repository/run IDs. Toasts and notification history
+offer Open log and Disable automation; disabled jobs show the latter as disabled.
+NotificationCenter can open the log from any app page and selects that failed
+run, even after newer successful runs. Opening from a notification closes any
+existing panel-owned log dialog. Removing the automation removes those actions.
+
+Validation: production TypeScript/dropdown/Vite build, saved-prompt, handoff, CI,
+and four-window zoom viewport fixtures passed (runner exit 0), and diff whitespace
+passed. Regression coverage includes automatic filtering versus manual override,
+action/preparation failures remaining enabled, failure-log selection after a
+newer success, explicit disable persistence, and disabling during execution.
+The saved-prompt fixture now resolves Vite's actual savedPrompts/automationLogs
+import URLs rather than copying api.ts's unrelated timestamp, avoiding duplicate
+state stores during development tests. That fixture's WebKit child printed an
+allocator diagnostic after successful assertions; Vite's chunk warning remains.
+No paid agent run, settings write to the user's configured jobs, commit, or push.

@@ -383,7 +383,7 @@ export function App() {
   }
 
   return <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
-    <NotificationCenter/>
+    <NotificationCenter repositories={repositories}/>
     <button className="app-menu-toggle" aria-label="Toggle navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)} title="GitCerberus navigation"><ShieldCheck /></button>
     <aside hidden={!sidebarOpen}>
       <div className="brand"><div className="brand-mark"><ShieldCheck /></div><div><b>GitCerberus</b><span>Repository guardian</span></div></div>

@@ -17,9 +17,11 @@ function HighlightedCode({value}:{value:string}){
   const html=hljs.highlightAuto(value,['bash','json','diff']).value;
   return <pre className="automation-log-code"><code dangerouslySetInnerHTML={{__html:html}}/></pre>;
 }
-export function AutomationLogDialog({job,repositories,onClose}:{job:SavedPrompt;repositories:Repository[];onClose:()=>void}){
+export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:SavedPrompt;repositories:Repository[];onClose:()=>void;initialRun?:{repositoryId:string;runId:string}}){
   const [summaries,setSummaries]=useState<AutomationLogSummary[]>([]);
-  const [selected,setSelected]=useState('');
+  const initialSelection=initialRun?`${initialRun.repositoryId}:${initialRun.runId}`:'';
+  const [selected,setSelected]=useState(initialSelection);
+  const preferredSelection=useRef(initialSelection);
   const [entry,setEntry]=useState<AutomationLog|null>(null);
   const [error,setError]=useState('');
   const [copyStatus,setCopyStatus]=useState('');
@@ -39,6 +41,7 @@ export function AutomationLogDialog({job,repositories,onClose}:{job:SavedPrompt;
   const active=logs.find(item=>item.status==='running');
   const activeKey=active?`${active.repositoryId}:${active.runId}`:'';
   useEffect(()=>{
+    if(preferredSelection.current){if(logs.some(item=>`${item.repositoryId}:${item.runId}`===preferredSelection.current)){setSelected(preferredSelection.current);preferredSelection.current='';lastActive.current=activeKey;}return;}
     if(activeKey&&activeKey!==lastActive.current){lastActive.current=activeKey;setSelected(activeKey);}
     else if(!selected||!logs.some(item=>`${item.repositoryId}:${item.runId}`===selected)){setSelected(logs[0]?`${logs[0].repositoryId}:${logs[0].runId}`:'');}
   },[activeKey,selected,summaries,liveEntries]);

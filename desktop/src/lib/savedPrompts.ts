@@ -1,5 +1,5 @@
-import { beginAutomationLog, updateAutomationLog, finishAutomationLog } from './automationLogs';
-import { api, inTauri, type GithubCiRun, type GithubRepositoryEvent } from './api';
+import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAutomationLogs } from './automationLogs';
+import { api, inTauri, type GithubCiRun, type GithubRepositoryEvent, type AutomationLog } from './api';
 import { listen } from '@tauri-apps/api/event';
 import { useSyncExternalStore } from 'react';
 import { addAutomationNotice } from './automationNotifications';
@@ -90,6 +90,7 @@ function read():SavedPrompt[] {try {const data=JSON.parse(localStorage.getItem(k
 function publish(next:SavedPrompt[]){const serialized=JSON.stringify(next);localStorage.setItem(key,serialized);if(localStorage.getItem(key)!==serialized)throw new Error('Automation could not be saved on this device.');jobs=next;for(const listener of listeners)listener();}
 export function subscribeSavedPrompts(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function savedPrompts(){return jobs;}
+export function disableAutomation(id:string){change(id,{enabled:false});}
 export function savePrompt(job:SavedPrompt){for(const key of pendingConditionEvents.keys())if(key.startsWith(`${job.id}:`))pendingConditionEvents.delete(key);publish(jobs.some(item=>item.id===job.id)?jobs.map(item=>item.id===job.id?job:item):[...jobs,job]);}
 export function removePrompt(id:string){for(const key of pendingConditionEvents.keys())if(key.startsWith(`${id}:`))pendingConditionEvents.delete(key);publish(jobs.filter(item=>item.id!==id));for(const key of pendingCi.keys())if(key.startsWith(`${id}:`))pendingCi.delete(key);for(const key of Object.keys(ciHandled))if(key.startsWith(`${id}:`))delete ciHandled[key];try{localStorage.setItem(ciHandledKey,JSON.stringify(ciHandled));}catch{/* The removed job cannot run again. */}}
 export function reorderSavedPrompts(ids:string[]){
@@ -107,11 +108,12 @@ async function repositoryAgentBusy(repositoryId:string){
 export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string):Promise<void>{
   const job=jobs.find(item=>item.id===id);if(!job||job.handoffOnly||running.has(id)||job.state==='running'){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
   if(!manual&&!job.enabled){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
-  if(job.kind!=='git'&&job.kind!=='shell'&&job.kind!=='notification'&&job.target!=='new'){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);change(id,{state:'error',enabled:false,lastResult:'Existing-conversation delivery was retired. Create a new in-app automation from this prompt.'});return;}
   running.add(id);
   let incomingStarted=false;
+  let currentLog:AutomationLog|undefined;
   try{
     change(id,{state:'running',lastResult:'Running automation…'});
+    if(job.kind!=='git'&&job.kind!=='shell'&&job.kind!=='notification'&&job.target!=='new')throw new Error('Existing-conversation delivery was retired. Create a new in-app automation from this prompt.');
     const useLiveRepositories=job.includeFutureRepositories||(manual&&job.trigger==='manual');
     let repositories=useLiveRepositories||job.kind==='shell'?await api.repositories():[];
     if(job.includeFutureRepositories&&job.kind==='prompt'&&job.provider==='copilot'){
@@ -126,7 +128,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
     const results:string[]=[];let failures=0;
     if(job.kind==='shell')beginAutomationOutput(id);
     for(const repositoryId of targets){
-      if((job.conditions?.length&&(job.commitBranch||'*')!=='*')||job.commitAllExcept){
+      if(!manual&&((job.conditions?.length&&(job.commitBranch||'*')!=='*')||job.commitAllExcept)){
         const branch=eventBranch||ciRun?.headBranch||(await api.repositoryCommitState(repositoryId)).branch;
         if(!matchesCommitBranch(branch||'',job.commitBranch||'*',job.commitAllExcept))continue;
       }
@@ -134,6 +136,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       setRepositoryWorking(repositoryId,id,true);
       const runId=crypto.randomUUID(),createdAt=Date.now();
       const log={automationId:id,repositoryId,runId,createdAt,kind:job.kind==='shell'?'shell' as const:job.kind==='git'?'git' as const:job.kind==='notification'?'notification' as const:'agent' as const,status:'running' as const,command:job.prompt,stdout:'',stderr:'',response:'',activity:''};
+      currentLog=log;
       await beginAutomationLog(log);
       if(job.kind==='notification'){
         incomingStarted=true;
@@ -141,6 +144,8 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
         const emissionId=runId;let emissionError='';
         for(const name of job.emitsHandoffs||[]){try{if(await api.publishHandoff(repositoryId,name,emissionId,job.prompt))void tick();}catch(error){failures++;emissionError+=` Could not emit ${name}: ${String(error)}`;}}
         await finishAutomationLog({...log,status:emissionError?'error':'completed',response:job.prompt,stderr:emissionError});
+        currentLog=undefined;
+        if(emissionError)addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} failed`,message:`${repositoryLabel} · ${emissionError}`,status:'failed'});
         results.push(`${repositoryLabel}: Notification sent.${emissionError}`);change(id,{lastResult:results.join('\n')});
         const key=`${id}:${repositoryId}`;pendingChanges.delete(key);window.clearTimeout(debounceTimers.get(key));debounceTimers.delete(key);
         setRepositoryWorking(repositoryId,id,false);continue;
@@ -184,7 +189,8 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       try{
         await finishAutomationLog({automationId:id,repositoryId,runId,createdAt,kind:job.kind==='shell'?'shell':job.kind==='git'?'git':'agent',status:failure?'error':'completed',command:job.prompt,stdout,stderr:failure?[stderr,failure].filter(Boolean).join('\n'):stderr,response,activity});
       }catch(error){failure=[failure,`Log could not be saved: ${String(error)}`].filter(Boolean).join(' · ');if(!failure.includes(' · '))failures++;}
-      addAutomationNotice({automationId:id,repositoryId,title:`${job.title} ${failure?'failed':'completed'}`,message:`${repositoryLabel}${failure?` · ${failure}`:''}`,status:failure?'failed':'completed'});
+      currentLog=undefined;
+      addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} ${failure?'failed':'completed'}`,message:`${repositoryLabel}${failure?` · ${failure}`:''}`,status:failure?'failed':'completed'});
       results.push(`${repositoryLabel}: ${(failure||result).slice(0,500)}`);
       change(id,{lastResult:results.join('\n')});
       if(job.trigger==='fileChange'||job.trigger==='changeCount'){
@@ -194,8 +200,14 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       setRepositoryWorking(repositoryId,id,false);
     }
     if(job.kind==='shell')endAutomationOutput(id);
-    change(id,{state:failures?'error':'completed',enabled:failures?false:job.enabled,lastResult:results.join('\n'),lastAt:Date.now(),nextAt:Date.now()+job.minutes*60_000});
-  }catch(error){addAutomationNotice({automationId:id,title:`${job.title} failed`,message:String(error),status:'failed'});try{change(id,{state:'error',lastResult:String(error),lastAt:Date.now(),enabled:false});}catch{window.dispatchEvent(new CustomEvent('automation-storage-error',{detail:String(error)}));}}
+    change(id,{state:failures?'error':'completed',lastResult:results.join('\n'),lastAt:Date.now(),nextAt:Date.now()+job.minutes*60_000});
+  }catch(error){
+    const failedLog=currentLog||{automationId:id,repositoryId:runtimeRepositoryId||job.repositoryId,runId:crypto.randomUUID(),createdAt:Date.now(),kind:job.kind==='shell'?'shell':job.kind==='git'?'git':job.kind==='notification'?'notification':'agent',status:'running',command:job.prompt,stdout:'',stderr:'',response:'',activity:''} as AutomationLog;
+    const latest=currentAutomationLogs(id).find(item=>item.repositoryId===failedLog.repositoryId&&item.runId===failedLog.runId)||failedLog;
+    try{await finishAutomationLog({...latest,status:'error',stderr:[latest.stderr,String(error)].filter(Boolean).join('\n')});}catch(logError){console.warn('Could not save failed automation log:',logError);}
+    addAutomationNotice({automationId:id,repositoryId:failedLog.repositoryId,runId:failedLog.runId,title:`${job.title} failed`,message:String(error),status:'failed'});
+    try{change(id,{state:'error',lastResult:String(error),lastAt:Date.now(),nextAt:Date.now()+job.minutes*60_000});}catch{window.dispatchEvent(new CustomEvent('automation-storage-error',{detail:String(error)}));}
+  }
   finally{if(incoming)try{if(incomingStarted)await api.finishHandoff(incoming.repositoryId,incoming.name,incoming.id);else await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);}catch(error){console.warn('Could not finish handoff:',error);}running.delete(id);for(const [repositoryId,active] of workingRepositories)if(active.has(id))setRepositoryWorking(repositoryId,id,false);if(job.kind==='shell')endAutomationOutput(id);}
 }
 

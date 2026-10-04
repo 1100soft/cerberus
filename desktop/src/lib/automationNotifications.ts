@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-export type AutomationNotice={id:string;automationId:string;repositoryId?:string;title:string;message:string;status:'started'|'completed'|'failed'|'message';createdAt:number;read:boolean};
+export type AutomationNotice={id:string;automationId:string;repositoryId?:string;runId?:string;title:string;message:string;status:'started'|'completed'|'failed'|'message';createdAt:number;read:boolean};
 const key='gitcerberus.automationNotifications.v1';
 const listeners=new Set<()=>void>();
 function read():AutomationNotice[]{try{const saved=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(saved)?saved.filter(item=>item&&typeof item.id==='string'&&typeof item.title==='string').slice(0,100):[];}catch{return [];}}

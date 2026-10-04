@@ -713,8 +713,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, .repo-row:foc
 .notification-toasts { position: fixed; top: 52px; right: 14px; display: grid; gap: 7px; width: min(360px,calc(100vw - 28px)); pointer-events: none; }
 .notification-toast { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--accent-codex-border); border-radius: 8px; background: var(--surface-raised); color: var(--text-primary); box-shadow: 0 10px 28px var(--color-08070ccc); pointer-events: auto; }
 .notification-toast > svg { flex: none; color: var(--accent-codex-border); }
-.notification-toast span { flex: 1; min-width: 0; }
+.notification-toast > .notification-text { flex: 1; min-width: 0; }
 .notification-toast small { color: var(--text-secondary); font-size: 11px; }
+.notification-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.notification-actions button { padding: 4px 7px; border: 1px solid var(--border-control); border-radius: 5px; background: var(--surface-raised); color: var(--text-primary); cursor: pointer; font-size: 11px; }
+.notification-actions button:disabled { opacity: .6; cursor: default; }
 .automation-dialog > footer button:disabled { opacity: .5; cursor: default; }
 .automation-dialog-content { min-height: 0; overflow: auto; padding: 12px 14px; }
 .automation-dialog-content .saved-prompt-form { gap: 6px; }
