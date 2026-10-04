@@ -145,3 +145,44 @@ shell syntax, whitespace, and credential-pattern review passed. Earlier passing
 Linux native build and WebKit regressions remain applicable; only workflow/docs
 and runner cleanup changed since those runs. No generated artifacts or unrelated
 files are staged. Existing rustfmt baseline failure remains documented.
+
+
+## Repository-wide commits and copyable automation logs (2026-10-04)
+
+Branch enumeration already used shared local refs, but history only reloaded on
+repository selection/manual refresh. It now refreshes when the repository object
+is refreshed by Git events. Commit detection previously compared only checkout
+HEAD: it now snapshots all local branch tips and detached worktree HEADs, checks
+commit/merge/cherry-pick reflog reasons, serializes concurrent checks, deduplicates
+unchanged tips, and queues separate branch events for commit-only jobs. Watchers
+resolve the common Git directory, including when the linked checkout is itself a
+worktree, and observe private worktree HEAD logs. A 30-second snapshot fallback
+catches missed notifications. Shell context lookup remains checkout-local and
+works for nongit folders as before. Actions still run in the linked checkout;
+file/change-count conditions remain checkout-local. Rapid same-branch commits can
+coalesce to the latest observed tip; remote-tracking refs are not local branches.
+
+Automation log dialog adds Copy log with status feedback and clipboard error
+handling, copying all displayed saved/live output sections and fallback results.
+WebKit regressions cover copying, failure feedback, unchanged primary HEAD with
+an agent branch commit, branch-creation suppression, event deduplication, context,
+and two different branch commits queued together. Native temporary Git/worktree
+fixtures cover shared branch enumeration, linked and detached commits, shared Git
+directory resolution, and actual watcher delivery for a linked-worktree commit.
+Production build and saved-prompt/CI WebKit fixtures passed. Native suite passed
+88 tests (4 ignored) after separating checkout context from repository-wide
+snapshot collection; the initial shell regression identified that distinction.
+Changes remain uncommitted; nothing pushed.
+
+
+Branch-list follow-up: relying on a changed parent repository object was not
+sufficient, because the regular repository refresh preserves equal snapshots.
+CommitHistory now requests branches directly on focus/visibility, every 15 seconds
+while visible, and on debounced Git events, with request-generation protection
+and listener/timer cleanup. WebKit regression proves a private/ branch appears
+without a parent metadata change, can load its history, and a second branch
+appears through the timer fallback. Production build and that regression passed.
+The running app uses the expected gitcerberus.db; all refs and registered worktrees
+for its four linked repositories were inspected read-only and none currently
+contains a private/ branch. Asked for the repository/worktree path to locate the
+user's specific branch rather than claiming it has been found.

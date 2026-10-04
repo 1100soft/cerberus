@@ -24,8 +24,9 @@ const running=new Set<string>();
 const pendingChanges=new Map<string,{changedAt:number}>();
 const debounceTimers=new Map<string,number>();
 const lastTriggeredCounts=new Map<string,{head:string;count:number}>();
-const commitHeads=new Map<string,string>();
-const pendingCommits=new Map<string,{branch:string;sha:string}>();
+const commitHeads=new Map<string,Map<string,string>>();
+const commitChecks=new Map<string,Promise<void>>();
+const pendingCommits=new Map<string,{branch:string;sha:string}[]>();
 const pendingCi=new Map<string,{jobId:string;repositoryId:string;run:GithubCiRun}>();
 type ConditionEvent={at:number;branch?:string;sha?:string;ciRun?:GithubCiRun};
 const pendingConditionEvents=new Map<string,{jobId:string;repositoryId:string;events:Partial<Record<Trigger,ConditionEvent>>}>();
@@ -217,7 +218,7 @@ async function tick(now=Date.now()){
         if(!key.startsWith(`${job.id}:`))continue;
         const repositoryId=key.slice(job.id.length+1);
         if(job.kind!=='notification'&&await repositoryAgentBusy(repositoryId))continue;
-        const event=pendingCommits.get(key)!;pendingCommits.delete(key);void runSavedPrompt(job.id,false,repositoryId,undefined,undefined,event.branch,event.sha);break;
+        const queue=pendingCommits.get(key)!;const event=queue.shift()!;if(!queue.length)pendingCommits.delete(key);void runSavedPrompt(job.id,false,repositoryId,undefined,undefined,event.branch,event.sha);break;
       }
     }
     for(const [key,pending] of pendingCi){
@@ -403,20 +404,30 @@ export function recordAutomationFileChange(repositoryId:string,occurredAt=Date.n
     debounceTimers.set(key,window.setTimeout(()=>void tick(),Math.max(30,job.debounceSeconds||300)*1000));
   }
 }
-export async function recordAutomationCommit(repositoryId:string,state?:{head:string;branch:string;reflog:string}){
-  const current=state||await api.repositoryCommitState(repositoryId);
-  const previous=commitHeads.get(repositoryId);
-  commitHeads.set(repositoryId,current.head);
-  if(previous===undefined||previous===current.head||!current.head||!/^(commit|merge|cherry-pick)(?:\b|\s*\()/i.test(current.reflog))return;
-  for(const job of jobs){
-    if(!job.enabled||!automationConditions(job).includes('commit')||!matchesCommitBranch(current.branch,job.commitBranch||'',job.commitAllExcept))continue;
-    const targets=job.repositoryIds?.length?job.repositoryIds:[job.repositoryId];
-    if(job.includeFutureRepositories?watchedRepositoryIds.has(repositoryId):targets.includes(repositoryId)){
-      if(composite(job))recordConditionEvent(repositoryId,'commit',Date.now(),{branch:current.branch,sha:current.head});
-      else pendingCommits.set(`${job.id}:${repositoryId}`,{branch:current.branch,sha:current.head});
+type CommitSnapshot=Awaited<ReturnType<typeof api.repositoryCommitState>>;
+function commitRefs(state:CommitSnapshot){return state.refs??[{key:'HEAD',...state}];}
+export async function recordAutomationCommit(repositoryId:string,state?:CommitSnapshot){
+  const previousCheck=commitChecks.get(repositoryId)||Promise.resolve();
+  const check=previousCheck.catch(()=>{}).then(async()=>{
+    const current=state||await api.repositoryCommitState(repositoryId);
+    const refs=commitRefs(current),previous=commitHeads.get(repositoryId);
+    commitHeads.set(repositoryId,new Map(refs.map(ref=>[ref.key,ref.head])));
+    if(!previous)return;
+    for(const ref of refs){
+      if(previous.get(ref.key)===ref.head||!ref.head||!/^(commit|merge|cherry-pick)(?:\b|\s*\()/i.test(ref.reflog))continue;
+      for(const job of jobs){
+        if(!job.enabled||!automationConditions(job).includes('commit')||!matchesCommitBranch(ref.branch,job.commitBranch||'',job.commitAllExcept))continue;
+        const targets=job.repositoryIds?.length?job.repositoryIds:[job.repositoryId];
+        if(job.includeFutureRepositories?watchedRepositoryIds.has(repositoryId):targets.includes(repositoryId)){
+          if(composite(job))recordConditionEvent(repositoryId,'commit',Date.now(),{branch:ref.branch,sha:ref.head});
+          else {const key=`${job.id}:${repositoryId}`,queue=pendingCommits.get(key)||[];queue.push({branch:ref.branch,sha:ref.head});pendingCommits.set(key,queue);}
+        }
+      }
     }
-  }
-  void tick();
+    void tick();
+  });
+  commitChecks.set(repositoryId,check);
+  try{await check;}finally{if(commitChecks.get(repositoryId)===check)commitChecks.delete(repositoryId);}
 }
 async function syncFileWatchers(){
   if(!inTauri())return;
@@ -424,9 +435,10 @@ async function syncFileWatchers(){
   const ids=repositories.filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id);
   watchedRepositoryIds=new Set(ids);
   const fresh=ids.filter(id=>!commitHeads.has(id));
-  if(fresh.length){const states=await api.repositoryCommitStatesBatch(fresh);for(const [id,state] of Object.entries(states))commitHeads.set(id,state.head);}
+  if(fresh.length){const states=await api.repositoryCommitStatesBatch(fresh);for(const [id,state] of Object.entries(states))commitHeads.set(id,new Map(commitRefs(state).map(ref=>[ref.key,ref.head])));}
   for(const id of commitHeads.keys())if(!watchedRepositoryIds.has(id))commitHeads.delete(id);
   const errors=await api.watchAutomationRepositories(ids);
+  await Promise.allSettled(ids.filter(id=>!fresh.includes(id)).map(id=>recordAutomationCommit(id)));
   if(errors.length)console.warn('Automation file watchers:',errors.join('; '));
   if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).catch(error=>console.warn('Handoff cleanup:',error));}
 }

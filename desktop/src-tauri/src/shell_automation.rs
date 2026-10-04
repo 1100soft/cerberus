@@ -26,7 +26,7 @@ pub fn run_stream_with_context(repository:&Path,script:&str,channel:Option<Chann
     let mut command=Command::new("bash");
     command.arg("-c").arg(script).current_dir(repository).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     for (name,_) in std::env::vars_os(){if name.to_string_lossy().starts_with("CERBERUS_"){command.env_remove(name);}}
-    let state=crate::repository_changes::commit_state(repository)?;
+    let state=crate::repository_changes::checkout_state(repository)?;
     for name in ["CERBERUS_REPOSITORY_ID","CERBERUS_REPOSITORY_NAME","CERBERUS_AUTOMATION_ID","CERBERUS_AUTOMATION_NAME","CERBERUS_RUN_ID","CERBERUS_CONDITIONS","CERBERUS_CI_RUN_URL","CERBERUS_CI_CONCLUSION"] {command.env(name,context.get(name).map(String::as_str).unwrap_or(""));}
     command.env("CERBERUS_REPOSITORY_PATH",repository);
     command.env("CERBERUS_BRANCH",context.get("CERBERUS_BRANCH").filter(|value|!value.is_empty()).unwrap_or(&state.branch));

@@ -33,6 +33,22 @@ script = r"""
  const apiPath=cacheModule.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];
  const {api}=await import(apiPath);
  const repos=await api.repositories();assert(repos.find(repo=>repo.id===sourceId).manualOrder===1,'Saved repository order did not update');
+ const originalBranches=api.branches,originalHistory=api.history;
+ let branchNames=['main'],historyBranch='';
+ api.branches=async()=>branchNames;
+ api.history=async(_,branch)=>{historyBranch=branch||'';return [];};
+ const nativeSetInterval=window.setInterval;let pollBranches;
+ window.setInterval=(callback,delay,...args)=>{if(delay===15000)pollBranches=callback;return nativeSetInterval(callback,delay,...args);};
+ document.querySelector('.repo-row.repo-local[data-repository-id="'+sourceId+'"]').click();
+ await wait(()=>document.querySelector('.history-tabs [role="tab"]')?.textContent.includes('main'));
+ branchNames=['main','private/agent-work'];window.dispatchEvent(new Event('focus'));
+ const privateBranch=await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.textContent==='private/agent-work'));
+ privateBranch.click();await wait(()=>historyBranch==='private/agent-work');
+ assert(pollBranches,'Branch list has no independent polling fallback');
+ branchNames=['main','private/agent-work','private/second-worktree'];pollBranches();
+ await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.textContent==='private/second-worktree'));
+ window.setInterval=nativeSetInterval;api.branches=originalBranches;api.history=originalHistory;
+
  const savedPath=apiPath.replace('/lib/api.ts','/lib/savedPrompts.ts');
  const {savePrompt,savedPrompts}=await import(savedPath);
  for(const [index,id] of ['drag-one','drag-two'].entries())savePrompt({id,repositoryId:'',repositoryIds:[],provider:'codex',threadId:'',title:'Drag fixture '+index,prompt:'true',trigger:'manual',minutes:60,enabled:false,nextAt:0,editor:'vscode',kind:'shell'});

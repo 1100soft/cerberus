@@ -37,3 +37,25 @@ Emit handoffs is available for all three automation types. Its info button opens
 Shell context help lists the exported Bash variables. Commands run in the targeted repository and may use `"$CERBERUS_REPOSITORY_PATH"`, `"$CERBERUS_REPOSITORY_ID"`, `"$CERBERUS_REPOSITORY_NAME"`, `"$CERBERUS_BRANCH"`, and `"$CERBERUS_COMMIT_SHA"`. Branch and SHA come from the triggering event when supplied, otherwise from the current checkout; the app does not switch branches. Run metadata is in `CERBERUS_AUTOMATION_ID`, `CERBERUS_AUTOMATION_NAME`, `CERBERUS_RUN_ID`, and comma-separated `CERBERUS_CONDITIONS` (`manual` for Run now). CI context is in `CERBERUS_CI_RUN_URL` and `CERBERUS_CI_CONCLUSION`, empty for non-CI runs. Existing `CERBERUS_HANDOFF_INPUT` and outgoing `CERBERUS_HANDOFF_<NAME>` variables provide payload paths. Quote variable expansions; values are exported as environment data, never interpolated into command text. Inherited `CERBERUS_` variables are cleared before the current run’s context is set.
 
 To diagnose live CI access without invoking an agent or running an automation, set `CERBERUS_TEST_DATABASE` to the app database path and run `cargo test --lib github::tests::live_ci_catalog -- --ignored --nocapture` from `src-tauri/`. This opt-in diagnostic reads workflow catalogs using the assigned keyring credentials; credentials remain native and are not printed.
+
+
+Commit conditions observe local branch tips repository-wide, including branches
+checked out in other Git worktrees and detached worktree HEADs. Shared Git metadata
+is watched, with a 30-second snapshot fallback while the app runs. Existing tips
+are baselined on startup; creating a branch or checking out an existing commit
+alone does not trigger. New commit/merge/cherry-pick reflog entries trigger on the
+changed branch, subject to its branch patterns. Repeated watcher events are
+deduplicated; pending commit-only events from different branches are queued. Snapshots observe
+latest tips, so several rapid commits on the same branch can coalesce. Detached
+commits have an empty branch name and match `*` (all branches). The branch browser
+lists all local branches shared across worktrees and refreshes directly on Git
+changes, window focus/visibility, and every 15 seconds while visible;
+it does not include remote-tracking refs as local branches. Automations receive
+the observed branch/SHA as context but execute in the repository's linked checkout
+without switching it. File-change and changed-line conditions still apply to that
+linked checkout.
+
+The automation details dialog has **Copy log**, which copies its displayed live
+output, selected saved run (stdout, stderr, response, and activity), and errors.
+It falls back to the last result when no output exists. Copy success or failure
+is reported in the dialog.

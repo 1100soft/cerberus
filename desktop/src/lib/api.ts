@@ -22,6 +22,8 @@ let demoRepositories: Repository[] = [
   { id: "3", displayName: "infra-modules", localPath: "/Users/alex/work/infra-modules", canonicalRemote: "git@gitlab.com:northstar/infra-modules.git", hostType: "gitlab", defaultBranch: "main", branch: "main", detached: false, stagedCount: 0, modifiedCount: 1, untrackedCount: 2, ahead: 0, behind: 0, lastCommitSummary: "Pin provider versions", lastCommitAt: new Date(Date.now() - 86400000).toISOString(), identityMismatch: true, tags: ["infra"], manualOrder: 2 }
 ];
 
+export type RepositoryCommitState={head:string;branch:string;reflog:string;refs?:{key:string;head:string;branch:string;reflog:string}[]};
+
 export const api = {
   async linkRepositoryFolder(expectedRemote: string, path: string, repositoryId?: string): Promise<ImportResult> {
     if (!inTauri()) throw new Error("Linking a checkout is available in the desktop app.");
@@ -89,11 +91,11 @@ export const api = {
     if (!inTauri()){const repo=demoRepositories.find(item=>item.id===repositoryId);return {head:repo?.lastCommitAt||'demo',branch:repo?.branch||'',reflog:'commit: demo',changedLines:await this.repositoryChangedLines(repositoryId)};}
     return invoke('repository_change_summary',{repositoryId});
   },
-  async repositoryCommitState(repositoryId:string):Promise<{head:string;branch:string;reflog:string}>{
+  async repositoryCommitState(repositoryId:string):Promise<RepositoryCommitState>{
     if(!inTauri()){const repo=demoRepositories.find(item=>item.id===repositoryId);return {head:repo?.lastCommitAt||'demo',branch:repo?.branch||'',reflog:'commit: demo'};}
     return invoke('repository_commit_state',{repositoryId});
   },
-  async repositoryCommitStatesBatch(repositoryIds:string[]):Promise<Record<string,{head:string;branch:string;reflog:string}>>{
+  async repositoryCommitStatesBatch(repositoryIds:string[]):Promise<Record<string,RepositoryCommitState>>{
     if(!inTauri())return Object.fromEntries(await Promise.all(repositoryIds.map(async id=>[id,await api.repositoryCommitState(id)] as const)));
     return invoke('repository_commit_states_batch',{repositoryIds});
   },

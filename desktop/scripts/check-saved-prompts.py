@@ -116,7 +116,21 @@ script = r"""
  assert(document.querySelector('.saved-prompt-list article strong').textContent==='Fixture autosave','Automation name missing from card');
  assert(!document.querySelector('.saved-prompt-list article').textContent.includes('printf'), 'Automation content leaked onto card');
  const actionButtons=[...document.querySelectorAll('.saved-prompt-list article .saved-prompt-actions > button')];assert(actionButtons.length>=3&&Math.max(...actionButtons.map(button=>button.getBoundingClientRect().top))-Math.min(...actionButtons.map(button=>button.getBoundingClientRect().top))<2,'Automation actions are stacked vertically');
+ const oldLogList=api.listAutomationLogs,oldLogRead=api.readAutomationLog;
+ api.listAutomationLogs=async()=>[{repositoryId:jobs[0].repositoryId,runId:'copy-fixture',createdAt:new Date().toISOString(),status:'completed'}];
+ api.readAutomationLog=async()=>({repositoryId:jobs[0].repositoryId,runId:'copy-fixture',createdAt:new Date().toISOString(),stdout:'fixture stdout',stderr:'fixture stderr',response:'fixture response',activity:'fixture activity'});
+ let copiedLog='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{copiedLog=text;}}});
  document.querySelector('.saved-prompt-list article').click();await wait(()=>document.querySelector('.automation-log-dialog'));
+ await wait(()=>document.querySelector('.automation-log-lines')?.textContent.includes('fixture activity'));
+ document.querySelector('[aria-label="Copy automation log"]').click();await pause();
+ assert(['fixture stdout','fixture stderr','fixture response','fixture activity'].every(value=>copiedLog.includes(value)),'Copy log omitted saved output sections');
+ assert(document.querySelector('.automation-log-dialog [role="status"]')?.textContent==='Copied log.','Copy feedback missing');
+ navigator.clipboard.writeText=async()=>{throw Error('Clipboard denied');};
+ document.querySelector('[aria-label="Copy automation log"]').click();await pause();
+ assert(document.querySelector('.automation-log-dialog [role="status"]')?.textContent.includes('Clipboard denied'),'Clipboard failure was not shown');
+ navigator.clipboard.writeText=async text=>{copiedLog=text;};
+ api.listAutomationLogs=oldLogList;api.readAutomationLog=oldLogRead;
+
  assert(document.querySelector('.automation-detail-pane .shell-code').textContent.includes('printf "fixture shell"'),'Inspect view omitted script');
  document.querySelector('[aria-label="Close automation details"]').click();await pause();
  window.__automationStage='edit existing automation';
@@ -136,7 +150,7 @@ script = r"""
  document.querySelector('.automation-dialog footer button:last-child').click();await wait(()=>!document.querySelector('.automation-dialog'));
  jobs=JSON.parse(localStorage.getItem('gitcerberus.savedPrompts.v1'));
  assert(jobs.length===1&&jobs[0].id===originalId&&jobs[0].prompt==='printf "revised shell"'&&jobs[0].enabled,'Edit created a duplicate or lost its schedule');
- const shellCalls=[];api.repositories=async()=>jobs[0].repositoryIds.map(id=>({id,localPath:'/tmp/'+id,displayName:id}));api.runAutomationShell=async(repo,script,onOutput)=>{onOutput?.({stream:'stdout',text:'fixture result\n'});await pause(180);shellCalls.push({repo,script});return {result:'fixture result',stdout:'fixture result',stderr:''};};
+ const shellCalls=[];api.repositories=async()=>jobs[0].repositoryIds.map(id=>({id,localPath:'/tmp/'+id,displayName:id}));api.runAutomationShell=async(repo,script,onOutput,incoming,outgoing,context)=>{onOutput?.({stream:'stdout',text:'fixture result\n'});await pause(180);shellCalls.push({repo,script,context});return {result:'fixture result',stdout:'fixture result',stderr:''};};
  document.querySelector('.saved-prompt-list [aria-label^="Run "]').click();await wait(()=>document.querySelector('[aria-label="Choose repository"]'));
  assert(shellCalls.length===0,'Scheduled job ran before manual repository selection');
  document.querySelector('.automation-runtime-dialog [aria-label="Repository"]').click();await pause();
@@ -218,6 +232,22 @@ script = r"""
  await wait(()=>shellCalls.length===beforeCommitRuns+1);
  assert(shellCalls.at(-1).repo===targetIds[1],'Commit in one watched repository ran in another repository');
  await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');
+ const branchRef=(branch,head,reflog='commit: worktree')=>({key:'refs/heads/'+branch,branch,head,reflog});
+ const state=(refs)=>({head:'primary-unchanged',branch:'main',reflog:'commit: primary',refs});
+ await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged','branch: baseline')]));
+ const worktreeBefore=shellCalls.length;
+ await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged'),branchRef('agent/new','primary-unchanged','branch: Created from HEAD')]));
+ await pause();assert(shellCalls.length===worktreeBefore,'Branch creation incorrectly triggered a commit automation');
+ await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged'),branchRef('agent/new','worktree-commit')]));
+ await wait(()=>shellCalls.length===worktreeBefore+1);await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');
+ await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged'),branchRef('agent/new','worktree-commit')]));
+ await pause();assert(shellCalls.length===worktreeBefore+1,'Duplicate worktree events retriggered the automation');
+ assert(shellCalls.at(-1).context.CERBERUS_BRANCH==='agent/new'&&shellCalls.at(-1).context.CERBERUS_COMMIT_SHA==='worktree-commit','Worktree branch and commit context was lost');
+ await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged'),branchRef('agent/new','worktree-commit-2'),branchRef('agent/second','second-commit')]));
+ await wait(()=>shellCalls.length===worktreeBefore+2);await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');
+ await checkSavedPromptSchedule();await wait(()=>shellCalls.length===worktreeBefore+3);await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');
+ assert(shellCalls.slice(-2).map(call=>call.context.CERBERUS_BRANCH).sort().join(',')==='agent/new,agent/second','Concurrent branch commits overwrote a pending event');
+
  savePrompt({...savedPrompts().find(job=>job.id==='commit-scope-fixture'),enabled:false});
  window.__automationStage='interval repository scope';
  savePrompt({...jobs[0],id:'interval-scope-fixture',title:'Interval scope fixture',repositoryIds:targetIds,repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'interval',conditions:undefined,nextAt:0,enabled:true,state:undefined});

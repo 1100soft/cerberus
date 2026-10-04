@@ -1,7 +1,8 @@
 import { matchesShortcut } from '../lib/shortcuts';
 import { useEffect, useId, useRef, useState } from "react";
 import { GitBranch, GitCommitHorizontal, RefreshCw } from "lucide-react";
-import { api } from "../lib/api";
+import { api, inTauri } from "../lib/api";
+import { listen } from "@tauri-apps/api/event";
 import type { Commit, Repository } from "../types";
 
 export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = true }: { repository?: Repository; unlinkedName?: string; shortcutsEnabled?: boolean }) {
@@ -31,16 +32,37 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
         .finally(() => { if (request === generation.current) setLoading(false); });
     }
     return () => { generation.current++; };
-  }, [repository?.id, branch, revision]);
+  }, [repository, branch, revision]);
 
   useEffect(() => {
-    let active = true;
     if (!repository) return;
-    api.branches(repository.id).then((items) => {
-      if (!active) return;
-      setBranches(items); setBranchError("");
-    }).catch((error) => { if (active) setBranchError(String(error)); });
-    return () => { active = false; };
+    let active = true;
+    let request = 0;
+    let unlisten: (() => void) | undefined;
+    let debounce: number | undefined;
+    const refreshBranches = () => {
+      const generation = ++request;
+      void api.branches(repository.id).then(items => {
+        if (!active || generation !== request) return;
+        setBranches(current => current.length === items.length && current.every((value,index) => value === items[index]) ? current : items);
+        setBranchError("");
+      }).catch(error => { if (active && generation === request) setBranchError(String(error)); });
+    };
+    const onVisible = () => { if (!document.hidden) refreshBranches(); };
+    refreshBranches();
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(onVisible, 15000);
+    if (inTauri()) void listen<{repositoryId:string}>('automation-git-change', event => {
+      if (event.payload.repositoryId !== repository.id) return;
+      window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => { refreshBranches(); setRevision(value => value + 1); }, 300);
+    }).then(stop => { if (active) unlisten = stop; else stop(); });
+    return () => {
+      active = false; unlisten?.(); window.clearInterval(timer); window.clearTimeout(debounce);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [repository?.id, revision]);
 
   useEffect(() => {

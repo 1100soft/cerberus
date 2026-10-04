@@ -6,7 +6,10 @@ use serde::Serialize;
 pub struct ChangeSummary { pub head:String, pub branch:String, pub reflog:String, pub changed_lines:u64 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct CommitState { pub head:String, pub branch:String, pub reflog:String }
+pub struct CommitState { pub head:String, pub branch:String, pub reflog:String, pub refs:Vec<CommitRef> }
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct CommitRef { pub key:String, pub head:String, pub branch:String, pub reflog:String }
 
 fn git(repository:&Path,args:&[&str])->Result<Vec<u8>,String>{
     let output=Command::new("git").arg("-C").arg(repository).args(args).env("GIT_TERMINAL_PROMPT","0").output().map_err(|error|error.to_string())?;
@@ -52,19 +55,63 @@ pub fn changed_lines(repository:&Path)->Result<u64,String>{
     }
     Ok(count)
 }
-pub fn commit_state(repository:&Path)->Result<CommitState,String>{
+pub fn checkout_state(repository:&Path)->Result<CommitState,String>{
     let head=String::from_utf8(git(repository,&["rev-parse","--verify","HEAD"]).unwrap_or_default()).unwrap_or_default().trim().to_owned();
     let branch=String::from_utf8(git(repository,&["symbolic-ref","--quiet","--short","HEAD"]).unwrap_or_default()).unwrap_or_default().trim().to_owned();
     let reflog=String::from_utf8(git(repository,&["reflog","-1","--format=%gs"]).unwrap_or_default()).unwrap_or_default().trim().to_owned();
-    Ok(CommitState{head,branch,reflog})
+    Ok(CommitState{head,branch,reflog,refs:Vec::new()})
+}
+pub fn commit_state(repository:&Path)->Result<CommitState,String>{
+    let CommitState{head,branch,reflog,..}=checkout_state(repository)?;
+    let mut refs=Vec::new();
+    let branches=git(repository,&["for-each-ref","--format=%(refname)%09%(objectname)","refs/heads/"])?;
+    for line in String::from_utf8_lossy(&branches).lines(){
+        let Some((reference,sha))=line.split_once('\t') else {continue};
+        let message=String::from_utf8_lossy(&git(repository,&["reflog","-1","--format=%gs",reference]).unwrap_or_default()).trim().to_owned();
+        refs.push(CommitRef{key:reference.into(),head:sha.into(),branch:reference.trim_start_matches("refs/heads/").into(),reflog:message});
+    }
+    // Detached worktrees have no branch ref; their private HEAD reflogs still record commits.
+    let worktrees=git(repository,&["worktree","list","--porcelain","-z"])?;
+    for record in worktrees.split(|byte|*byte==0).filter(|record|record.starts_with(b"worktree ")){
+        #[cfg(unix)] let path={use std::os::unix::ffi::OsStrExt;Path::new(std::ffi::OsStr::from_bytes(&record[9..]))};
+        #[cfg(not(unix))] let path_text=String::from_utf8_lossy(&record[9..]);
+        #[cfg(not(unix))] let path=Path::new(path_text.as_ref());
+        if git(path,&["symbolic-ref","--quiet","HEAD"]).is_ok(){continue;}
+        let sha=String::from_utf8_lossy(&git(path,&["rev-parse","--verify","HEAD"]).unwrap_or_default()).trim().to_owned();
+        let message=String::from_utf8_lossy(&git(path,&["reflog","-1","--format=%gs","HEAD"]).unwrap_or_default()).trim().to_owned();
+        refs.push(CommitRef{key:format!("worktree:{}",path.display()),head:sha,branch:String::new(),reflog:message});
+    }
+    Ok(CommitState{head,branch,reflog,refs})
 }
 pub fn summary(repository:&Path)->Result<ChangeSummary,String>{
-    let state=commit_state(repository)?;
+    let state=checkout_state(repository)?;
     Ok(ChangeSummary{head:state.head,branch:state.branch,reflog:state.reflog,changed_lines:changed_lines(repository)?})
 }
 
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn commits_in_other_worktrees_are_repository_wide(){
+        let root=tempfile::tempdir().unwrap();let primary=root.path().join("primary");let linked=root.path().join("linked");
+        std::fs::create_dir(&primary).unwrap();
+        let run=|path:&Path,args:&[&str]|{git(path,args).unwrap();};
+        run(&primary,&["init","-q","-b","main"]);run(&primary,&["config","user.name","Fixture"]);run(&primary,&["config","user.email","fixture@example.test"]);
+        run(&primary,&["commit","--allow-empty","-qm","initial"]);
+        let initial=commit_state(&primary).unwrap();
+        run(&primary,&["worktree","add","-q","-b","agent/new",linked.to_str().unwrap()]);
+        let created=commit_state(&primary).unwrap();
+        assert!(!created.refs.iter().find(|item|item.branch=="agent/new").unwrap().reflog.starts_with("commit"));
+        run(&linked,&["commit","--allow-empty","-qm","agent commit"]);
+        let observed=commit_state(&primary).unwrap();
+        assert_eq!(observed.head,initial.head);
+        let agent=observed.refs.iter().find(|item|item.branch=="agent/new").unwrap();
+        assert_ne!(agent.head,initial.head);assert!(agent.reflog.starts_with("commit"));
+        let from_linked=commit_state(&linked).unwrap();
+        assert_eq!(from_linked.refs.len(),observed.refs.len());
+        assert_eq!(crate::git::GitService::default().branches(&primary).unwrap(),vec!["agent/new","main"]);
+        run(&linked,&["checkout","--detach","-q"]);run(&linked,&["commit","--allow-empty","-qm","detached commit"]);
+        let detached=commit_state(&primary).unwrap();
+        assert!(detached.refs.iter().any(|item|item.key.starts_with("worktree:")&&item.branch.is_empty()&&item.reflog.starts_with("commit")));
+    }
     #[test]fn counts_tracked_and_untracked_lines_then_resets_after_commit(){
         let root=tempfile::tempdir().unwrap();
         let run=|args:&[&str]|assert!(Command::new("git").args(args).current_dir(root.path()).status().unwrap().success());
