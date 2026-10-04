@@ -26,6 +26,7 @@ mod setup_terminal;
 mod db;
 mod git;
 mod github;
+mod github_credentials;
 mod models;
 mod oauth;
 

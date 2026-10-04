@@ -166,9 +166,7 @@ fn client() -> Result<Client, String> {
         .map_err(|e| e.to_string())
 }
 fn token(id: &str) -> Result<String, String> {
-    keyring::Entry::new("dev.gitcerberus.app", &format!("github:{id}"))
-        .and_then(|entry| entry.get_password())
-        .map_err(|_| "Reconnect this GitHub account to restore repository access.".into())
+    crate::github_credentials::token(id)
 }
 fn get(http: &Client, token: &str, path: &str) -> Result<reqwest::blocking::Response, String> {
     let request = http.get(format!("https://api.github.com{path}"));

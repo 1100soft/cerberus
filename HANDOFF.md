@@ -312,3 +312,42 @@ import URLs rather than copying api.ts's unrelated timestamp, avoiding duplicate
 state stores during development tests. That fixture's WebKit child printed an
 allocator diagnostic after successful assertions; Vite's chunk warning remains.
 No paid agent run, settings write to the user's configured jobs, commit, or push.
+
+## GitHub credential storage and reconnect refresh (2026-10-04)
+
+Read-only Secret Service metadata diagnosis: org.freedesktop.secrets is currently
+owned by GNOME Keyring, has only a session collection, and ReadAlias(default)
+returns /. KDE's separate compatibility endpoint has a default kdewallet
+collection. Neither endpoint's service-attribute search found Cerberus GitHub
+entries. No secret values were retrieved, provider configuration changed, or
+collections created. The pinned keyring 3.6.3 legacy default-target lookup calls
+ReadAlias(default) when its initial item search is empty; the resulting NoResult
+becomes the user's storage error. github.rs then obscured every storage cause
+with a generic reconnect instruction.
+
+Added github_credentials.rs shared by OAuth persistence/status/disconnect,
+repository API calls, and Copilot (through oauth::github_token). Linux writes
+target a named GitCerberus collection, independent of the default alias. Legacy
+reads search service/user across collections without the default-alias fallback.
+New entries take precedence; legacy fallback is only used when the named entry
+is absent. Saving must succeed and match a fresh credential lookup before sign-in
+reports success. Disconnect deletes matching service/user entries across the
+active service's collections. Native macOS/Windows entry naming is preserved.
+Storage access, missing tokens, and ambiguous credentials have distinct messages;
+no plaintext storage or cross-provider token recovery was introduced. A stable
+Secret Service provider and user sign-in are still required on this machine.
+
+App.tsx also dropped forced catalog refreshes while an older lookup was in
+flight. Reconnection now queues a fresh lookup and invalidates the older result,
+preventing pre-reconnection warnings from being published after sign-in.
+
+Validation: four new credential tests passed, production build passed, and the
+saved-prompt WebKit fixture passed with a mocked OAuth reconnect while a catalog
+request is in flight (including observing the visible repository warnings).
+New module rustfmt and diff whitespace passed. Full Rust suite: 93 passed,
+4 ignored, 1 existing Cursor wrapper-child cleanup test failed; isolated rerun
+also failed its immediate process-state assertion. Cursor source was unchanged.
+The remaining suite passed with that test excluded. WebKit child again printed
+an allocator diagnostic after successful fixture assertions/runner exit 0;
+Vite retains its chunk warning. No actual OAuth flow, paid agent call, credential
+write, commit, or push was performed.

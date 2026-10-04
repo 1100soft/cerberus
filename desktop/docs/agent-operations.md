@@ -24,6 +24,17 @@ The Identity card labels `premium_interactions` as **Premium requests** only whe
 
 ## Provider setup rules
 
+GitHub repository access and Copilot use the same native token. On Linux, a
+`Secret Service: no result found` error can mean that the active password manager
+has no default collection. New connections use the named GitCerberus collection
+and verify that the saved token can be read before confirming sign-in. The system
+password manager may prompt to create or unlock that collection. Keep the same
+Secret Service provider active between sign-in and execution; switching between
+GNOME Keyring and KDE's service can make another provider's saved tokens invisible.
+Unlock or repair unavailable storage before reconnecting accounts. No plaintext
+token fallback is used. Reconnection queues a fresh repository catalog lookup
+after any in-flight lookup and discards pre-reconnection results.
+
 Conversation providers are queried only after configuration and opt-in. Provider installers must display their exact command plan and wait for explicit in-app approval. Do not silently install tools or run a paid inference call as a diagnostic. GitHub identities and provider billing accounts are separate assignments.
 
 The desktop `open_external_url` command accepts exact approved destinations in `src-tauri/src/lib.rs`. When adding a usage link, update that allowlist and its URL test. In the browser demo, `api.openExternalUrl` opens a new tab.
