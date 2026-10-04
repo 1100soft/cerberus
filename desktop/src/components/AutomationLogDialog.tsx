@@ -1,5 +1,5 @@
 import { CopyButton } from './CopyButton';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
@@ -25,6 +25,8 @@ export function AutomationLogDialog({job,repositories,onClose}:{job:SavedPrompt;
   const [copyStatus,setCopyStatus]=useState('');
   const [liveEntries,setLiveEntries]=useState(()=>currentAutomationLogs(job.id));
   const lastActive=useRef('');
+  const logScroll=useRef<HTMLDivElement>(null);
+  const followOutput=useRef(true);
   useEffect(()=>{
     let active=true;let request=0;
     const refresh=()=>{const generation=++request;void api.listAutomationLogs(job.id).then(items=>{if(active&&generation===request){setSummaries(items);setError('');}}).catch(reason=>{if(active)setError(String(reason));});};
@@ -56,9 +58,11 @@ export function AutomationLogDialog({job,repositories,onClose}:{job:SavedPrompt;
     !entry&&!error&&job.state!=='running'?job.lastResult:'',
   ].filter(Boolean).join('\n\n');
   useEffect(()=>setCopyStatus(''),[selected,entry]);
+  useLayoutEffect(()=>{followOutput.current=true;},[selected]);
+  useLayoutEffect(()=>{const pane=logScroll.current;if(pane&&followOutput.current)pane.scrollTop=pane.scrollHeight;},[selected,entry,error,copyStatus,job.lastResult]);
   return <div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="automation-dialog automation-log-dialog" role="dialog" aria-modal="true" aria-label={`Details for ${job.title}`} onKeyDown={event=>{if(event.key==='Escape')onClose();}}><header><h2>{job.title}</h2><button type="button" aria-label="Close automation details" onClick={onClose}><X size={17}/></button></header><div className="automation-dialog-content automation-detail-content">
     <section className="automation-detail-pane" aria-label="Automation content"><strong>{job.kind==='notification'?'Notification message':job.kind==='shell'||job.kind==='git'?'Command or script':'Agent prompt'}</strong><div className="automation-detail-scroll">{job.kind==='shell'||job.kind==='git'?<ShellCode code={job.prompt}/>:<pre className="automation-log-plain">{job.prompt}</pre>}</div></section>
-    <section className="automation-detail-pane" aria-label="Automation log"><div className="automation-detail-log-header"><strong>Log</strong><CopyButton label="Copy automation log" value={logText} disabled={!logText} onError={reason=>setCopyStatus(`Could not copy log: ${String(reason)}`)}/>{logs.length>0&&<Select label="Automation log run" value={selected} onChange={setSelected} options={logs.map(item=>({value:`${item.repositoryId}:${item.runId}`,label:`${repositoryName(item.repositoryId)} · ${new Date(item.createdAt).toLocaleString()} · ${item.status}`}))}/>}</div><div className="automation-detail-scroll" aria-live="polite">
+    <section className="automation-detail-pane" aria-label="Automation log"><div className="automation-detail-log-header"><strong>Log</strong><CopyButton label="Copy automation log" value={logText} disabled={!logText} onError={reason=>setCopyStatus(`Could not copy log: ${String(reason)}`)}/>{logs.length>0&&<Select label="Automation log run" value={selected} onChange={setSelected} options={logs.map(item=>({value:`${item.repositoryId}:${item.runId}`,label:`${repositoryName(item.repositoryId)} · ${new Date(item.createdAt).toLocaleString()} · ${item.status}`}))}/>}</div><div ref={logScroll} className="automation-detail-scroll" aria-live="polite" onScroll={event=>{const pane=event.currentTarget;followOutput.current=pane.scrollHeight-pane.clientHeight-pane.scrollTop<=16;}}>
       {copyStatus&&<p role="status">{copyStatus}</p>}
 
       {entry&&<div className="automation-log-lines"><small>{repositoryName(entry.repositoryId)} · {new Date(entry.createdAt).toLocaleString()}</small>{entry.stdout&&<HighlightedCode value={entry.stdout}/>}{entry.stderr&&<pre className="automation-log-error">{entry.stderr}</pre>}{entry.response&&<pre>{entry.response}</pre>}{entry.activity&&<pre className="automation-log-activity">{entry.activity}</pre>}</div>}

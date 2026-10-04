@@ -257,3 +257,23 @@ under the same run ID, absent placeholder options, and permission routing. The
 CI fixture's WebKit child printed an allocator diagnostic after its successful
 assertions; the fixture runner still exited 0. Vite retains its chunk-size
 warning. Diff whitespace passed. All current changes remain uncommitted.
+
+## Manual-run defaults and log following (2026-10-04)
+
+Run once derives its selection from the eligible local repositories, defaulting
+to the first while preserving a valid explicit choice. Display, button validation,
+and execution share that value, including when repository options change. Empty
+scope remains disabled. Audited app Select usages: account controls have real
+None/Unassigned states or explicit account-selection buttons; other controls
+initialize real values, and log selection is owned by its running/history logic.
+Removed Select's misleading first-option display fallback for invalid values;
+it now reports unavailable selection rather than pretending another value was
+chosen. Recorded the selection-state invariant in desktop/AGENTS.md.
+
+The log pane follows output at the bottom, pauses when the user scrolls up, and
+resumes when they return to the bottom. Switching runs resets following.
+Saved-prompt WebKit regression tests cover running without touching the repository
+dropdown, explicit repository selection, overflowing log following, retaining a
+scrolled-up position, and resuming at the bottom. Production build, that fixture,
+four-window viewport matrix at 75/100/140/150% zoom, and diff whitespace passed.
+Vite's existing chunk-size warning remains. No commit or push performed.

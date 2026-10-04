@@ -94,3 +94,10 @@ its requested tool permissions, while analyze restricts tools to reading. Cursor
 full uses its force execution mode; Claude full uses bypassPermissions. These are
 provider-specific policies, not Codex's sandbox names. Codex full continues using
 danger-full-access. Logs stream only the progress a provider actually emits.
+
+Run once preselects the first available in-scope local repository. The displayed
+selection and execution target use the same value; changing the repository keeps
+that choice while it remains available. With no eligible repositories, running
+is disabled. Live logs scroll to the newest output until you scroll up; scrolling
+back to the bottom resumes following. Selecting a different run starts at its
+latest output.
