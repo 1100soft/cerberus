@@ -118,6 +118,47 @@ script = r"""
  assert(calls.length===beforeIdle,'Idle condition ran before quiet period');
  await automation.checkSavedPromptSchedule(Date.now()+3000);
  await wait(()=>calls.length===beforeIdle+1);
+ window.__ciStage='CI monitoring recovery';
+ for(const job of automation.savedPrompts())automation.savePrompt({...job,enabled:false});
+ const healthId='health-'+crypto.randomUUID();
+ automation.savePrompt({...base,id:healthId,title:'Monitoring recovery',trigger:'ciFail',commitBranch:'*',includeFutureRepositories:true});
+ const monitored=[...repos,...['3','4','5'].map(id=>({...repos[0],id,displayName:'repo-'+id})),{...repos[0],id:'local',canonicalRemote:null},{...repos[0],id:'unassigned',identity:null}];
+ api.repositories=async()=>monitored;
+ const monitorNotices=()=>JSON.parse(localStorage.getItem('gitcerberus.automationNotifications.v1')||'[]').filter(item=>item.automationId==='ci-monitor');
+ const noticesBefore=monitorNotices().length,requests=[];let failMonitoring=true,releaseSlow;
+ const slow=new Promise(resolve=>releaseSlow=resolve);
+ api.githubCiRuns=async repo=>{requests.push(repo);if(repo==='2')return [run(999,'failure')];if(failMonitoring&&repo!=='5'){if(repo==='1')await slow;throw {kind:'timeout',message:'GitHub request timed out'};}return [];};
+ const healthNow=Date.now(),callsBeforeHealth=calls.length;
+ const checking=automation.pollAutomationCi(healthNow);
+ await wait(()=>calls.length===callsBeforeHealth+1);
+ assert(calls.at(-1).repo==='2','An unavailable repository blocked a healthy repository CI failure');
+ assert(requests.includes('5'),'A stalled request blocked healthy repositories beyond the first four');
+ releaseSlow();await checking;
+ assert(!requests.includes('local')&&!requests.includes('unassigned'),'CI monitoring queried an ineligible live-scope repository');
+ assert(monitorNotices().length===noticesBefore,'One transient timeout generated monitoring alerts');
+ const firstRequests=requests.filter(id=>id==='1').length;
+ await automation.pollAutomationCi(healthNow+1000);
+ assert(requests.filter(id=>id==='1').length===firstRequests,'CI backoff was ignored');
+ await automation.pollAutomationCi(healthNow+60000);await automation.pollAutomationCi(healthNow+180000);
+ assert(monitorNotices().length===noticesBefore+1&&monitorNotices()[0].title==='CI checks delayed','Persistent outage did not produce one combined monitoring notice');
+ assert(['repo-1','repo-3','repo-4'].every(name=>monitorNotices()[0].message.includes(name)),'Grouped outage notice omitted affected repositories');
+ await automation.pollAutomationCi(healthNow+420000);
+ assert(monitorNotices().length===noticesBefore+1,'Unchanged outage spammed additional monitoring notices');
+ failMonitoring=false;await automation.pollAutomationCi(healthNow+1000000);
+ assert(calls.length===callsBeforeHealth+1,'Recovery replayed the already handled failure');
+ let rateRequests=0;
+ api.githubCiRuns=async repo=>{if(repo==='1'){rateRequests++;throw {kind:'rateLimit',message:'Rate limited',retryAfterSeconds:600};}return [];};
+ await automation.pollAutomationCi(healthNow+1100000);await automation.pollAutomationCi(healthNow+1160000);
+ assert(rateRequests===1,'GitHub Retry-After was ignored');
+ let denied=false;
+ api.githubCiRuns=async repo=>{if(repo==='1')throw {kind:'authentication',message:'Reconnect assigned account'};if(repo==='2'&&!denied)return [run(1000,'failure')];return [];};
+ await automation.pollAutomationCi(healthNow+1700000);denied=true;
+ await wait(()=>calls.length===callsBeforeHealth+2);
+ assert(monitorNotices()[0].title==='CI access needs attention'&&monitorNotices()[0].message.includes('Reconnect assigned account'),'Permanent account failure did not get actionable guidance');
+ const noticesAfterAccess=monitorNotices().length;
+ await automation.pollAutomationCi(healthNow+1900000);
+ assert(monitorNotices().length===noticesAfterAccess,'Repeated account failure spammed another alert');
+ automation.savePrompt({...automation.savedPrompts().find(job=>job.id===healthId),enabled:false});
  window.__ciStage='list scrolling';
  for(let i=0;i<30;i++)automation.savePrompt({...base,id:'scroll-'+i,title:'Scroll '+i,trigger:'manual',enabled:false});
  await pause();
@@ -166,6 +207,6 @@ def loaded(webview, event):
 
 view.connect('load-changed', loaded)
 view.load_uri('http://127.0.0.1:3000')
-GLib.timeout_add_seconds(35, lambda: (Gtk.main_quit(),False)[1])
+GLib.timeout_add_seconds(60, lambda: (Gtk.main_quit(),False)[1])
 Gtk.main()
 sys.exit(exit_code)

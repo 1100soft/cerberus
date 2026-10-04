@@ -332,9 +332,9 @@ async fn github_repositories(state: State<'_, AppState>) -> Result<github::Catal
     tauri::async_runtime::spawn_blocking(move || github::catalog(&db)).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-async fn github_ci_runs(repository_id: String, state: State<'_, AppState>) -> Result<Vec<github::CiRun>, String> {
+async fn github_ci_runs(repository_id: String, state: State<'_, AppState>) -> Result<Vec<github::CiRun>, github::CiPollError> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || github::ci_runs(&db, &repository_id)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || github::ci_runs(&db, &repository_id)).await.map_err(|e| github::CiPollError::from(e.to_string()))?
 }
 #[tauri::command]
 async fn github_repository_events(repository_id:String,state:State<'_,AppState>)->Result<Vec<github::RepositoryEvent>,String>{

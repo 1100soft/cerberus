@@ -76,15 +76,40 @@ fn first_attempt() -> u32 { 1 }
 #[derive(Deserialize)]
 struct CiRunsResponse { workflow_runs: Vec<CiRun> }
 
-pub fn ci_runs(db: &Database, repository_id: &str) -> Result<Vec<CiRun>, String> {
+#[derive(Clone,Debug,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct CiPollError {pub kind:String,pub message:String,pub retry_after_seconds:Option<u64>}
+impl From<String> for CiPollError {fn from(message:String)->Self{Self{kind:"configuration".into(),message,retry_after_seconds:None}}}
+impl std::fmt::Display for CiPollError {fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{write!(f,"{}",self.message)}}
+fn ci_http_error(status:reqwest::StatusCode,headers:&reqwest::header::HeaderMap,now:u64)->CiPollError{
+    let limited=status.as_u16()==429||(status.as_u16()==403&&(headers.get("x-ratelimit-remaining").is_some_and(|v|v=="0")||headers.contains_key("retry-after")));
+    let retry=headers.get("retry-after").and_then(|v|v.to_str().ok()).and_then(|v|v.parse::<u64>().ok()).or_else(||headers.get("x-ratelimit-reset").and_then(|v|v.to_str().ok()).and_then(|v|v.parse::<u64>().ok()).map(|reset|reset.saturating_sub(now)+1));
+    let (kind,message)=if limited{("rateLimit","GitHub rate limit reached; CI checks will resume after the retry delay.")}
+    else if status.as_u16()==401{("authentication","GitHub rejected this account's credentials. Reconnect the assigned GitHub identity.")}
+    else if status.as_u16()==403{("access","GitHub denied Actions access. Check the assigned account's Actions read permission and organization authorization.")}
+    else if status.as_u16()==404{("access","GitHub could not find this repository or the assigned account cannot read its Actions runs.")}
+    else if status.is_server_error(){("server","GitHub is temporarily unavailable; CI checks will retry.")}
+    else{("response","GitHub returned an unexpected response while reading Actions runs.")};
+    CiPollError{kind:kind.into(),message:format!("{message} (HTTP {})",status.as_u16()),retry_after_seconds:if limited{Some(retry.unwrap_or(60).max(1))}else{None}}
+}
+fn ci_transport_error(error:reqwest::Error)->CiPollError{
+    let kind=if error.is_timeout(){"timeout"}else{"transport"};
+    let error=error.without_url();let mut details=error.to_string();let mut source=std::error::Error::source(&error);
+    while let Some(cause)=source{details.push_str(": ");details.push_str(&cause.to_string());source=cause.source();}
+    CiPollError{kind:kind.into(),message:format!("Could not read GitHub Actions runs: {details}. CI checks will retry."),retry_after_seconds:None}
+}
+pub fn ci_runs(db: &Database, repository_id: &str) -> Result<Vec<CiRun>, CiPollError> {
     let repository = db.list()?.into_iter().find(|repo| repo.id == repository_id)
         .ok_or_else(|| "Repository is not linked on this device.".to_owned())?;
     let name = repository.canonical_remote.as_deref().and_then(github_name)
         .ok_or_else(|| "CI conditions require a GitHub repository.".to_owned())?;
     let identity = repository.identity.ok_or_else(|| "Assign a GitHub identity to check CI runs.".to_owned())?;
-    if identity.provider_username.is_none() { return Err("Assign a connected GitHub identity to check CI runs.".into()); }
-    let response = get(&client()?, &token(&identity.id)?, &format!("/repos/{name}/actions/runs?event=push&status=completed&per_page=100"))?;
-    let runs: CiRunsResponse = response.json().map_err(|e| format!("Invalid GitHub workflow response: {e}"))?;
+    if identity.provider_username.is_none() { return Err("Assign a connected GitHub identity to check CI runs.".to_owned().into()); }
+    let response=client()?.get(format!("https://api.github.com/repos/{name}/actions/runs?event=push&status=completed&per_page=100"))
+        .bearer_auth(token(&identity.id)?).header("Accept","application/vnd.github+json").header("X-GitHub-Api-Version","2022-11-28")
+        .send().map_err(ci_transport_error)?;
+    if !response.status().is_success(){return Err(ci_http_error(response.status(),response.headers(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()));}
+    let runs: CiRunsResponse = response.json().map_err(|_|CiPollError{kind:"response".into(),message:"GitHub returned an invalid workflow-run response; CI checks will retry.".into(),retry_after_seconds:None})?;
     Ok(runs.workflow_runs)
 }
 pub fn repository_events(db:&Database,repository_id:&str)->Result<Vec<RepositoryEvent>,String>{
@@ -134,6 +159,7 @@ impl Remote {
 fn client() -> Result<Client, String> {
     Client::builder()
         .user_agent("GitCerberus/0.1")
+        .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -502,6 +528,40 @@ pub fn link_existing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ci_errors_distinguish_access_rate_limits_and_outages(){
+        let mut headers=reqwest::header::HeaderMap::new();
+        headers.insert("x-ratelimit-remaining","0".parse().unwrap());headers.insert("x-ratelimit-reset","1300".parse().unwrap());
+        let limited=ci_http_error(reqwest::StatusCode::FORBIDDEN,&headers,1000);
+        assert_eq!(limited.kind,"rateLimit");assert_eq!(limited.retry_after_seconds,Some(301));
+        headers.insert("retry-after","120".parse().unwrap());
+        assert_eq!(ci_http_error(reqwest::StatusCode::TOO_MANY_REQUESTS,&headers,1000).retry_after_seconds,Some(120));
+        let empty=reqwest::header::HeaderMap::new();
+        assert_eq!(ci_http_error(reqwest::StatusCode::UNAUTHORIZED,&empty,1000).kind,"authentication");
+        assert_eq!(ci_http_error(reqwest::StatusCode::FORBIDDEN,&empty,1000).kind,"access");
+        assert_eq!(ci_http_error(reqwest::StatusCode::NOT_FOUND,&empty,1000).kind,"access");
+        assert_eq!(ci_http_error(reqwest::StatusCode::SERVICE_UNAVAILABLE,&empty,1000).kind,"server");
+        let json=serde_json::to_value(limited).unwrap();assert_eq!(json["retryAfterSeconds"],301);
+    }
+    #[test]
+    fn ci_timeout_diagnostic_preserves_cause_without_request_url(){
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();let address=listener.local_addr().unwrap();
+        let server=std::thread::spawn(move||{let (_stream,_)=listener.accept().unwrap();std::thread::sleep(Duration::from_millis(150));});
+        let http=Client::builder().no_proxy().timeout(Duration::from_millis(50)).build().unwrap();
+        let error=ci_transport_error(http.get(format!("http://{address}/private-request")).send().unwrap_err());
+        assert_eq!(error.kind,"timeout");assert!(error.message.contains("timed out"));assert!(!error.message.contains("private-request"));
+        server.join().unwrap();
+    }
+    #[test]
+    #[ignore = "read-only live GitHub diagnostic; requires CERBERUS_TEST_DATABASE"]
+    fn live_ci_catalog(){
+        let path=std::env::var("CERBERUS_TEST_DATABASE").expect("Set the diagnostic database path");
+        let db=Database::open(std::path::PathBuf::from(path)).unwrap();
+        for repository in db.list().unwrap(){
+            let started=std::time::Instant::now();
+            match ci_runs(&db,&repository.id){Ok(runs)=>println!("{}: {} workflow runs ({:?})",repository.display_name,runs.len(),started.elapsed()),Err(error)=>panic!("{}: {error} ({:?})",repository.display_name,started.elapsed())}
+        }
+    }
     #[test]
     fn parses_completed_push_workflow_attempts() {
         let response: CiRunsResponse = serde_json::from_str(r#"{"workflow_runs":[{"id":42,"run_attempt":2,"name":"CI","head_branch":"main","head_sha":"abc","conclusion":"failure","updated_at":"2026-10-03T12:00:00Z","html_url":"https://github.com/example/repo/actions/runs/42"}]}"#).unwrap();

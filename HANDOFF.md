@@ -3,7 +3,7 @@
 ## First read
 
 - Repository: `/home/eh930/project/apps/cerberus`; branch `wip`.
-- This document describes the Automation and Agent UI checkpoint plus the Automation follow-ups included in this checkpoint. Review current Git status before continuing; repository state is authoritative.
+- This document describes the committed Automation and Agent UI checkpoint and the CI reliability and desktop workflow checkpoint below. Review current Git status before continuing; repository state is authoritative.
 - Current docs: [README](README.md), [documentation index](docs/README.md), [desktop architecture](desktop/docs/architecture.md), [desktop operations](desktop/docs/agent-operations.md), and [UI conventions](desktop/AGENTS.md).
 - The 2026-09-27 handoff is in [docs/archive/HANDOFF-2026-09-27.md](docs/archive/HANDOFF-2026-09-27.md). Older notes remain in `docs/archive/HANDOFF-previous.md`.
 
@@ -93,3 +93,55 @@ Validation: build, saved-prompt UI (independent text, quota guidance, popover zo
 All pending Automation work is included in this checkpoint. Final review also restored two-second polling for handoff conditions when combined with another condition, reset all parameters and outgoing names when importing a new prompt, retained a 500-character branch-pattern field, and reset GitHub observation time when re-enabling a combined GitHub job. Notification edits no longer show the legacy conversation-target message. Desktop operations now lists the CI, handoff, and card-reorder checks.
 
 Checkpoint validation: production build (dropdown convention, TypeScript, Vite), ChatGPT capability and conversation-display Node checks, saved-prompt/CI/handoff/card-reorder WebKit checks, the four-size viewport matrix, `cargo check`, full `cargo test -- --test-threads=1` (84 passed, 3 live tests ignored), and whitespace review. No credential-pattern matches or generated artifacts were found in the pending changes. `cargo fmt --check` does not pass: the archived HEAD baseline also fails with extensive compact-source formatting differences (267 diff sections versus 268 at this checkpoint). Existing Rust style is preserved rather than applying a repository-wide reformat. Normal bundle-size and Rust dead-code warnings remain.
+
+
+## CI monitoring reliability follow-up — 2026-10-04
+
+The user's saved monitoring notices contained “Could not reach GitHub” for Cerberus, Mountlet, 1100, and InDEx, with roughly 30-second spacing matching the old request timeout. These were monitoring transport errors, not workflow failures. The old code discarded the underlying error cause and sent an alert per repository. The exact historical transport cause cannot be reconstructed from those messages. A read-only live native diagnostic with each repository's assigned GitHub credential succeeded for all four: Cerberus/1100/InDEx returned no push-triggered workflow runs; Mountlet returned 100. No agent inference, workflow dispatch, or credential changes were used.
+
+The native CI command now returns structured timeout/transport, authentication/access, rate-limit, server, and response errors; details preserve transport causes without request URLs. GitHub retry/reset headers are retained, and connection setup has a ten-second timeout within the existing thirty-second request timeout. Frontend polling uses four workers to check eligible repositories, keeps per-repository retry health, backs off to fifteen minutes, respects larger GitHub retry delays, and groups persistent outages into one “CI checks delayed” notice after three failures. Access failures get actionable grouped notices. These monitoring notices have message status and cannot trigger automations. Healthy repositories continue checking while another request fails or stalls. All-repository scopes still poll without a local push prerequisite, so remote/editor pushes remain detectable; non-GitHub or unassigned future repositories are skipped.
+
+The CI WebKit fixture now tests a slow failed poll alongside a real matching failure in another repository, transient-alert suppression, grouped persistent notices, backoff, rate-limit delays, access guidance, recovery deduplication, and eligible live-scope filtering. Native tests cover error categories, retry headers, JSON error serialization, and timeout cause retention without request URLs. The opt-in `live_ci_catalog` test reads existing workflow catalogs without running automations.
+
+Validation for this follow-up: production build (dropdown convention and TypeScript included), full `cargo test -- --test-threads=1` (86 passed, 4 opt-in tests ignored), CI recovery WebKit fixture, saved-prompt and handoff WebKit regressions, and `git diff --check`. The live catalog diagnostic was explicitly run and passed against all four assigned repositories, both before and after the native error-handling changes. Existing bundle-size and Rust dead-code warnings remain. Retry deadlines use response time so slow requests do not shorten GitHub's retry delay. These changes are included in this checkpoint.
+
+## Desktop CI and release foundations (2026-10-04)
+
+The only previous workflow was version-tag Debian publication; ordinary pushes
+had no CI workflows. Added `.github/workflows/ci.yml` for all branch pushes, PRs,
+and manual runs: actionlint, frontend build/logic/version checks, native test
+compilation on Ubuntu/Windows/macOS, plus serial Rust and mocked WebKitGTK tests
+on Linux. Added `desktop-packages.yml` for manual/version-tag artifact builds:
+Linux x64/ARM64 Debian and AppImage, Windows x64 NSIS, macOS Intel/ARM64 DMG.
+Read-only tokens, bounded jobs, caches, lockfiles, tag/app-version validation,
+ad-hoc macOS signing, and artifact retention are configured. Existing APT tag
+publication remains separate. No release/store publication or signing secrets
+were added. Nothing pushed.
+
+`docs/ci-and-releases.md` documents release verification, signing/protection needs,
+Linux baseline/ARM runner constraints, and the mobile implementation sequence.
+Android/iOS jobs are intentionally not enabled: generated projects, mobile entry,
+tray/CLI adapters, and small-screen UI are missing. Local workflow actionlint
+1.7.12, shell syntax, matching/mismatching release-tag checks, frontend production
+build, Linux Tauri debug application build, and both logic scripts passed.
+Rust tests: 86 passed, 4 opt-in ignored.
+All five configured WebKit fixtures passed individually against the existing
+local Vite server, including four viewport sizes and 75/100/140/150% zoom.
+The Xvfb orchestration script could not run locally (Xvfb not installed); its CI
+job explicitly installs it. Hosted Windows/macOS/ARM builds and installers await
+GitHub execution. The CI-monitoring reliability changes are included in the same checkpoint.
+
+Autosave branches (`autosave` and `autosave/**`, matching the existing
+`autosave/eh930-GX5MRXL-0e0293a2/wip` branch) are excluded from CI push and PR
+target triggers. Job guards additionally skip autosave PR sources and manual
+CI/package dispatches. Version-tag publication is unchanged. Actionlint and
+`git diff --check` passed after the filter change.
+
+Checkpoint review: all 13 pending files belong to CI monitoring, desktop
+workflows, autosave filtering, supporting checks, or documentation. The UI runner
+now starts Vite directly so its exit trap stops the server process. Final build,
+frontend logic checks, 86 native tests (4 ignored), actionlint, release version,
+shell syntax, whitespace, and credential-pattern review passed. Earlier passing
+Linux native build and WebKit regressions remain applicable; only workflow/docs
+and runner cleanup changed since those runs. No generated artifacts or unrelated
+files are staged. Existing rustfmt baseline failure remains documented.
