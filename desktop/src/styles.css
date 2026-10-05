@@ -1061,3 +1061,9 @@ input[type="number"] { text-align: right; }
 .automation-alternative-set > strong { min-width: 84px; }
 .automation-sets-help { font-size: .8rem; color: var(--text-secondary); margin: 4px 0; }
 .automation-add-set { align-self: flex-start; }
+
+.automation-page .automation-list-header { flex: none; }
+.automation-page .saved-prompt-list { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: auto; }
+.automation-page .saved-prompt-list article { flex: 0 0 auto; overflow: visible; }
+.automation-page .saved-prompt-list article strong, .automation-page .saved-prompt-list article small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.automation-page .saved-prompt-list article > div:first-child { overflow: visible; }

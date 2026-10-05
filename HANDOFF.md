@@ -481,3 +481,23 @@ restored committed CSS plus prior copy/notification/branch/flag styles and new
 row styles. Card fixture confirms prior copy/branch behavior. InfoPopover now
 uses clamped top placement to stay in the zoomed viewport. All changes remain
 uncommitted, no push or live automation run.
+
+## Automation defaults, help, and card sizing (2026-10-05)
+
+New automation creation (including incoming drafts) selects every current local
+repository and includes future repositories by default. Editing retains saved
+scope. While future inclusion is on, displayed targets follow the linked local
+repository list; deselecting any repository snapshots the remaining targets and
+turns future inclusion off. Manual still chooses its repository at run time.
+
+Handoff help is a short summary with Agent wording, Shell output path, conditional
+emission, and a boolean flag example. Detailed instructions moved to the separate
+desktop/docs/handoffs.md guide, linked from the docs index and automation docs.
+Automation list is a flexible, internally scrolling column. Cards never shrink,
+and titles/summaries wrap to their content height rather than being truncated.
+
+Validation: build and WebKit automation UI pass (default current/future scope and
+existing workflows); card fixture passes with 30 extra long-title cards at
+100/140/150% zoom, confirming no card shrink/clipping and independent list scroll.
+Existing Vite chunk and WebKit child allocator diagnostics remain. Changes are
+uncommitted; no live automation execution or push.

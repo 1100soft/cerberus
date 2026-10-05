@@ -108,7 +108,7 @@ script = r"""
 
 
  const panelSource=await (await fetch('/src/components/SavedPromptsPanel.tsx')).text();const savedPath=panelSource.match(/from "([^"\n]*\/savedPrompts\.ts[^"\n]*)"/)[1];
- const {savePrompt,savedPrompts}=await import(savedPath);
+ const {savePrompt,savedPrompts,removePrompt}=await import(savedPath);
  for(const [index,id] of ['drag-one','drag-two'].entries())savePrompt({id,repositoryId:'',repositoryIds:[],provider:'codex',threadId:'',title:'Drag fixture '+index,prompt:'true',trigger:'manual',minutes:60,enabled:false,nextAt:0,editor:'vscode',kind:'shell'});
  document.querySelector('[aria-label="Toggle navigation"]').click();
  (await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Automation')))).click();
@@ -120,6 +120,20 @@ script = r"""
  assert(automationCards[1].classList.contains('card-drop-after'),'Automation drop indicator is missing');
  automationCards[1].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:cardTransfer,clientY:cardBox.bottom-2}));
  assert(savedPrompts().findIndex(job=>job.id==='drag-one')>savedPrompts().findIndex(job=>job.id==='drag-two'),'Automation order was not saved');
+ const originalHeight=automationCards[0].getBoundingClientRect().height;
+ for(let index=0;index<30;index++)savePrompt({...savedPrompts().find(job=>job.id==='drag-one'),id:'overflow-'+index,title:'Long automation title '+index+' with enough words to wrap and remain fully visible at larger application zoom'});
+ await pause();
+ for(const zoom of [1,1.4,1.5]){
+   document.documentElement.style.setProperty('--ui-zoom',String(zoom));await pause();
+   const list=document.querySelector('.saved-prompt-list'),cards=[...list.querySelectorAll('article')];
+   assert(list.scrollHeight>list.clientHeight&&getComputedStyle(list).overflowY==='auto','Automation list does not scroll at '+zoom);
+   assert(automationCards[0].getBoundingClientRect().height>=originalHeight-1,'Automation card shrank when the list overflowed');
+   assert(cards.every(card=>card.scrollHeight<=card.clientHeight+2),'Automation card clips its content');
+   list.scrollTop=list.scrollHeight;await pause();assert(list.scrollTop>0,'Automation list cannot scroll to later cards');
+ }
+ document.documentElement.style.setProperty('--ui-zoom','1');
+ for(let index=0;index<30;index++)removePrompt('overflow-'+index);await pause();
+
 
  (await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Identities')))).click();
  const identityCards=await wait(()=>{const cards=[...document.querySelectorAll('.identity-card')];return cards.length>=2?cards:null;});
