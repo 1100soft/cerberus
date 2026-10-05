@@ -102,12 +102,22 @@ is disabled. Live logs scroll to the newest output until you scroll up; scrollin
 back to the bottom resumes following. Selecting a different run starts at its
 latest output.
 
-### Boolean handoff conditions
+### Handoff flags (boolean variables)
 
-In the Handoff condition dialog, **Require variables to be true** accepts optional comma-separated variable names, such as `v, ready`. Names are case-sensitive ASCII identifiers (letters or underscore first, then letters, digits, or underscores). All listed variables must be JSON boolean `true` in the same incoming payload:
+In the Handoff condition dialog, **Require flags to be true** accepts optional comma-separated flag names, such as `v, ready`. Names are case-sensitive ASCII identifiers (letters or underscore first, then letters, digits, or underscores). All listed variables must be JSON boolean `true` in the same incoming payload:
 
 ```json
 {"variables":{"v":true,"ready":true},"details":"Context for the next automation"}
 ```
 
 Agents receive this format in their outgoing handoff instructions. Shell scripts write the same JSON to their supplied handoff output path; a Notification automation can use JSON as its message payload. Missing variables, `false`, strings such as `"true"`, and invalid JSON do not match. Without variable requirements, ordinary text payloads still trigger as before. Nonmatching emissions remain pending and do not block a later matching emission. Matching is applied during both queue inspection and atomic claiming, including composite conditions. Queue consumption is still shared: one emission runs one consumer, rather than broadcasting to every matching automation.
+
+Agent prompts can set flags using ordinary wording: “Set v in the handoff when the review passes,” “mark v as true,” or “raise the ready flag.” The injected instructions tell the agent to preserve names and case, evaluate the stated condition, and serialize actual JSON booleans in the `variables` object alongside context such as `details`. Flags and variables refer to the same values; existing payloads and saved conditions remain compatible.
+
+In Shell mode, write the JSON yourself to the supplied outgoing path. For a handoff named `review`:
+
+```bash
+printf '%s\n' '{"variables":{"v":true},"details":"Review passed"}' > "$CERBERUS_HANDOFF_REVIEW"
+```
+
+Both examples are included in the Emit handoffs info popover.

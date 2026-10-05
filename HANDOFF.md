@@ -425,3 +425,15 @@ concurrent filtered claims; WebKit scheduler fixture confirms nonmatching queue
 entries are preserved. Production build passes (existing chunk-size warning).
 Automation UI fixture covers variable entry, condition chip, and dialog bounds
 at 100/140/150% zoom. Changes remain uncommitted.
+
+## Handoff flags wording and help (2026-10-05)
+
+Trigger UI calls boolean variables flags. Emitting agents receive instructions
+to interpret ordinary task wording (set v, mark v true, raise ready, conditional
+flags), preserve names/case, and write actual JSON booleans in the existing
+variables object alongside details. No schema migration or natural-language
+parsing of payloads; deterministic trigger matching is unchanged. Emit handoffs
+popover explains Agent wording and Shell JSON output with a quoted output path.
+Documentation and fixtures updated. Production build and handoff scheduler
+fixture pass; automation UI fixture checks flag labels and both help examples.
+Changes remain uncommitted.

@@ -25,6 +25,7 @@ script = r"""
  assert(module.validCommitBranchPatterns('main, wip, feature/*')&&module.matchesCommitBranch('feature/foo','main, wip, feature/*')&&!module.matchesCommitBranch('release/foo','main, wip, feature/*'),'Commit branch patterns failed');
  assert(module.matchesCommitBranch('wip','main, autosave/*',true)&&!module.matchesCommitBranch('main','main, autosave/*',true)&&!module.matchesCommitBranch('autosave/x','main, autosave/*',true),'Commit branch exclusions failed');
  const augmented=module.automationPromptWithHandoffs('Original task',{id:'one',name:'review',repositoryId:'1',path:'/repo/.git/claimed/review/one.txt'},{correction:'/repo/.git/outgoing/correction/two.txt'});
+ assert(augmented.includes('raise the ready flag')&&augmented.includes('actual JSON booleans')&&augmented.includes('preserve flag names and case'),'Agent flag instructions missing');
  assert(augmented.startsWith('Handoff instructions')&&augmented.indexOf('Read the incoming')<augmented.indexOf('Task:')&&augmented.includes('claimed/review/one.txt')&&augmented.includes('outgoing/correction/two.txt'),'Agent prompt did not require reading the handoff first');
  const base={repositoryId:'1',repositoryIds:['1'],repositoryLabels:{'1':'backend-api'},provider:'codex',threadId:'',minutes:60,enabled:true,nextAt:0,editor:'vscode'};
  module.savePrompt({...base,id:'producer',title:'Producer',kind:'shell',prompt:'emit review',trigger:'manual',enabled:false,emitsHandoffs:['review']});

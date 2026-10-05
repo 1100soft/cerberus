@@ -377,7 +377,7 @@ script = r"""
  assert(!incomingName.placeholder,'Incoming handoff field has hint text');
  incomingName.focus();document.execCommand('insertText',false,'review');await pause();
  assert(incomingName.value==='review','Incoming handoff field rejected a new name');
- const requiredVariables=document.querySelector('[aria-label="Required handoff variables"]');assert(requiredVariables,'Missing handoff variable requirements');
+ const requiredVariables=document.querySelector('[aria-label="Required handoff flags"]');assert(requiredVariables,'Missing handoff variable requirements');
  requiredVariables.focus();document.execCommand('insertText',false,'v, ready');await pause();
  assert(requiredVariables.value==='v, ready','Variable requirements did not update');
  for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',String(zoom));await pause();const dialog=document.querySelector('.automation-condition-dialog').getBoundingClientRect();const field=requiredVariables.getBoundingClientRect();assert(dialog.top>=-2&&dialog.bottom<=innerHeight+2&&field.right<=dialog.right+2,'Handoff variables overflow at zoom '+zoom);}
@@ -390,7 +390,7 @@ script = r"""
  assert(!outgoingName.placeholder,'Outgoing handoff field has hint text');
  outgoingName.focus();document.execCommand('insertText',false,'correction');await pause();
  assert(outgoingName.value==='correction','Outgoing handoff field rejected a new name');
- document.querySelector('[aria-label="Handoff help"]').click();await pause();assert(document.querySelector('.info-popover').textContent.includes('the handoff'),'Handoff help popover is missing');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause();assert(!document.querySelector('.info-popover')&&document.querySelector('.automation-dialog'),'Popover Escape closed the dialog');
+ document.querySelector('[aria-label="Handoff help"]').click();await pause();assert(document.querySelector('.info-popover').textContent.includes('the handoff'),'Handoff help popover is missing');assert(document.querySelector('.info-popover').textContent.includes('Agent:')&&document.querySelector('.info-popover').textContent.includes('Shell:')&&document.querySelector('.info-popover').textContent.includes('$CERBERUS_HANDOFF_REVIEW'),'Flag help missing Agent or Shell example');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause();assert(!document.querySelector('.info-popover')&&document.querySelector('.automation-dialog'),'Popover Escape closed the dialog');
  assert(document.querySelector('.automation-emits').getBoundingClientRect().top>=document.querySelector('.automation-output textarea').getBoundingClientRect().bottom-2,'Emit field is not below the prompt');
  outgoingName.focus();outgoingName.select();document.execCommand('insertText',false,'new-handoff');await pause();
  assert(document.querySelector('[aria-label="Outgoing handoff names"]').value==='new-handoff','The field rejected a new handoff name');

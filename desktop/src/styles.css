@@ -1059,3 +1059,5 @@ input[type="number"] { text-align: right; }
 .automation-handoff-parameter input { flex: 1; min-width: 0; }
 .automation-handoff-parameter p { margin: 0; }
 .automation-handoff-parameter code { overflow-wrap: anywhere; white-space: pre-wrap; }
+
+.info-popover pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
