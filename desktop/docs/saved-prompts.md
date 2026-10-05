@@ -121,3 +121,19 @@ printf '%s\n' '{"variables":{"v":true},"details":"Review passed"}' > "$CERBERUS_
 ```
 
 Both examples are included in the Emit handoffs info popover.
+
+### Conditional emission
+
+In **Emit handoffs**, enter `(review)` to mark review as conditional, or `summary, (review)` to combine normal and conditional names. Parentheses are saved and restored by the editor, but are stripped from actual handoff names, suggestions, pairing checks, and output paths. Do not list both `review` and `(review)`. Conditional emission is available for Agent and Shell actions.
+
+Agent prompt example: “Emit the review handoff only if you find issues; otherwise do not emit it.” The app supplies instructions and the exact output path, requiring the agent to leave the file absent when it chooses not to emit. Plain names request normal emission.
+
+Shell example, with `(review)` configured:
+
+```bash
+if [ "$needs_review" = true ]; then
+  printf '%s\n' 'Issues found' > "$CERBERUS_HANDOFF_REVIEW"
+fi
+```
+
+The app publishes only files actually written by the action; it never creates a payload for an omitted conditional emission. Empty files still emit, so leave the file absent to skip. A conditional payload can also include boolean flags using the JSON format above.

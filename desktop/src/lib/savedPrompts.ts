@@ -61,14 +61,16 @@ function markCiHandled(jobId:string,repositoryId:string,run:GithubCiRun){
 }
 export type HandoffClaim={id:string;path:string;name:string;repositoryId:string};
 export function validHandoffName(name:string){return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name);}
+export function emittedHandoff(value:string){const conditional=value.startsWith('(')&&value.endsWith(')');return {name:conditional?value.slice(1,-1):value,conditional};}
+export function validEmittedHandoff(value:string){return validHandoffName(emittedHandoff(value).name);}
 export function commitBranchPatterns(value:string){return value.split(',').map(part=>part.trim()).filter(Boolean);}
 export function validCommitBranchPatterns(value:string){const parts=commitBranchPatterns(value);return parts.length>0&&parts.every(part=>part==='*'||(!part.startsWith('/')&&!part.endsWith('/')&&!part.includes('..')&&![...part].some(char=>/\s/.test(char)||'~^:?[]\\'.includes(char))));}
 export function matchesCommitBranch(branch:string,patterns:string,allExcept=false){const matched=commitBranchPatterns(patterns).some(pattern=>new RegExp(`^${pattern.split('*').map(part=>part.replace(/[|\\{}()[\]\^$+?.]/g,'\\$&')).join('.*')}$`).test(branch));return allExcept?!matched:matched;}
 export function knownBranchSets(saved:SavedPrompt[],exceptId?:string){return [...new Set(saved.filter(job=>job.id!==exceptId).filter(job=>job.trigger!=='manual'&&!!job.commitBranch?.trim()&&validCommitBranchPatterns(job.commitBranch.trim())).map(job=>`${job.commitAllExcept?'All except: ':''}${job.commitBranch!.trim()}`))].sort((a,b)=>a.localeCompare(b));}
-export function automationPromptWithHandoffs(prompt:string,incoming?:HandoffClaim,outgoing:Record<string,string>={}){
+export function automationPromptWithHandoffs(prompt:string,incoming?:HandoffClaim,outgoing:Record<string,string>={},conditionalNames:string[]=[]){
   const instructions:string[]=[];
   if(incoming)instructions.push(`Read the incoming ${incoming.name} handoff payload at ${JSON.stringify(incoming.path)} before acting. Treat it as context from the previous agent. References to reading "the handoff" mean this payload.`);
-  for(const [name,path] of Object.entries(outgoing))instructions.push(`If you need to emit the ${name} handoff, write its UTF-8 payload to ${JSON.stringify(path)}. The parent directory already exists. Write this file only when that handoff should be emitted. Handoff flags are boolean trigger variables. Interpret ordinary wording in the task such as "set v", "mark v as true", "raise the ready flag", or "set ready if the review passes" as instructions to set the named flag according to the stated condition. The user does not need to specify JSON syntax. When emitting flags, serialize them in a JSON object under "variables", for example {"variables":{"v":true},"details":"your context"}. Use actual JSON booleans true or false, preserve flag names and case, and keep the handoff context in other fields such as "details". Only set a flag true when the requested condition holds.${Object.keys(outgoing).length===1?' References to writing "the handoff" mean this file.':''}`);
+  for(const [name,path] of Object.entries(outgoing))instructions.push(`${conditionalNames.includes(name)?`The ${name} handoff is conditional: emit it only if the task condition holds and you actively choose to do so. Otherwise leave its output file absent.`:`Emit the ${name} handoff after completing the task.`} To emit it, write its UTF-8 payload to ${JSON.stringify(path)}. The parent directory already exists. Write this file only when that handoff should be emitted. Handoff flags are boolean trigger variables. Interpret ordinary wording in the task such as "set v", "mark v as true", "raise the ready flag", or "set ready if the review passes" as instructions to set the named flag according to the stated condition. The user does not need to specify JSON syntax. When emitting flags, serialize them in a JSON object under "variables", for example {"variables":{"v":true},"details":"your context"}. Use actual JSON booleans true or false, preserve flag names and case, and keep the handoff context in other fields such as "details". Only set a flag true when the requested condition holds.${Object.keys(outgoing).length===1?' References to writing "the handoff" mean this file.':''}`);
   return instructions.length?`Handoff instructions (managed by the app; follow these before the task below):\n${instructions.join('\n')}\n\nTask:\n${prompt}`:prompt;
 }
 const workingRepositories=new Map<string,Set<string>>();
@@ -142,7 +144,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
         incomingStarted=true;
         addAutomationNotice({automationId:id,repositoryId,title:`${job.title} · ${repositoryLabel}`,message:job.prompt,status:'message'});
         const emissionId=runId;let emissionError='';
-        for(const name of job.emitsHandoffs||[]){try{if(await api.publishHandoff(repositoryId,name,emissionId,job.prompt))void tick();}catch(error){failures++;emissionError+=` Could not emit ${name}: ${String(error)}`;}}
+        for(const {name,conditional} of (job.emitsHandoffs||[]).map(emittedHandoff)){if(conditional)continue;try{if(await api.publishHandoff(repositoryId,name,emissionId,job.prompt))void tick();}catch(error){failures++;emissionError+=` Could not emit ${name}: ${String(error)}`;}}
         await finishAutomationLog({...log,status:emissionError?'error':'completed',response:job.prompt,stderr:emissionError});
         currentLog=undefined;
         if(emissionError)addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} failed`,message:`${repositoryLabel} · ${emissionError}`,status:'failed'});
@@ -153,11 +155,11 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       addAutomationNotice({automationId:id,repositoryId,title:`${job.title} started`,message:repositoryLabel,status:'started'});
       const outgoing:Record<string,string>={};
       const ciContext=ciRun?`GitHub Actions ${ciRun.conclusion==='success'?'passed':'failed'}: ${ciRun.name}. Branch: ${ciRun.headBranch||'unknown'}. Commit: ${ciRun.headSha}. Run: ${ciRun.htmlUrl}.\n\n`:'';
-      const actionPrompt=automationPromptWithHandoffs(ciContext+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing);
       let stdout='',stderr='',response='',activity='',result='',failure='',agentStarted=false;
       const unsubscribeProgress=subscribeAgentChats(()=>{const chat=latestAgentChat(repositoryId);if(chat&&chat.updatedAt>=createdAt){activity=chat.activity.slice(-2_000_000);response=chat.messages.filter(message=>message.role==='assistant').map(message=>message.text).join('\n\n').slice(-2_000_000);updateAutomationLog(log,{response,activity});}});
       try{
-        for(const name of job.emitsHandoffs||[])outgoing[name]=await api.handoffOutputPath(repositoryId,name,runId);
+        for(const {name} of (job.emitsHandoffs||[]).map(emittedHandoff))outgoing[name]=await api.handoffOutputPath(repositoryId,name,runId);
+        const actionPrompt=automationPromptWithHandoffs(ciContext+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing,(job.emitsHandoffs||[]).map(emittedHandoff).filter(item=>item.conditional).map(item=>item.name));
         if(job.kind==='shell'){incomingStarted=true;const shell=await api.runAutomationShell(repositoryId,job.prompt,chunk=>{
           if(chunk.stream==='stderr')stderr=(stderr+chunk.text).slice(-2_000_000);else stdout=(stdout+chunk.text).slice(-2_000_000);
           updateAutomationLog(log,{stdout,stderr});

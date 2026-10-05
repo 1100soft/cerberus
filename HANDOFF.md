@@ -437,3 +437,21 @@ popover explains Agent wording and Shell JSON output with a quoted output path.
 Documentation and fixtures updated. Production build and handoff scheduler
 fixture pass; automation UI fixture checks flag labels and both help examples.
 Changes remain uncommitted.
+
+## Conditional handoff emissions (2026-10-05)
+
+Emit handoffs accepts parentheses: summary, (review). Parenthesized names remain
+in saved settings/edit fields, but runtime paths, shell environment keys, name
+suggestions and pairing use undecorated names. Agents receive explicit optional
+emission instructions; absent files emit nothing. Shell scripts decide by
+writing inside an if condition. Empty payload files still emit. Duplicate names
+with different decoration are rejected; conditional names require Agent/Shell
+(not Notification, which emits automatically). Suggestions retain parentheses
+when completing a conditional name. Help includes Agent wording and Shell if
+commands, and docs explain lifecycle and syntax.
+
+Fixed an existing ordering bug: agent prompt augmentation now happens after
+outgoing paths are populated, ensuring instructions actually reach agents.
+Validation: production build, WebKit handoff scheduler (skip and active emission,
+undecorated paths, persistence, prompt instructions), and automation UI checks
+pass. Existing Vite chunk warning remains. Changes are uncommitted.

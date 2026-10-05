@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 
-type Props={value:string;onChange:(value:string)=>void;names:string[];multiple?:boolean;label:string;placeholder?:string;maxLength?:number;onChoose?:(value:string)=>void;showAllOnFocus?:boolean};
-export function SuggestedTextInput({value,onChange,names,multiple=false,label,placeholder,maxLength,showAllOnFocus=false,onChoose}:Props){
+type Props={value:string;onChange:(value:string)=>void;names:string[];multiple?:boolean;label:string;placeholder?:string;maxLength?:number;onChoose?:(value:string)=>void;showAllOnFocus?:boolean;conditional?:boolean};
+export function SuggestedTextInput({value,onChange,names,multiple=false,label,placeholder,maxLength,showAllOnFocus=false,onChoose,conditional=false}:Props){
   const input=useRef<HTMLInputElement>(null);
   const blurTimer=useRef<number|undefined>(undefined);
   const [open,setOpen]=useState(false);
@@ -9,10 +9,12 @@ export function SuggestedTextInput({value,onChange,names,multiple=false,label,pl
   const [filterOnInput,setFilterOnInput]=useState(false);
   const start=multiple?Math.max(value.lastIndexOf(','),value.lastIndexOf(' '),value.lastIndexOf('\n'))+1:0;
   const end=value.length;
-  const query=showAllOnFocus&&!filterOnInput?'':value.slice(start).trim().toLowerCase();
-  const selected=multiple?new Set(value.split(/[,\s]+/).map(name=>name.toLowerCase())):new Set<string>();
+  const token=value.slice(start).trim().toLowerCase();
+  const query=showAllOnFocus&&!filterOnInput?'':conditional?token.replace(/^\(|\)$/g,''):token;
+  const selected=multiple?new Set(value.split(/[,\s]+/).map(name=>conditional?name.toLowerCase().replace(/^\(|\)$/g,''):name.toLowerCase())):new Set<string>();
   const suggestions=names.filter(name=>name.toLowerCase().includes(query)&&(!multiple||!selected.has(name)||name===value.slice(start,end).trim().toLowerCase())).slice(0,12);
   const choose=(name:string)=>{
+    if(conditional&&value.slice(start).trim().startsWith('('))name=`(${name})`;
     if(multiple){const prefix=value.slice(0,start).replace(/\s+$/,'');const suffix=value.slice(end).replace(/^\s+/,'');const next=`${prefix}${prefix&&!prefix.endsWith(',')?', ':prefix?' ':''}${name}${suffix?`, ${suffix.replace(/^,\s*/,'')}`:''}`;onChange(next);requestAnimationFrame(()=>{input.current?.focus();input.current?.setSelectionRange(next.length,next.length);});}
     else (onChoose||onChange)(name);
     setOpen(false);

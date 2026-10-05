@@ -392,8 +392,8 @@ script = r"""
  assert(outgoingName.value==='correction','Outgoing handoff field rejected a new name');
  document.querySelector('[aria-label="Handoff help"]').click();await pause();assert(document.querySelector('.info-popover').textContent.includes('the handoff'),'Handoff help popover is missing');assert(document.querySelector('.info-popover').textContent.includes('Agent:')&&document.querySelector('.info-popover').textContent.includes('Shell:')&&document.querySelector('.info-popover').textContent.includes('$CERBERUS_HANDOFF_REVIEW'),'Flag help missing Agent or Shell example');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause();assert(!document.querySelector('.info-popover')&&document.querySelector('.automation-dialog'),'Popover Escape closed the dialog');
  assert(document.querySelector('.automation-emits').getBoundingClientRect().top>=document.querySelector('.automation-output textarea').getBoundingClientRect().bottom-2,'Emit field is not below the prompt');
- outgoingName.focus();outgoingName.select();document.execCommand('insertText',false,'new-handoff');await pause();
- assert(document.querySelector('[aria-label="Outgoing handoff names"]').value==='new-handoff','The field rejected a new handoff name');
+ outgoingName.focus();outgoingName.select();document.execCommand('insertText',false,'(new-handoff)');await pause();
+ assert(document.querySelector('[aria-label="Outgoing handoff names"]').value==='(new-handoff)','The field rejected a new handoff name');
  const promptModule=await import(promptPath);
  const noticeModule=await import(apiPath.replace('/lib/api.ts','/lib/automationNotifications.ts'));
  const targetId=jobs[0].repositoryIds[0];
