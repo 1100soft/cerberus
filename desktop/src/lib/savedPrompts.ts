@@ -15,8 +15,9 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
-export function automationConditions(job:SavedPrompt):Trigger[]{return job.conditions?.length&&job.conditions[0]===job.trigger?job.conditions:[job.trigger];}
+export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export function automationConditionSets(job:SavedPrompt):Trigger[][]{return job.conditionSets?.length?job.conditionSets:[job.conditions?.length&&job.conditions[0]===job.trigger?job.conditions:[job.trigger]];}
+export function automationConditions(job:SavedPrompt):Trigger[]{return [...new Set(automationConditionSets(job).flat())];}
 const exclusiveEvents=new Set<Trigger>(['commit','ciPass','ciFail']);
 export function conditionsCompatible(current:Trigger[],next:Trigger){return !current.includes(next)&&!(next==='manual'||current.includes('manual'))&&!(exclusiveEvents.has(next)&&current.some(item=>exclusiveEvents.has(item)));}
 const key='gitcerberus.savedPrompts.v1';
@@ -30,19 +31,22 @@ const commitChecks=new Map<string,Promise<void>>();
 const pendingCommits=new Map<string,{branch:string;sha:string}[]>();
 const pendingCi=new Map<string,{jobId:string;repositoryId:string;run:GithubCiRun}>();
 type ConditionEvent={at:number;branch?:string;sha?:string;ciRun?:GithubCiRun};
-const pendingConditionEvents=new Map<string,{jobId:string;repositoryId:string;events:Partial<Record<Trigger,ConditionEvent>>}>();
+const pendingConditionEvents=new Map<string,{jobId:string;repositoryId:string;setIndex:number;events:Partial<Record<Trigger,ConditionEvent>>}>();
 const githubEventKey='gitcerberus.automationGithubEvents.v1';
 const githubEventSeen:Record<string,string[]>=(()=>{try{return JSON.parse(localStorage.getItem(githubEventKey)||'{}');}catch{return {};}})();
 let checkingGithubEvents=false;
-function composite(job:SavedPrompt){const conditions=automationConditions(job);return !!job.conditions?.length&&(conditions.length>1||conditions.some(condition=>condition==='fileChange'||condition==='changeCount'||condition==='idleTime'||condition==='push'||condition==='pullRequest'));}
+function composite(job:SavedPrompt){const conditions=automationConditions(job);return !!job.conditionSets?.length||!!job.conditions?.length&&(conditions.length>1||conditions.some(condition=>condition==='fileChange'||condition==='changeCount'||condition==='idleTime'||condition==='push'||condition==='pullRequest'));}
 function scopedTo(job:SavedPrompt,repositoryId:string){return job.includeFutureRepositories?watchedRepositoryIds.has(repositoryId)||!inTauri():(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repositoryId);}
 export function recordConditionEvent(repositoryId:string,condition:Trigger,at=Date.now(),details:Omit<ConditionEvent,'at'>={}){
   for(const job of jobs){
     if(!job.enabled||!composite(job)||!automationConditions(job).includes(condition)||!scopedTo(job,repositoryId))continue;
     if(details.branch&&!matchesCommitBranch(details.branch,job.commitBranch||'*',job.commitAllExcept))continue;
-    const key=`${job.id}:${repositoryId}`,pending=pendingConditionEvents.get(key)||{jobId:job.id,repositoryId,events:{}};
-    pending.events[condition]={at,...details};pendingConditionEvents.set(key,pending);
-    if(condition!=='idleTime'&&automationConditions(job).includes('idleTime'))pending.events.idleTime={at};
+    automationConditionSets(job).forEach((conditions,setIndex)=>{
+      if(!conditions.includes(condition))return;
+      const key=`${job.id}:${repositoryId}:${setIndex}`,pending=pendingConditionEvents.get(key)||{jobId:job.id,repositoryId,setIndex,events:{}};
+      pending.events[condition]={at,...details};pendingConditionEvents.set(key,pending);
+      if(condition!=='idleTime'&&conditions.includes('idleTime'))pending.events.idleTime={at};
+    });
   }
   void tick();
 }
@@ -107,7 +111,7 @@ async function repositoryAgentBusy(repositoryId:string){
   return status.every(item=>item.status==='fulfilled')?false:repositoryHistoryWorking(repositoryId);
 }
 
-export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string):Promise<void>{
+export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string,matchedConditions?:Trigger[]):Promise<void>{
   const job=jobs.find(item=>item.id===id);if(!job||job.handoffOnly||running.has(id)||job.state==='running'){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
   if(!manual&&!job.enabled){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
   running.add(id);
@@ -164,7 +168,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
           if(chunk.stream==='stderr')stderr=(stderr+chunk.text).slice(-2_000_000);else stdout=(stdout+chunk.text).slice(-2_000_000);
           updateAutomationLog(log,{stdout,stderr});
           appendAutomationOutput(id,{repositoryId,stream:chunk.stream==='stderr'?'stderr':'stdout',text:chunk.text});
-        },incoming?.repositoryId===repositoryId?incoming.path:undefined,outgoing,{CERBERUS_REPOSITORY_ID:repositoryId,CERBERUS_REPOSITORY_NAME:repositoryLabel,CERBERUS_AUTOMATION_ID:id,CERBERUS_AUTOMATION_NAME:job.title,CERBERUS_RUN_ID:runId,CERBERUS_CONDITIONS:manual?'manual':automationConditions(job).join(','),CERBERUS_BRANCH:eventBranch||ciRun?.headBranch||'',CERBERUS_COMMIT_SHA:eventSha||ciRun?.headSha||'',CERBERUS_CI_RUN_URL:ciRun?.htmlUrl||'',CERBERUS_CI_CONCLUSION:ciRun?.conclusion||''});result=shell.result;stdout=shell.stdout||shell.result;stderr=shell.stderr;}
+        },incoming?.repositoryId===repositoryId?incoming.path:undefined,outgoing,{CERBERUS_REPOSITORY_ID:repositoryId,CERBERUS_REPOSITORY_NAME:repositoryLabel,CERBERUS_AUTOMATION_ID:id,CERBERUS_AUTOMATION_NAME:job.title,CERBERUS_RUN_ID:runId,CERBERUS_CONDITIONS:manual?'manual':(matchedConditions||automationConditions(job)).join(','),CERBERUS_BRANCH:eventBranch||ciRun?.headBranch||'',CERBERUS_COMMIT_SHA:eventSha||ciRun?.headSha||'',CERBERUS_CI_RUN_URL:ciRun?.htmlUrl||'',CERBERUS_CI_CONCLUSION:ciRun?.conclusion||''});result=shell.result;stdout=shell.stdout||shell.result;stderr=shell.stderr;}
         else if(job.kind==='git'){
           if(!job.gitAction)throw new Error('Choose a Git action.');
           incomingStarted=true;
@@ -256,7 +260,7 @@ async function tick(now=Date.now()){
       if(conditions.includes('handoff')&&validHandoffName(job.handoffName||'')){
         const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
         for(const repositoryId of targets){
-          if(pendingConditionEvents.get(`${job.id}:${repositoryId}`)?.events.handoff)continue;
+          if([...pendingConditionEvents.values()].some(pending=>pending.jobId===job.id&&pending.repositoryId===repositoryId&&pending.events.handoff))continue;
           try{if(await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))recordConditionEvent(repositoryId,'handoff',now);}catch(error){console.warn('Could not inspect handoff:',error);}
         }
       }
@@ -267,6 +271,8 @@ async function tick(now=Date.now()){
       }
       for(const [key,pending] of pendingConditionEvents){
         if(pending.jobId!==job.id)continue;
+        const conditions=automationConditionSets(job)[pending.setIndex];
+        if(!conditions||conditions.includes('manual'))continue;
         const latest=Math.max(...Object.values(pending.events).map(event=>event?.at||0));
         if(conditions.includes('idleTime')&&(!pending.events.idleTime||now-latest<Math.max(1,job.debounceSeconds||300)*1000))continue;
         if(conditions.some(condition=>condition!=='handoff'&&!pending.events[condition]))continue;
@@ -283,10 +289,10 @@ async function tick(now=Date.now()){
           catch(error){console.warn('Could not claim handoff:',error);continue;}
         }
         const event=Object.values(pending.events).find(item=>item?.ciRun)?.ciRun;
-        pendingConditionEvents.delete(key);
+        for(const [pendingKey,item] of pendingConditionEvents)if(item.jobId===job.id&&item.repositoryId===pending.repositoryId)pendingConditionEvents.delete(pendingKey);
         if(conditions.includes('changeCount')){try{const summary=await api.repositoryChangeSummary(pending.repositoryId);lastTriggeredCounts.set(`${job.id}:${pending.repositoryId}`,{head:summary.head,count:summary.changedLines});}catch{/* Retry from the last known count on the next change. */}}
         if(event)try{markCiHandled(job.id,pending.repositoryId,event);}catch(error){console.warn('Could not save handled CI run:',error);if(claim)await api.releaseHandoff(claim.repositoryId,claim.name,claim.id);continue;}
-        void runSavedPrompt(job.id,false,pending.repositoryId,claim,event,Object.values(pending.events).find(item=>item?.branch)?.branch,Object.values(pending.events).find(item=>item?.sha)?.sha);
+        void runSavedPrompt(job.id,false,pending.repositoryId,claim,event,Object.values(pending.events).find(item=>item?.branch)?.branch,Object.values(pending.events).find(item=>item?.sha)?.sha,conditions);
         break;
       }
     }
@@ -316,9 +322,10 @@ export function checkSavedPromptSchedule(now?:number){return tick(now);}
 export function recordAutomationCiRuns(repositoryId:string,runs:GithubCiRun[]){
   const eligible=jobs.filter(job=>job.enabled&&automationConditions(job).some(condition=>condition==='ciPass'||condition==='ciFail')&&(job.includeFutureRepositories?true:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repositoryId)));
   for(const job of eligible){
-    const condition=automationConditions(job).includes('ciPass')?'ciPass':'ciFail';
+    const ciConditions=automationConditions(job).filter((condition):condition is 'ciPass'|'ciFail'=>condition==='ciPass'||condition==='ciFail');
     for(const run of [...runs].reverse()){
-      if(!matchesCiConclusion(condition,run.conclusion)||!ciCompletedSince(run,job.ciSince)||!matchesCommitBranch(run.headBranch||'',job.commitBranch||'*',job.commitAllExcept))continue;
+      const condition=ciConditions.find(condition=>matchesCiConclusion(condition,run.conclusion));
+      if(!condition||!ciCompletedSince(run,job.ciSince)||!matchesCommitBranch(run.headBranch||'',job.commitBranch||'*',job.commitAllExcept))continue;
       const runKey=ciRunKey(run),key=`${job.id}:${repositoryId}:${runKey}`;
       if(ciHandled[`${job.id}:${repositoryId}`]?.includes(runKey)||pendingCi.has(key))continue;
       if(composite(job))recordConditionEvent(repositoryId,condition,Date.parse(run.updatedAt),{branch:run.headBranch||undefined,sha:run.headSha,ciRun:run});

@@ -455,3 +455,29 @@ outgoing paths are populated, ensuring instructions actually reach agents.
 Validation: production build, WebKit handoff scheduler (skip and active emission,
 undecorated paths, persistence, prompt instructions), and automation UI checks
 pass. Existing Vite chunk warning remains. Changes are uncommitted.
+
+## OR condition sets (2026-10-05)
+
+SavedPrompt.conditionSets stores arrays of AND conditions; rows are combined in
+OR. Legacy conditions remain a single set. automationConditions returns the
+union for monitoring subscriptions; automationConditionSets returns rows for
+evaluation. Pending events are keyed by job/repository/set and cannot satisfy
+other rows. A match clears all pending rows for that job/repository to prevent
+double runs. CI dispatch now handles both pass and fail alternatives. Shell
+CERBERUS_CONDITIONS reports the matched set. Branch/repository scope and repeated
+condition parameters remain shared, explicitly explained in editor/docs.
+
+Editor provides colored rows, OR labels, AND separators, per-row adding/removing,
+and an inline Add condition set button. Empty rows block saving; Manual remains
+exclusive. Clicking an alternative parameter chip promotes that row into the
+primary editing position; colors/order follow the displayed rows.
+
+Validation: build, WebKit scheduler (separate partial matches, either OR row,
+clear-after-run, CI pass/fail alternatives), automation UI (rows, different
+colors, selectors at 100/140/150%, existing compact layouts), and card/branch
+removal fixture pass. Existing Vite chunk and WebKit child allocator diagnostics
+remain. During validation styles.css contained component source instead of CSS;
+restored committed CSS plus prior copy/notification/branch/flag styles and new
+row styles. Card fixture confirms prior copy/branch behavior. InfoPopover now
+uses clamped top placement to stay in the zoomed viewport. All changes remain
+uncommitted, no push or live automation run.

@@ -137,3 +137,20 @@ fi
 ```
 
 The app publishes only files actually written by the action; it never creates a payload for an omitted conditional emission. Empty files still emit, so leave the file absent to skip. A conditional payload can also include boolean flags using the JSON format above.
+
+## Alternative condition sets
+
+**Add condition set (OR)** adds another colored row. Every condition in a row
+must match (AND); any complete row can run the automation (OR). For example,
+`On commit AND On push` OR `On pull request AND On file change`. Pending events
+are tracked separately per set and repository. A successful match clears the
+repository's pending events for all sets, preventing another row from replaying
+the same match. Existing single-set automations retain their behavior.
+
+Repository and branch scope apply to every row. Settings for repeated condition
+types (interval duration, changed-line threshold, handoff name/flags, idle time)
+are shared across rows, as indicated in the editor. Clicking a condition in an
+alternative row moves that row into the primary editing position. Manual is
+exclusive and cannot be combined with alternative sets. Empty sets must be
+filled or removed before saving. Saved `conditionSets` stores the ordered arrays
+of conditions; older `conditions` records remain supported.

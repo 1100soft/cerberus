@@ -88,6 +88,18 @@ script = r"""
  module.savePrompt({...module.savedPrompts().find(item=>item.id==='conditional-producer'),prompt:'emit review'});
  await module.runSavedPrompt('conditional-producer',true,'1');
  assert(pending.some(item=>item.name==='review'&&item.id!=='false'),'Chosen conditional shell did not emit');
+ for(const job of module.savedPrompts())module.disableAutomation(job.id);
+ module.savePrompt({...base,id:'sets-fixture',title:'OR sets',kind:'notification',prompt:'Matched sets',trigger:'commit',conditions:['commit','push'],conditionSets:[['commit','push'],['pullRequest','fileChange']],enabled:true});
+ let setRuns=0;api.publishHandoff=async()=>false;
+ const originalLog=api.writeAutomationLog;api.writeAutomationLog=async log=>{if(log.automationId==='sets-fixture'&&log.status==='completed')setRuns++;return originalLog(log);};
+ module.recordConditionEvent('1','commit');module.recordConditionEvent('1','pullRequest');await module.checkSavedPromptSchedule();await pause();
+ assert(setRuns===0,'Partial conditions crossed OR rows');
+ module.recordConditionEvent('1','push');await module.checkSavedPromptSchedule();await wait(()=>setRuns===1);
+ module.recordConditionEvent('1','fileChange');await module.checkSavedPromptSchedule();await pause();assert(setRuns===1,'Other row reused events after an OR run');
+ module.recordConditionEvent('1','pullRequest');await module.checkSavedPromptSchedule();await wait(()=>setRuns===2);
+ assert(module.automationConditionSets(module.savedPrompts().find(job=>job.id==='sets-fixture')).length===2,'Condition sets lost in persistence');
+ module.savePrompt({...module.savedPrompts().find(job=>job.id==='sets-fixture'),trigger:'ciPass',conditions:['ciPass'],conditionSets:[['ciPass'],['ciFail']],ciSince:0,state:undefined});
+ for(const [id,conclusion] of [[901,'success'],[902,'failure']]){module.recordAutomationCiRuns('1',[{id,status:'completed',conclusion,headBranch:'main',headSha:'sha-'+id,updatedAt:new Date().toISOString(),htmlUrl:'https://example.test/'+id,name:'Fixture CI'}]);await wait(()=>setRuns===id-898);}
  window.__handoffCheck={passed:true,claims,finishes,calls:calls.length};
 })().catch(error=>window.__handoffCheck={passed:false,error:String(error)});
 """

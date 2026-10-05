@@ -58,7 +58,7 @@ script = r"""
  enterText(document.querySelector('[aria-label="Prompt to save"]'),'agent text');await pause();
  document.querySelector('.automation-type button:nth-child(2)').click();await pause();
  assert(document.querySelector('[aria-label="Shell command or script"]').value==='','Shell inherited agent text');enterText(document.querySelector('[aria-label="Shell command or script"]'),'shell text');await pause();
- for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);document.querySelector('[aria-label="Shell context help"]').click();await pause();const help=document.querySelector('.info-popover'),r=help.getBoundingClientRect();assert(r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1,'Context popover exceeds viewport');assert(help.textContent.includes('CERBERUS_BRANCH'),'Shell context help missing');document.querySelector('[aria-label="Shell context help"]').click();await pause();}
+ for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);document.querySelector('[aria-label="Shell context help"]').click();await pause();const help=document.querySelector('.info-popover'),r=help.getBoundingClientRect();assert(r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1,'Context popover exceeds viewport '+JSON.stringify({zoom,left:r.left,right:r.right,top:r.top,bottom:r.bottom,w:innerWidth,h:innerHeight,bodyZoom:getComputedStyle(document.body).zoom,style:help.getAttribute('style'),position:getComputedStyle(help).position}));assert(help.textContent.includes('CERBERUS_BRANCH'),'Shell context help missing');document.querySelector('[aria-label="Shell context help"]').click();await pause();}
  document.documentElement.style.setProperty('--ui-zoom',1);
  document.querySelector('.automation-type button:nth-child(3)').click();await pause();assert(document.querySelector('[aria-label="Notification message"]').value==='','Notification inherited shell text');enterText(document.querySelector('[aria-label="Notification message"]'),'notice text');await pause();
  document.querySelector('.automation-type button:nth-child(1)').click();await pause();assert(document.querySelector('[aria-label="Prompt to save"]').value==='agent text','Agent text not preserved');
@@ -79,6 +79,17 @@ script = r"""
  const intervalInput=document.querySelector('[aria-label="Interval minutes"]');
  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(intervalInput,'30');intervalInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  assert(document.querySelector('.automation-condition-chip').textContent.includes('30 min'),'Chip did not update after editing the interval');
+ document.querySelector('.automation-condition-dialog footer button').click();await pause();
+ document.querySelector('.automation-add-set').click();await pause();
+ assert(document.querySelector('.automation-alternative-set'),'Missing OR condition row');
+ document.querySelector('[aria-label="Add condition to set 2"]').click();await pause();
+ [...document.querySelectorAll('[role="option"]')].find(node=>node.dataset.value==='fileChange').click();await pause();
+ assert(document.querySelector('.automation-alternative-set').textContent.includes('On file change'),'Alternative set did not retain condition');
+ assert(getComputedStyle(document.querySelector('.automation-alternative-set')).borderLeftColor!==getComputedStyle(document.querySelector('.automation-conditions')).borderLeftColor,'Condition rows share a color');
+ for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',String(zoom));await pause();document.querySelector('[aria-label="Add condition to set 2"]').click();await pause();assert(document.querySelector('[role="option"]'),'OR row selector not usable at zoom '+zoom);document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();}
+ document.documentElement.style.setProperty('--ui-zoom','1');document.querySelector('[aria-label="Remove condition set 2"]').click();await pause();
+ document.querySelector('.automation-condition-chip .automation-condition-edit').click();await pause();
+
  assert(document.querySelector('.automation-branch > strong')?.textContent==='Branch','Branch selector has no visible label');
  document.querySelector('.automation-condition-dialog').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
  assert(!document.querySelector('.automation-condition-dialog')&&!document.querySelector('.automation-dialog[inert]'),'Escape did not restore the main form');
