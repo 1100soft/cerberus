@@ -33,8 +33,82 @@ script = r"""
  const apiPath=cacheModule.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];
  const {api}=await import(apiPath);
  const repos=await api.repositories();assert(repos.find(repo=>repo.id===sourceId).manualOrder===1,'Saved repository order did not update');
- const savedPath=apiPath.replace('/lib/api.ts','/lib/savedPrompts.ts');
- const {savePrompt,savedPrompts}=await import(savedPath);
+ const originalBranches=api.branches,originalHistory=api.history;
+ let branchNames=['main'],historyBranch='';
+ api.branches=async()=>branchNames;
+ api.history=async(_,branch)=>{historyBranch=branch||'';return [];};
+ document.querySelector('.repo-row.repo-local:not([data-repository-id="'+sourceId+'"])').click();await pause();
+ const nativeSetInterval=window.setInterval;let pollBranches;
+ window.setInterval=(callback,delay,...args)=>{if(delay===15000)pollBranches=callback;return nativeSetInterval(callback,delay,...args);};
+ document.querySelector('.repo-row.repo-local[data-repository-id="'+sourceId+'"]').click();
+ await wait(()=>document.querySelector('.history-tabs [role="tab"]')?.textContent.includes('main'));
+ branchNames=['main','private/agent-work'];window.dispatchEvent(new Event('focus'));
+ const privateBranch=await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.textContent==='private/agent-work'));
+ privateBranch.click();await wait(()=>historyBranch==='private/agent-work');
+ assert(pollBranches,'Branch list has no independent polling fallback');
+ branchNames=['main','private/agent-work','private/second-worktree'];pollBranches();
+ await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.textContent==='private/second-worktree'));
+ window.setInterval=nativeSetInterval;
+ const originalPlan=api.branchRemovalPlan,originalRemove=api.removeBranch;
+ const plan={branch:'private/agent-work',head:'a'.repeat(40),merged:true,worktrees:['/tmp/linked tree'],remote:'origin',remoteHead:'a'.repeat(40)};
+ let removalCalls=0;
+ api.branchRemovalPlan=async(repo,branch)=>{assert(repo===sourceId&&branch===plan.branch,'Removal plan used another branch or repository');return plan;};
+ api.removeBranch=async(repo,confirmed)=>{assert(repo===sourceId&&confirmed.head===plan.head,'Confirmation lost the inspected branch tip');removalCalls++;branchNames=branchNames.filter(name=>name!==confirmed.branch);return {completed:true,steps:['Removed worktree: /tmp/linked tree','Deleted local branch: '+confirmed.branch,'Deleted remote branch: origin/'+confirmed.branch],error:null};};
+ for(const zoom of [1,1.4,1.5]){
+   document.documentElement.style.setProperty('--ui-zoom',zoom);
+   document.querySelector('[aria-label="Remove selected branch"]').click();
+   const dialog=await wait(()=>document.querySelector('[aria-label="Remove branch"]'));
+   await wait(()=>dialog.textContent.includes('/tmp/linked tree'));
+   assert(removalCalls===0,'Inspecting a removal mutated the branch');
+   const bounds=dialog.getBoundingClientRect();assert(bounds.left>=-1&&bounds.right<=innerWidth+1&&bounds.top>=-1&&bounds.bottom<=innerHeight+1,'Removal dialog exceeds viewport at '+zoom);
+   assert(dialog.textContent.includes('origin/private/agent-work'),'Confirmation omitted remote deletion');
+   dialog.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await pause();
+   assert(!document.querySelector('[aria-label="Remove branch"]'),'Escape did not cancel confirmation');
+ }
+ document.documentElement.style.setProperty('--ui-zoom',1);
+ document.querySelector('[aria-label="Remove selected branch"]').click();
+ await wait(()=>document.querySelector('.branch-removal-dialog footer button:last-child')?.textContent==='Remove branch');
+ document.querySelector('.branch-removal-dialog footer button:last-child').click();
+ await wait(()=>document.querySelector('.branch-removal-dialog').textContent.includes('Branch removal completed'));
+ assert(removalCalls===1,'Confirmation ran removal more than once');
+ await wait(()=>![...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.textContent===plan.branch));
+ assert(document.querySelector('.history-tabs [aria-selected="true"]').textContent==='main','History retained the removed branch selection');
+ document.querySelector('[aria-label="Close branch removal"]').click();await pause();
+ assert(document.querySelector('[aria-label="Remove selected branch"]').disabled,'Current checkout branch removal was enabled');
+ const remainingBranch=[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.textContent==='private/second-worktree');remainingBranch.click();await pause();
+ api.branchRemovalPlan=async()=>{throw Error('Branch is unmerged');};
+ document.querySelector('[aria-label="Remove selected branch"]').click();
+ await wait(()=>document.querySelector('.branch-removal-dialog [role="alert"]')?.textContent.includes('unmerged'));
+ assert(![...document.querySelectorAll('.branch-removal-dialog footer button')].some(button=>button.textContent==='Remove branch'),'Failed preflight still offered deletion');
+ document.querySelector('[aria-label="Close branch removal"]').click();await pause();
+ api.branchRemovalPlan=async()=>({...plan,branch:'private/second-worktree',merged:false,worktrees:[]});
+ document.documentElement.style.setProperty('--ui-zoom',1.5);
+ let forcedHead;
+ api.removeBranch=async(repo,confirmed,head)=>{forcedHead=head;return {completed:true,steps:['Force-deleted local branch: '+confirmed.branch],error:null};};
+ document.querySelector('[aria-label="Remove selected branch"]').click();
+ await wait(()=>document.querySelector('.branch-removal-dialog footer button:last-child')?.textContent==='Continue to forced deletion');
+ assert(document.querySelector('.branch-removal-dialog [role="alert"]').textContent.includes('unmerged'),'Unmerged branch warning missing');
+ document.querySelector('.branch-removal-dialog footer button:last-child').click();await pause();
+ assert(!forcedHead,'Initial unmerged confirmation forced deletion immediately');
+ const forceButton=document.querySelector('.branch-removal-dialog footer button:last-child');
+ assert(forceButton.textContent==='Force delete branch'&&forceButton.disabled,'Second confirmation did not require acknowledgement');
+ const forcedBounds=document.querySelector('.branch-removal-dialog').getBoundingClientRect();assert(forcedBounds.left>=-1&&forcedBounds.right<=innerWidth+1&&forcedBounds.top>=-1&&forcedBounds.bottom<=innerHeight+1,'Forced confirmation exceeds viewport at 150%');
+ document.querySelector('[aria-label="Confirm unmerged branch deletion"]').click();await pause();forceButton.click();
+ await wait(()=>document.querySelector('.branch-removal-dialog').textContent.includes('Branch removal completed'));
+ assert(forcedHead===plan.head,'Forced confirmation was not bound to the inspected commit');
+ document.documentElement.style.setProperty('--ui-zoom',1);
+ document.querySelector('[aria-label="Close branch removal"]').click();await pause();
+ api.branchRemovalPlan=async()=>({...plan,branch:'private/second-worktree',worktrees:[]});
+ api.removeBranch=async()=>{branchNames=['main'];return {completed:false,steps:['Deleted local branch: private/second-worktree'],error:'Remote deletion refused'};};
+ document.querySelector('[aria-label="Remove selected branch"]').click();await wait(()=>document.querySelector('.branch-removal-dialog footer button:last-child')?.textContent==='Remove branch');
+ document.querySelector('.branch-removal-dialog footer button:last-child').click();await wait(()=>document.querySelector('.branch-removal-dialog [role="alert"]')?.textContent.includes('Remote deletion refused'));
+ assert(document.querySelector('.branch-removal-dialog').textContent.includes('Deleted local branch'),'Partial failure hid the completed operation');
+ document.querySelector('[aria-label="Close branch removal"]').click();await pause();
+ api.branchRemovalPlan=originalPlan;api.removeBranch=originalRemove;api.branches=originalBranches;api.history=originalHistory;
+
+
+ const panelSource=await (await fetch('/src/components/SavedPromptsPanel.tsx')).text();const savedPath=panelSource.match(/from "([^"\n]*\/savedPrompts\.ts[^"\n]*)"/)[1];
+ const {savePrompt,savedPrompts,removePrompt}=await import(savedPath);
  for(const [index,id] of ['drag-one','drag-two'].entries())savePrompt({id,repositoryId:'',repositoryIds:[],provider:'codex',threadId:'',title:'Drag fixture '+index,prompt:'true',trigger:'manual',minutes:60,enabled:false,nextAt:0,editor:'vscode',kind:'shell'});
  document.querySelector('[aria-label="Toggle navigation"]').click();
  (await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Automation')))).click();
@@ -46,6 +120,20 @@ script = r"""
  assert(automationCards[1].classList.contains('card-drop-after'),'Automation drop indicator is missing');
  automationCards[1].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:cardTransfer,clientY:cardBox.bottom-2}));
  assert(savedPrompts().findIndex(job=>job.id==='drag-one')>savedPrompts().findIndex(job=>job.id==='drag-two'),'Automation order was not saved');
+ const originalHeight=automationCards[0].getBoundingClientRect().height;
+ for(let index=0;index<30;index++)savePrompt({...savedPrompts().find(job=>job.id==='drag-one'),id:'overflow-'+index,title:'Long automation title '+index+' with enough words to wrap and remain fully visible at larger application zoom'});
+ await pause();
+ for(const zoom of [1,1.4,1.5]){
+   document.documentElement.style.setProperty('--ui-zoom',String(zoom));await pause();
+   const list=document.querySelector('.saved-prompt-list'),cards=[...list.querySelectorAll('article')];
+   assert(list.scrollHeight>list.clientHeight&&getComputedStyle(list).overflowY==='auto','Automation list does not scroll at '+zoom);
+   assert(automationCards[0].getBoundingClientRect().height>=originalHeight-1,'Automation card shrank when the list overflowed');
+   assert(cards.every(card=>card.scrollHeight<=card.clientHeight+2),'Automation card clips its content');
+   list.scrollTop=list.scrollHeight;await pause();assert(list.scrollTop>0,'Automation list cannot scroll to later cards');
+ }
+ document.documentElement.style.setProperty('--ui-zoom','1');
+ for(let index=0;index<30;index++)removePrompt('overflow-'+index);await pause();
+
 
  (await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Identities')))).click();
  const identityCards=await wait(()=>{const cards=[...document.querySelectorAll('.identity-card')];return cards.length>=2?cards:null;});

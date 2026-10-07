@@ -198,26 +198,14 @@ pub fn complete(
     identity_from_token(db, &access_token).map(Some)
 }
 
-fn github_entry(id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new("dev.gitcerberus.app", &format!("github:{id}"))
-        .map_err(|e| format!("Could not open the GitHub credential entry: {e}"))
-}
-
 pub fn github_connected(id: &str) -> bool {
-    github_entry(id)
-        .and_then(|entry| entry.get_password().map_err(|e| e.to_string()))
-        .is_ok()
+    crate::github_credentials::token(id).is_ok()
 }
 pub fn github_token(id: &str) -> Result<String,String> {
-    github_entry(id)?.get_password().map_err(|e| format!("GitHub token unavailable: {e}"))
+    crate::github_credentials::token(id)
 }
-
 pub fn disconnect_github_identity(id: &str) -> Result<(), String> {
-    let entry = github_entry(id)?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(format!("Could not remove the GitHub token from the system credential store: {error}")),
-    }
+    crate::github_credentials::disconnect(id)
 }
 
 pub fn identity_from_token(db: &Database, access_token: &str) -> Result<Identity, String> {
@@ -251,8 +239,6 @@ pub fn identity_from_token(db: &Database, access_token: &str) -> Result<Identity
         .ok_or("GitHub account has no accessible verified email")?;
     let name = user.name.as_deref().unwrap_or(&user.login);
     let identity = db.save_github_identity(&user.login, name, &email)?;
-    keyring::Entry::new("dev.gitcerberus.app", &format!("github:{}", identity.id))
-        .and_then(|entry| entry.set_password(access_token))
-        .map_err(|e| format!("Could not save GitHub token in the system credential store: {e}"))?;
+    crate::github_credentials::save(&identity.id, access_token)?;
     Ok(identity)
 }

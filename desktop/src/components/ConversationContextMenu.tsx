@@ -1,8 +1,9 @@
-import { Archive, ArchiveRestore, Copy, Share2, Pencil } from 'lucide-react';
+import { CopyButton } from './CopyButton';
+import { Archive, ArchiveRestore, Share2, Pencil } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 type Action = 'rename' | 'archive' | 'copy' | 'share';
-export function ConversationContextMenu({x,y,title,archived,canManage=true,onAction,onClose}:{x:number;y:number;title:string;archived:boolean;canManage?:boolean;onAction:(action:Action)=>void;onClose:()=>void}) {
+export function ConversationContextMenu({x,y,title,archived,canManage=true,getCopyText,onAction,onClose}:{x:number;y:number;title:string;archived:boolean;canManage?:boolean;getCopyText:()=>Promise<string>;onAction:(action:Action)=>void;onClose:()=>void}) {
   const menu=useRef<HTMLDivElement>(null);
   const [position,setPosition]=useState({left:x,top:y});
   useLayoutEffect(()=>{
@@ -31,6 +32,6 @@ export function ConversationContextMenu({x,y,title,archived,canManage=true,onAct
     {canManage && <button role="menuitem" onClick={()=>choose('archive')}>{archived?<ArchiveRestore/>:<Archive/>}{archived?'Unarchive':'Archive'}</button>}
     {canManage && <hr/>}
     <button role="menuitem" onClick={()=>choose('share')}><Share2/>Share</button>
-    <button role="menuitem" onClick={()=>choose('copy')}><Copy/>Copy conversation</button>
+    <CopyButton role="menuitem" label="Copy conversation" getText={getCopyText}/>
   </div>;
 }

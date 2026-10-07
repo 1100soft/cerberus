@@ -12,7 +12,7 @@ script = r"""
 (async()=>{
  window.__ciStage='mount';
  const pause=(ms=40)=>new Promise(resolve=>setTimeout(resolve,ms));
- const wait=async(get)=>{for(let i=0;i<150;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for CI automation');};
+ const wait=async(get)=>{for(let i=0;i<150;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for CI automation: '+document.querySelector('[aria-label="Add condition"]')?.outerHTML+' / dialogs '+document.querySelectorAll('[role="dialog"]').length);};
  const assert=(condition,message)=>{if(!condition)throw Error(message);};
  await wait(()=>document.querySelector('[aria-label="Toggle navigation"]'));
  window.__ciStage='open automation';
@@ -20,9 +20,10 @@ script = r"""
  (await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Automation')))).click();
  (await wait(()=>document.querySelector('.automation-list-header button'))).click();
  await wait(()=>document.querySelector('[aria-label="New automation"]'));
+ await wait(()=>document.activeElement===document.querySelector('.automation-type button'));
  window.__ciStage='condition options';
  document.querySelector('[aria-label="Add condition"]').click();await pause();
- const conditionOptions=[...document.querySelectorAll('[role="option"]')];
+ const conditionOptions=await wait(()=>{const options=[...document.querySelectorAll('[role="option"]')];return options.length?options:null;});
  assert(conditionOptions.some(node=>node.textContent==='When CI passes')&&conditionOptions.some(node=>node.textContent==='When CI fails'),'CI conditions are missing from the dialog');
  conditionOptions.find(node=>node.textContent==='When CI passes').click();await pause();
  assert(!document.querySelector('.automation-repositories').open,'Repository picker expanded by default');document.querySelector('.automation-repositories summary').click();await pause();assert(document.querySelector('.automation-repositories .automation-scope-note').textContent.includes('only where the event occurs'),'CI repository scope is unclear');

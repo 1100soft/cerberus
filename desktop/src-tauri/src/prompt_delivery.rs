@@ -37,8 +37,9 @@ impl SessionLock {
 }
 impl Drop for SessionLock {fn drop(&mut self){if let Some(active)=ACTIVE.get(){if let Ok(mut active)=active.lock(){active.remove(&self.0);}}}}
 
-fn drain(mut input:impl Read+Send+'static,limit:usize)->std::thread::JoinHandle<String>{
-    std::thread::spawn(move||{let mut retained=Vec::new();let mut buffer=[0u8;4096];while let Ok(size)=input.read(&mut buffer){if size==0{break;}let remaining=limit.saturating_sub(retained.len());retained.extend_from_slice(&buffer[..size.min(remaining)]);}String::from_utf8_lossy(&retained).trim().to_owned()})
+fn drain(mut input:impl Read+Send+'static,limit:usize,output:Option<tauri::ipc::Channel<Value>>,stream:&'static str)->std::thread::JoinHandle<String>{
+    std::thread::spawn(move||{let mut retained=Vec::new();let mut buffer=[0u8;4096];while let Ok(size)=input.read(&mut buffer){if size==0{break;}
+        if let Some(output)=&output{let _=output.send(json!({"stream":stream,"text":String::from_utf8_lossy(&buffer[..size])}));}let remaining=limit.saturating_sub(retained.len());retained.extend_from_slice(&buffer[..size.min(remaining)]);}String::from_utf8_lossy(&retained).trim().to_owned()})
 }
 
 fn response_text(value:&Value)->Option<&str>{
@@ -54,8 +55,8 @@ fn response_text(value:&Value)->Option<&str>{
     None
 }
 
-pub fn new_cli_conversation(root:&Path,repo:&Path,repository_key:&str,provider:&str,identity_id:&str,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>)->Result<Value,String>{
-    if !matches!(provider,"cursor"|"claude")||!matches!(mode,"analyze"|"edit") {return Err("Unsupported provider or permission mode".into());}
+pub fn new_cli_conversation(root:&Path,repo:&Path,repository_key:&str,provider:&str,identity_id:&str,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>,output:Option<tauri::ipc::Channel<Value>>)->Result<Value,String>{
+    if !matches!(provider,"cursor"|"claude")||!matches!(mode,"analyze"|"edit"|"full") {return Err("Unsupported provider or permission mode".into());}
     if prompt.trim().is_empty()||prompt.len()>100_000{return Err("Enter a prompt of at most 100,000 characters".into());}
     if session_id.is_some_and(|id|!valid_id(id)){return Err("Invalid session ID".into());}
     let assigned=assigned_cli_identity(root,provider,repository_key)?;
@@ -69,13 +70,13 @@ pub fn new_cli_conversation(root:&Path,repo:&Path,repository_key:&str,provider:&
         if mode=="analyze"{command.args(["--mode","ask"]);}else{command.arg("--force");}
         if let Some(id)=session_id{command.args(["--resume",id]);}
     }else{
-        command.args(["--print","--output-format","json","--permission-prompts","none","--permission-mode",if mode=="analyze"{"plan"}else{"acceptEdits"}]);
+        command.args(["--print","--output-format","json","--permission-prompts","none","--permission-mode",if mode=="analyze"{"plan"}else if mode=="full"{"bypassPermissions"}else{"acceptEdits"}]);
         if let Some(id)=session_id{command.args(["--resume",id]);}
     }
     command.arg(prompt);
     let mut child=command.spawn().map_err(|e|format!("Could not start {tool}: {e}"))?;
-    let stdout=drain(child.stdout.take().ok_or("Agent output unavailable")?,200_000);
-    let stderr=drain(child.stderr.take().ok_or("Agent diagnostic stream unavailable")?,2_000);
+    let stdout=drain(child.stdout.take().ok_or("Agent output unavailable")?,200_000,output.clone(),"stdout");
+    let stderr=drain(child.stderr.take().ok_or("Agent diagnostic stream unavailable")?,2_000,output,"stderr");
     let deadline=Instant::now()+Duration::from_secs(900);
     let status=loop{
         if cancelled.as_ref().is_some_and(|flag|flag.load(Ordering::SeqCst)){let _=child.kill();let _=child.wait();let _=stdout.join();let _=stderr.join();return Err("Draft stopped".into());}

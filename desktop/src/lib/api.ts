@@ -4,7 +4,7 @@ import type { CodexAccount, CodexThreadPage, CodexMessagePage, Commit, GithubCat
 import { identitiesWithRepositoryAccess } from "./repositories";
 
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
-export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git';status:'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string};
+export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string};
 export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'>;
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
@@ -21,6 +21,10 @@ let demoRepositories: Repository[] = [
   { id: "2", displayName: "field-notes", localPath: "/Users/alex/code/field-notes", canonicalRemote: "https://github.com/alex/field-notes.git", hostType: "github", defaultBranch: "main", branch: "feature/offline", detached: false, stagedCount: 0, modifiedCount: 0, untrackedCount: 0, ahead: 0, behind: 3, lastCommitSummary: "Cache notebooks for offline use", lastCommitAt: new Date(Date.now() - 3 * 3600000).toISOString(), identity: demoIdentities[1], identityMismatch: false, tags: ["personal", "mobile"], manualOrder: 1 },
   { id: "3", displayName: "infra-modules", localPath: "/Users/alex/work/infra-modules", canonicalRemote: "git@gitlab.com:northstar/infra-modules.git", hostType: "gitlab", defaultBranch: "main", branch: "main", detached: false, stagedCount: 0, modifiedCount: 1, untrackedCount: 2, ahead: 0, behind: 0, lastCommitSummary: "Pin provider versions", lastCommitAt: new Date(Date.now() - 86400000).toISOString(), identityMismatch: true, tags: ["infra"], manualOrder: 2 }
 ];
+
+export type BranchRemovalPlan={branch:string;head:string;merged:boolean;worktrees:string[];remote:string|null;remoteHead:string|null};
+export type BranchRemovalResult={completed:boolean;steps:string[];error:string|null};
+export type RepositoryCommitState={head:string;branch:string;reflog:string;refs?:{key:string;head:string;branch:string;reflog:string}[]};
 
 export const api = {
   async linkRepositoryFolder(expectedRemote: string, path: string, repositoryId?: string): Promise<ImportResult> {
@@ -59,9 +63,10 @@ export const api = {
     if (!inTauri()) throw new Error('Automatic delivery requires the desktop app.');
     return invoke('submit_saved_prompt',{repositoryId,provider,threadId,prompt});
   },
-  async runNewAgentConversation(repositoryId:string,provider:string,identityId:string,mode:string,prompt:string,sessionId?:string,requestId?:string):Promise<{text:string;sessionId?:string}>{
+  async runNewAgentConversation(repositoryId:string,provider:string,identityId:string,mode:string,prompt:string,sessionId?:string,requestId?:string,onOutput?:(event:Record<string,unknown>)=>void):Promise<{text:string;sessionId?:string}>{
     if (!inTauri()) throw new Error('Agent execution requires the desktop app.');
-    return invoke('run_new_agent_conversation',{repositoryId,provider,identityId,mode,prompt,sessionId:sessionId||null,requestId:requestId||null});
+    const output=new Channel<Record<string,unknown>>();output.onmessage=onOutput||(()=>{});
+    return invoke('run_new_agent_conversation',{repositoryId,provider,identityId,mode,prompt,sessionId:sessionId||null,requestId:requestId||null,output});
   },
   async cancelDraft(requestId:string):Promise<void>{
     if (!inTauri()) return;
@@ -89,11 +94,11 @@ export const api = {
     if (!inTauri()){const repo=demoRepositories.find(item=>item.id===repositoryId);return {head:repo?.lastCommitAt||'demo',branch:repo?.branch||'',reflog:'commit: demo',changedLines:await this.repositoryChangedLines(repositoryId)};}
     return invoke('repository_change_summary',{repositoryId});
   },
-  async repositoryCommitState(repositoryId:string):Promise<{head:string;branch:string;reflog:string}>{
+  async repositoryCommitState(repositoryId:string):Promise<RepositoryCommitState>{
     if(!inTauri()){const repo=demoRepositories.find(item=>item.id===repositoryId);return {head:repo?.lastCommitAt||'demo',branch:repo?.branch||'',reflog:'commit: demo'};}
     return invoke('repository_commit_state',{repositoryId});
   },
-  async repositoryCommitStatesBatch(repositoryIds:string[]):Promise<Record<string,{head:string;branch:string;reflog:string}>>{
+  async repositoryCommitStatesBatch(repositoryIds:string[]):Promise<Record<string,RepositoryCommitState>>{
     if(!inTauri())return Object.fromEntries(await Promise.all(repositoryIds.map(async id=>[id,await api.repositoryCommitState(id)] as const)));
     return invoke('repository_commit_states_batch',{repositoryIds});
   },
@@ -105,13 +110,13 @@ export const api = {
     if(!inTauri())return false;
     return invoke('publish_handoff',{repositoryId,name,runId,payload:payload??null});
   },
-  async hasPendingHandoff(repositoryId:string,name:string):Promise<boolean>{
-    if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>!item.claimed);
-    return invoke('has_pending_handoff',{repositoryId,name});
+  async hasPendingHandoff(repositoryId:string,name:string,variables:string[]=[]):Promise<boolean>{
+    if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>!item.claimed&&!variables.length);
+    return invoke('has_pending_handoff',{repositoryId,name,variables});
   },
-  async claimHandoff(repositoryId:string,name:string):Promise<{id:string;path:string}|null>{
-    if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
-    return invoke('claim_handoff',{repositoryId,name});
+  async claimHandoff(repositoryId:string,name:string,variables:string[]=[]):Promise<{id:string;path:string}|null>{
+    if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed&&!variables.length);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
+    return invoke('claim_handoff',{repositoryId,name,variables});
   },
   async finishHandoff(repositoryId:string,name:string,id:string):Promise<void>{
     if(!inTauri()){const key=`${repositoryId}:${name}`;demoHandoffs.set(key,(demoHandoffs.get(key)||[]).filter(item=>item.id!==id));return;}
@@ -207,6 +212,14 @@ export const api = {
     if (inTauri()) return invoke("list_branches", { repositoryId });
     const repo = demoRepositories.find((repo) => repo.id === repositoryId);
     return [...new Set([repo?.branch || "main", "main", "develop", "feature/offline"])];
+  },
+  async branchRemovalPlan(repositoryId:string,branch:string):Promise<BranchRemovalPlan>{
+    if(!inTauri())throw new Error('Branch removal requires the desktop app.');
+    return invoke('branch_removal_plan',{repositoryId,branch});
+  },
+  async removeBranch(repositoryId:string,plan:BranchRemovalPlan,confirmedUnmergedHead?:string):Promise<BranchRemovalResult>{
+    if(!inTauri())throw new Error('Branch removal requires the desktop app.');
+    return invoke('remove_branch',{repositoryId,plan,confirmedUnmergedHead:confirmedUnmergedHead||null});
   },
   async history(repositoryId: string, branch?: string, skip = 0): Promise<Commit[]> {
     if (inTauri()) return invoke("commit_history", { repositoryId, branch: branch ?? null, skip });

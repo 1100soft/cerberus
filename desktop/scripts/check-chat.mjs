@@ -3,12 +3,14 @@ import {readFile} from 'node:fs/promises';
 import ts from 'typescript';
 const dataModule = source => `data:text/javascript;base64,${Buffer.from(ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`;
 const stored = new Map();
+globalThis.window = Object.assign(new EventTarget(),{setTimeout,clearTimeout});
 globalThis.localStorage = {getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)};
 const calls = [];
 let complete;
 globalThis.__chatTestInvoke = (command,args) => { calls.push({command,args}); return command === 'run_agent' ? new Promise((resolve,reject) => complete = {resolve,reject}) : Promise.resolve(); };
 let source = await readFile(new URL('../src/lib/agentChats.ts',import.meta.url),'utf8');
-source = source.replace("'react'", JSON.stringify(dataModule('export const useSyncExternalStore = (_,snapshot) => snapshot();')))
+source = source.replace("'./api'", JSON.stringify(dataModule('export const api = {};')))
+ .replace("'react'", JSON.stringify(dataModule('export const useSyncExternalStore = (_,snapshot) => snapshot();')))
  .replace("'@tauri-apps/api/core'", JSON.stringify(dataModule('export class Channel {} export const invoke = (...args) => globalThis.__chatTestInvoke(...args);')))
  .replace("'./agentEdits'", JSON.stringify(dataModule(await readFile(new URL('../src/lib/agentEdits.ts',import.meta.url),'utf8'))))
  .replace("'./agentOutput'", JSON.stringify(dataModule(await readFile(new URL('../src/lib/agentOutput.ts',import.meta.url),'utf8'))));

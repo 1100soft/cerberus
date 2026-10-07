@@ -29,15 +29,16 @@ fn file(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Result<Pa
     Ok(folder(root,automation_id,repository_id)?.join(format!("{run_id}.json")))
 }
 pub fn write(root:&Path,entry:&Entry)->Result<(),String>{
-    if !matches!(entry.kind.as_str(),"shell"|"agent"|"git")||!matches!(entry.status.as_str(),"completed"|"error"){return Err("Invalid automation log type or status".into());}
+    if !matches!(entry.kind.as_str(),"shell"|"agent"|"git"|"notification")||!matches!(entry.status.as_str(),"running"|"completed"|"error"){return Err("Invalid automation log type or status".into());}
     let path=file(root,&entry.automation_id,&entry.repository_id,&entry.run_id)?;
     if [entry.command.len(),entry.stdout.len(),entry.stderr.len(),entry.response.len(),entry.activity.len()].iter().any(|size|*size>2_000_000){return Err("Automation log exceeds the 2 MB per field limit".into());}
     fs::create_dir_all(path.parent().ok_or("Invalid log path")?).map_err(|error|error.to_string())?;
     let bytes=serde_json::to_vec_pretty(entry).map_err(|error|error.to_string())?;
-    let mut options=fs::OpenOptions::new();options.write(true).create_new(true);
-    let mut output=options.open(path).map_err(|error|error.to_string())?;
+    let mut output=tempfile::NamedTempFile::new_in(path.parent().ok_or("Invalid log path")?).map_err(|error|error.to_string())?;
     use std::io::Write;output.write_all(&bytes).map_err(|error|error.to_string())?;
-    output.sync_all().map_err(|error|error.to_string())
+    output.as_file().sync_all().map_err(|error|error.to_string())?;
+    output.persist(path).map_err(|error|error.to_string())?;
+    Ok(())
 }
 pub fn list(root:&Path,automation_id:&str)->Result<Vec<Summary>,String>{
     if !valid(automation_id){return Err("Invalid automation identifier".into());}
@@ -72,6 +73,16 @@ pub fn read(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Resul
 }
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn running_entry_updates_in_place(){
+        let root=tempfile::tempdir().unwrap();
+        let mut entry=Entry{automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
+        write(root.path(),&entry).unwrap();assert_eq!(list(root.path(),"live").unwrap()[0].status,"running");
+        entry.activity="working".into();write(root.path(),&entry).unwrap();
+        assert_eq!(read(root.path(),"live","repo","run").unwrap().activity,"working");
+        entry.status="completed".into();entry.response="done".into();write(root.path(),&entry).unwrap();
+        assert_eq!(list(root.path(),"live").unwrap().len(),1);
+        assert_eq!(read(root.path(),"live","repo","run").unwrap().response,"done");
+    }
     #[test]fn entries_are_scoped_to_automation_and_repository(){
         let root=tempfile::tempdir().unwrap();
         let entry=Entry{automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};

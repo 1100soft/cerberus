@@ -26,6 +26,8 @@ mod setup_terminal;
 mod db;
 mod git;
 mod github;
+mod github_credentials;
+mod branch_removal;
 mod models;
 mod oauth;
 
@@ -185,13 +187,16 @@ async fn chatgpt_capabilities(profile_id:String,state:State<'_,AppState>)->Resul
  tauri::async_runtime::spawn_blocking(move||{
   let profile=agents.profiles(&root)?.into_iter().find(|p|p.id==profile_id && p.subscription && !p.disconnected).ok_or("Connect this ChatGPT identity first")?;
   let client=codex::CodexService::for_account(root.join("codex-executable.txt"),chatgpt_accounts::account_home(&root,&profile.id)?);
-  let account=client.request("account/read",serde_json::json!({"refreshToken":false}))?;
-  if account["account"]["type"]!="chatgpt" || profile.email.as_deref().is_some_and(|email|account["account"]["email"].as_str()!=Some(email)){return Err("Reconnect the assigned ChatGPT account".into());}
-  let mut models=Vec::new();let mut cursor:Option<String>=None;let mut seen=std::collections::HashSet::new();
-  loop {let page=client.request("model/list",serde_json::json!({"limit":100,"cursor":cursor,"includeHidden":false}))?;if let Some(data)=page["data"].as_array(){models.extend(data.clone());}cursor=page["nextCursor"].as_str().map(String::from);match &cursor{Some(value) if seen.insert(value.clone())=>{},_=>break}}
-  let usage=client.request("account/rateLimits/read",serde_json::json!({}));
-  Ok(serde_json::json!({"models":models,"usage":usage.as_ref().ok(),"usageError":usage.err()}))
+  codex_capabilities(|method,params|client.request(method,params),profile.email.as_deref())
  }).await.map_err(|e|e.to_string())?
+}
+fn codex_capabilities(mut request:impl FnMut(&str,serde_json::Value)->Result<serde_json::Value,String>,email:Option<&str>)->Result<serde_json::Value,String>{
+  let account=request("account/read",serde_json::json!({"refreshToken":false}));
+  let account_error=match account{Ok(account) if account["account"]["type"]=="chatgpt" && !email.is_some_and(|email|account["account"]["email"].as_str()!=Some(email))=>None,Ok(_)=>Some("Reconnect the assigned ChatGPT account to restore usage information and agent execution.".to_owned()),Err(error)=>Some(error)};
+  let mut models=Vec::new();let mut cursor:Option<String>=None;let mut seen=std::collections::HashSet::new();
+  loop {let page=request("model/list",serde_json::json!({"limit":100,"cursor":cursor,"includeHidden":false}))?;if let Some(data)=page["data"].as_array(){models.extend(data.clone());}cursor=page["nextCursor"].as_str().map(String::from);match &cursor{Some(value) if seen.insert(value.clone())=>{},_=>break}}
+  let usage=match account_error{Some(error)=>Err(error),None=>request("account/rateLimits/read",serde_json::json!({}))};
+  Ok(serde_json::json!({"models":models,"usage":usage.as_ref().ok(),"usageError":usage.err()}))
 }
 #[tauri::command]
 async fn save_agent_profile(label: String, provider: String, executable: String, key: String, state: State<'_, AppState>) -> Result<agents::Profile, String> {
@@ -235,7 +240,7 @@ async fn submit_saved_prompt(repository_id:String,provider:String,thread_id:Stri
     tauri::async_runtime::spawn_blocking(move||prompt_delivery::submit(&root,&repo,&key,&provider,&thread_id,&prompt,&codex,&cursor)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
-async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,output:tauri::ipc::Channel<serde_json::Value>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
     let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
     let repo=state.db.repository_path(&repository_id)?;
     let key=prompt_repository_key(&record);
@@ -244,9 +249,9 @@ async fn run_new_agent_conversation(repository_id:String,provider:String,identit
     let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
     if provider=="copilot" {
         if record.identity.as_ref().map(|item|item.id.as_str())!=Some(identity_id.as_str()){return Err("Assign the selected GitHub identity to this repository first".into());}
-        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled).await;
+        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled,Some(output)).await;
     }
-    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled)).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled,Some(output))).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
@@ -293,9 +298,9 @@ fn handoff_output_path(repository_id:String,name:String,run_id:String,state:Stat
 #[tauri::command]
 fn publish_handoff(repository_id:String,name:String,run_id:String,payload:Option<String>,state:State<AppState>)->Result<bool,String>{let repository=state.db.repository_path(&repository_id)?;if let Some(payload)=payload{handoffs::write_payload(&repository,&name,&run_id,&payload)?;}handoffs::publish(&repository,&name,&run_id)}
 #[tauri::command]
-fn has_pending_handoff(repository_id:String,name:String,state:State<AppState>)->Result<bool,String>{handoffs::has_pending(&state.db.repository_path(&repository_id)?,&name)}
+fn has_pending_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<bool,String>{handoffs::has_pending_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
 #[tauri::command]
-fn claim_handoff(repository_id:String,name:String,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim(&state.db.repository_path(&repository_id)?,&name)}
+fn claim_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
 #[tauri::command]
 fn finish_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::finish(&state.db.repository_path(&repository_id)?,&name,&id)}
 #[tauri::command]
@@ -611,6 +616,18 @@ fn list_branches(repository_id: String, state: State<AppState>) -> Result<Vec<St
 }
 
 #[tauri::command]
+async fn branch_removal_plan(repository_id:String,branch:String,state:State<'_,AppState>)->Result<branch_removal::Plan,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    let remote=std::env::var("REMOTE").ok().filter(|value|!value.is_empty()).unwrap_or_else(||"origin".into());
+    tauri::async_runtime::spawn_blocking(move||branch_removal::plan(&path,&branch,Some(&remote))).await.map_err(|error|error.to_string())?
+}
+#[tauri::command]
+async fn remove_branch(repository_id:String,plan:branch_removal::Plan,confirmed_unmerged_head:Option<String>,state:State<'_,AppState>)->Result<branch_removal::ResultDetails,String>{
+    let path=state.db.repository_path(&repository_id)?;
+    tauri::async_runtime::spawn_blocking(move||branch_removal::remove(&path,plan,confirmed_unmerged_head.as_deref())).await.map_err(|error|error.to_string())?
+}
+
+#[tauri::command]
 fn commit_history(repository_id: String, branch: Option<String>, skip: u32, state: State<AppState>) -> Result<Vec<models::Commit>, String> {
     let path = state.db.repository_path(&repository_id)?;
     state.git.history(&path, branch.as_deref(), skip).map_err(|e| e.to_string())
@@ -904,7 +921,7 @@ pub fn run() {
             link_repository_folder,
             clone_github_repository,
             open_in_cursor,
-            list_branches,
+            list_branches, branch_removal_plan, remove_branch,
             commit_history,
             list_identities,
             disconnect_github_identity,
@@ -931,4 +948,17 @@ pub fn run() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) { app.state::<AppState>().agents.cancel_all(); }
         });
+}
+
+#[cfg(test)] mod codex_catalog_tests {
+ use super::*;
+ #[test] fn signed_out_account_keeps_catalog_without_reading_usage(){
+  let mut calls=Vec::new();
+  let result=codex_capabilities(|method,_|{calls.push(method.to_owned());match method{"account/read"=>Ok(serde_json::json!({"account":null})),"model/list"=>Ok(serde_json::json!({"data":[{"model":"available-model"}],"nextCursor":null})),_=>panic!("Usage must not be read for an unverified account")}},None).unwrap();
+  assert_eq!(result["models"][0]["model"],"available-model");assert!(result["usage"].is_null());assert!(result["usageError"].as_str().unwrap().contains("Reconnect"));assert_eq!(calls,vec!["account/read","model/list"]);
+ }
+ #[test] fn verified_account_retains_paginated_catalog_and_usage(){
+  let result=codex_capabilities(|method,params|Ok(match method{"account/read"=>serde_json::json!({"account":{"type":"chatgpt","email":"test@example.test"}}),"model/list" if params["cursor"].is_null()=>serde_json::json!({"data":[{"model":"first"}],"nextCursor":"page-two"}),"model/list"=>serde_json::json!({"data":[{"model":"second"}],"nextCursor":null}),"account/rateLimits/read"=>serde_json::json!({"rateLimits":{}}),_=>panic!("Unexpected request")}),Some("test@example.test")).unwrap();
+  assert_eq!(result["models"].as_array().unwrap().len(),2);assert!(!result["usage"].is_null());assert!(result["usageError"].is_null());
+ }
 }

@@ -33,3 +33,6 @@ wrapping on the repository list’s own named container, not an ancestor’s wid
 keep the main fields on one row whenever that container has enough room.
 Provider installation must show the command plan and require explicit in-app
 approval before executing. Use fixed provider commands and no privilege elevation.
+
+- Never add placeholder options to selection menus. Every option must represent a real selectable value or behavior (such as None, Automatic, or Provider default). When no choices exist, show an empty-state message and disable or omit the selector. Text-input hints are allowed.
+- A displayed selection must match the value used by actions and validation. Initialize required selections to the first available option, preserving valid user choices when options change. Never display a first-option fallback while leaving the actual value empty or invalid.

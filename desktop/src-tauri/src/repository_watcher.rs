@@ -14,7 +14,7 @@ fn emit_change(app:&AppHandle,kind:&str,repository_id:&str){
     let _=app.emit(kind,FileChange{repository_id:repository_id.to_owned(),occurred_at});
 }
 fn git_directory(root:&Path)->Option<PathBuf>{
-    let output=Command::new("git").arg("-C").arg(root).args(["rev-parse","--absolute-git-dir"]).output().ok()?;
+    let output=Command::new("git").arg("-C").arg(root).args(["rev-parse","--path-format=absolute","--git-common-dir"]).output().ok()?;
     if !output.status.success(){return None;}
     PathBuf::from(String::from_utf8(output.stdout).ok()?.trim()).canonicalize().ok()
 }
@@ -74,7 +74,7 @@ fn git_relevant(event:&Event,git_dir:&Path)->bool{
     if !matches!(event.kind,EventKind::Create(_)|EventKind::Modify(_)|EventKind::Remove(_)){return false;}
     event.paths.iter().any(|path|path.strip_prefix(git_dir).ok().is_some_and(|relative|{
         let name=relative.to_string_lossy().replace('\\',"/");
-        name=="HEAD"||name=="packed-refs"||name=="logs/HEAD"||name.starts_with("refs/heads/")||name.starts_with("logs/refs/heads/")
+        name.starts_with("worktrees/")&&(name.ends_with("/HEAD")||name.ends_with("/logs/HEAD"))||name=="HEAD"||name=="packed-refs"||name=="logs/HEAD"||name.starts_with("refs/heads/")||name.starts_with("logs/refs/heads/")
     }))
 }
 
@@ -103,6 +103,25 @@ mod tests {
         let commit=Event::new(EventKind::Modify(ModifyKind::Any)).add_path(root.join(".git/refs/heads/main"));
         assert!(git_relevant(&commit,&root.join(".git")));
         assert!(!git_relevant(&git,&root.join(".git")));
+    }
+    #[test]
+    fn linked_worktree_uses_shared_git_directory(){
+        let root=tempfile::tempdir().unwrap();let primary=root.path().join("primary");let linked=root.path().join("linked");
+        std::fs::create_dir(&primary).unwrap();
+        let run=|args:&[&str]|assert!(Command::new("git").arg("-C").arg(&primary).args(args).status().unwrap().success());
+        run(&["init","-q"]);run(&["config","user.name","Fixture"]);run(&["config","user.email","fixture@example.test"]);run(&["commit","--allow-empty","-qm","initial"]);
+        run(&["worktree","add","-q","-b","agent",linked.to_str().unwrap()]);
+        assert_eq!(git_directory(&primary),git_directory(&linked));
+        let common=git_directory(&linked).unwrap();
+        let event=Event::new(EventKind::Modify(ModifyKind::Any)).add_path(common.join("worktrees/linked/logs/HEAD"));
+        assert!(git_relevant(&event,&common));
+        let (tx,rx)=std::sync::mpsc::channel();let watched_common=common.clone();
+        let mut watcher=notify::recommended_watcher(move|event:notify::Result<Event>|{
+            if let Ok(event)=event {if git_relevant(&event,&watched_common){let _=tx.send(());}}
+        }).unwrap();
+        watcher.watch(&common,RecursiveMode::Recursive).unwrap();
+        assert!(Command::new("git").arg("-C").arg(&linked).args(["commit","--allow-empty","-qm","linked commit"]).status().unwrap().success());
+        rx.recv_timeout(std::time::Duration::from_secs(3)).expect("linked commit was not observed in common Git metadata");
     }
     #[test]
     fn receives_a_file_change_without_polling() {

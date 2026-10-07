@@ -25,6 +25,7 @@ All four conversation providers are opt-in through the Agent pane. The presence 
 ## Credentials and persistence
 
 - GitHub OAuth/CLI tokens and agent API keys use the OS credential store. Do not print or copy their values into logs, tests, or documentation.
+- GitHub APIs and Copilot share `github_credentials.rs`. On Linux, new GitHub tokens use a persistent Secret Service collection named GitCerberus, rather than relying on the default collection alias. Older tokens remain readable by service/user lookup across collections. Sign-in verifies a fresh credential lookup before reporting success; disconnect removes matching tokens. Storage-access failures and missing tokens have distinct messages. macOS and Windows retain their native credential-store entries.
 - Repository metadata and assignments are in the app-data SQLite database or provider-specific app-data settings.
 - ChatGPT subscription identities use account-specific Codex homes and provider-managed credentials.
 - UI preferences, initials, provider checkboxes, selected models, and local chat metadata use localStorage. Provider transcripts remain in their own local storage.

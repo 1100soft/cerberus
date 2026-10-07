@@ -89,6 +89,7 @@ export function App() {
   const catalogGeneration = useRef(0);
   const lastCatalogSync = useRef(0);
   const catalogInFlight = useRef(false);
+  const catalogRefreshQueued = useRef(false);
   const repositories = useMemo(() => mergeRepositories(localRepositories, githubRepositories), [localRepositories, githubRepositories]);
   const localIds=localRepositories.map(repo=>repo.id).join('|');
   useEffect(()=>{
@@ -139,7 +140,11 @@ export function App() {
   const [addRepo, setAddRepo] = useState<"choose" | "create">();
 
   async function syncGithub(force = false) {
-    if (catalogInFlight.current || (!force && Date.now() - lastCatalogSync.current < 300000)) return;
+    if (catalogInFlight.current) {
+      if (force) { catalogRefreshQueued.current = true; catalogGeneration.current++; }
+      return;
+    }
+    if (!force && Date.now() - lastCatalogSync.current < 300000) return;
     catalogInFlight.current = true;
     const generation = ++catalogGeneration.current;
     setSyncingGithub(true);
@@ -151,7 +156,11 @@ export function App() {
       setGithubRepositories(current => [...current.filter(repo => catalog.failedIdentityIds?.includes(repo.identityId)), ...catalog.repositories]); setGithubWarnings(catalog.warnings);
       setGithubReady(true); lastCatalogSync.current = Date.now();
     } catch (error) { if (generation === catalogGeneration.current) setGithubWarnings([String(error)]); }
-    finally { catalogInFlight.current = false; if (generation === catalogGeneration.current) setSyncingGithub(false); }
+    finally {
+      catalogInFlight.current = false;
+      if (catalogRefreshQueued.current) { catalogRefreshQueued.current = false; void syncGithub(true); }
+      else if (generation === catalogGeneration.current) setSyncingGithub(false);
+    }
   }
   async function reload() { await Promise.all([api.repositories().then(setRepositories), api.identities().then(setIdentities)]); void syncGithub(true); }
   useEffect(() => { void reload().then(() => { if (!inTauri()) return; requestAnimationFrame(() => { void api.syncRepositoryRemotes().then(updated => { const byId = new Map(updated.map(repo => [repo.id, repo])); setRepositories(current => current.map(repo => { const next = byId.get(repo.id); return next ? {...repo, canonicalRemote: next.canonicalRemote, hostType: next.hostType} : repo; })); }).catch(() => {}); }); }).catch((e) => setNotice(String(e))); }, []);
@@ -383,7 +392,7 @@ export function App() {
   }
 
   return <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
-    <NotificationCenter/>
+    <NotificationCenter repositories={repositories}/>
     <button className="app-menu-toggle" aria-label="Toggle navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)} title="GitCerberus navigation"><ShieldCheck /></button>
     <aside hidden={!sidebarOpen}>
       <div className="brand"><div className="brand-mark"><ShieldCheck /></div><div><b>GitCerberus</b><span>Repository guardian</span></div></div>

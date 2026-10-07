@@ -1,9 +1,9 @@
-# GitCerberus handoff — 2026-10-03
+# GitCerberus handoff — 2026-10-07
 
 ## First read
 
 - Repository: `/home/eh930/project/apps/cerberus`; branch `wip`.
-- This document describes the committed Automation and Agent UI checkpoint and the CI reliability and desktop workflow checkpoint below. Review current Git status before continuing; repository state is authoritative.
+- This document includes the automation triggers, live logs, provider permissions, credentials, model catalog, copy controls, and worktree-aware Git operations checkpoint below. Review current Git status before continuing; repository state is authoritative.
 - Current docs: [README](README.md), [documentation index](docs/README.md), [desktop architecture](desktop/docs/architecture.md), [desktop operations](desktop/docs/agent-operations.md), and [UI conventions](desktop/AGENTS.md).
 - The 2026-09-27 handoff is in [docs/archive/HANDOFF-2026-09-27.md](docs/archive/HANDOFF-2026-09-27.md). Older notes remain in `docs/archive/HANDOFF-previous.md`.
 
@@ -145,3 +145,407 @@ shell syntax, whitespace, and credential-pattern review passed. Earlier passing
 Linux native build and WebKit regressions remain applicable; only workflow/docs
 and runner cleanup changed since those runs. No generated artifacts or unrelated
 files are staged. Existing rustfmt baseline failure remains documented.
+
+
+## Repository-wide commits and copyable automation logs (2026-10-04)
+
+Branch enumeration already used shared local refs, but history only reloaded on
+repository selection/manual refresh. It now refreshes when the repository object
+is refreshed by Git events. Commit detection previously compared only checkout
+HEAD: it now snapshots all local branch tips and detached worktree HEADs, checks
+commit/merge/cherry-pick reflog reasons, serializes concurrent checks, deduplicates
+unchanged tips, and queues separate branch events for commit-only jobs. Watchers
+resolve the common Git directory, including when the linked checkout is itself a
+worktree, and observe private worktree HEAD logs. A 30-second snapshot fallback
+catches missed notifications. Shell context lookup remains checkout-local and
+works for nongit folders as before. Actions still run in the linked checkout;
+file/change-count conditions remain checkout-local. Rapid same-branch commits can
+coalesce to the latest observed tip; remote-tracking refs are not local branches.
+
+Automation log dialog adds Copy log with status feedback and clipboard error
+handling, copying all displayed saved/live output sections and fallback results.
+WebKit regressions cover copying, failure feedback, unchanged primary HEAD with
+an agent branch commit, branch-creation suppression, event deduplication, context,
+and two different branch commits queued together. Native temporary Git/worktree
+fixtures cover shared branch enumeration, linked and detached commits, shared Git
+directory resolution, and actual watcher delivery for a linked-worktree commit.
+Production build and saved-prompt/CI WebKit fixtures passed. Native suite passed
+88 tests (4 ignored) after separating checkout context from repository-wide
+snapshot collection; the initial shell regression identified that distinction.
+Changes remain uncommitted; nothing pushed.
+
+
+Branch-list follow-up: relying on a changed parent repository object was not
+sufficient, because the regular repository refresh preserves equal snapshots.
+CommitHistory now requests branches directly on focus/visibility, every 15 seconds
+while visible, and on debounced Git events, with request-generation protection
+and listener/timer cleanup. WebKit regression proves a private/ branch appears
+without a parent metadata change, can load its history, and a second branch
+appears through the timer fallback. Production build and that regression passed.
+The running app uses the expected gitcerberus.db; all refs and registered worktrees
+for its four linked repositories were inspected read-only and none currently
+contains a private/ branch. Asked for the repository/worktree path to locate the
+user's specific branch rather than claiming it has been found.
+
+Located the user's missing branch: `private/ci-37186394041` at
+`/tmp/cerberus-ci-37186394041`, commit
+`1bcca95178d5cbfed9c5c7a03d6a7fc2a72b99d4` (Fix desktop CI workflow lint and
+condition dialog focus). It still exists. Its common Git directory is
+`/tmp/cerberus-ci-repo-37186394041/.git`, a separate repository, not Cerberus's
+linked checkout. That separate clone has the temporary worktree registered; the
+linked checkout has neither the branch nor commit object. Repository-wide
+watching cannot see refs in another clone. A later CI-correction run failed to
+create `correction/ci-37186394041` in the primary repository due to Git metadata
+permissions. No refs were fetched, merged, pushed, or modified during diagnosis.
+
+## Shared copy feedback and automation write permissions (2026-10-04)
+
+Read Mountlet's license-key copy implementation in app/src/main.ts and its green
+corner badge CSS in app/src/style.css. Added shared CopyButton for automation logs,
+prompt output, checkpoint prompt, GitHub device code, repository path, and
+conversation copying. Buttons are icon-only with accessible names. The icon
+remains visible and a green corner check follows clipboard contents, checked on
+focus and every 400 ms while focused. Known in-app clipboard writes synchronize
+buttons when reads are denied. Value changes clear stale indicators; failures
+appear in accessible status and tooltip. Context-menu copy actions stay open so
+feedback remains visible. Removed old success text/timed checkpoint icon swap.
+
+The reported CI agent used edit/workspace-write with approvals disabled, so Git
+metadata was protected and outbound network was disabled. Edit agent automations
+now request the existing full execution mode on both profile and identity routes;
+Codex thread and turn receive danger-full-access. This disables the sandbox rather
+than granting narrowly scoped .git writes. Analyze-only jobs, drafting, and
+interactive conversation permission choices are preserved. Existing saved edit
+jobs get this on their next run; completed sessions need another run. The dialog
+includes agent-permissions help. No CI-fix agent was launched, paid inference used,
+Git credentials changed, or branch pushed during this work.
+
+Validation: production build (TypeScript/dropdown check), 88 Rust tests with 4
+opt-in ignored, saved-prompt WebKit (icon/badge, external clipboard change,
+clipboard failure, full automation mode), card/branch UI fixture, four-size zoom
+viewport matrix, and diff whitespace all passed. Transport fixture now verifies
+both edit and full thread/turn policies. Saved-prompt test clears in-memory jobs
+and mocks clipboard before React mounts; the earlier host-clipboard teardown
+abort did not recur with that isolated fixture. All changes remain uncommitted.
+
+## Running log entries and provider permission adapters (2026-10-04)
+
+Automation logs now begin before each repository action, including notifications.
+The dialog selects a newly running entry and updates that same entry from shell
+streams, agent chat messages/activity, Copilot session events, and available CLI
+output. Selecting an older run shows only its own content. In-memory updates are
+immediate; serialized disk checkpoints are throttled to 500 ms and flushed at
+completion/error. Native writes atomically replace the JSON file. The running
+entry keeps its run ID when completed. In-memory completed entries are bounded.
+
+Removed the saved-run placeholder and the generic Select "Choose…" fallback.
+desktop/AGENTS.md now records the general rule: no placeholder menu options;
+empty selectors are disabled or omitted, and every option is a real behavior.
+
+The earlier full-mode change exposed adapters that rejected that mode. Copilot
+now accepts edit/full and approves its tool permission requests for both; analyze
+still permits only reading. Cursor accepts full through its force mode, and
+Claude uses bypassPermissions for full. Codex continues danger-full-access.
+This fixes Cerberus's "Unsupported Copilot permission mode" rejection; provider
+or organization policies can still constrain the underlying tool. No paid agent
+run was launched to verify provider access.
+
+Validation: production TypeScript/dropdown/Vite build passed; Rust tests passed
+(90 passed, 4 opt-in ignored); saved-prompt and CI WebKit fixtures passed with
+exit status 0. Fixtures cover running-entry selection, live updates, completion
+under the same run ID, absent placeholder options, and permission routing. The
+CI fixture's WebKit child printed an allocator diagnostic after its successful
+assertions; the fixture runner still exited 0. Vite retains its chunk-size
+warning. Diff whitespace passed. All current changes remain uncommitted.
+
+## Manual-run defaults and log following (2026-10-04)
+
+Run once derives its selection from the eligible local repositories, defaulting
+to the first while preserving a valid explicit choice. Display, button validation,
+and execution share that value, including when repository options change. Empty
+scope remains disabled. Audited app Select usages: account controls have real
+None/Unassigned states or explicit account-selection buttons; other controls
+initialize real values, and log selection is owned by its running/history logic.
+Removed Select's misleading first-option display fallback for invalid values;
+it now reports unavailable selection rather than pretending another value was
+chosen. Recorded the selection-state invariant in desktop/AGENTS.md.
+
+The log pane follows output at the bottom, pauses when the user scrolls up, and
+resumes when they return to the bottom. Switching runs resets following.
+Saved-prompt WebKit regression tests cover running without touching the repository
+dropdown, explicit repository selection, overflowing log following, retaining a
+scrolled-up position, and resuming at the bottom. Production build, that fixture,
+four-window viewport matrix at 75/100/140/150% zoom, and diff whitespace passed.
+Vite's existing chunk-size warning remains. No commit or push performed.
+
+## Error notifications and manual branch-filter bypass (2026-10-04)
+
+Inspected saved Post-commit review (correction) configuration read-only: commit
+condition, correction/* inclusion filter, all repositories, enabled. Cerberus's
+current checkout is wip. runSavedPrompt previously applied the saved branch
+filter to manual runs and silently continued before creating a log, so this
+combination ran no action and produced empty completion details. Manual Run once
+now bypasses trigger/branch conditions in the selected repository's current
+checkout; automatic filtering and saved repository scope remain in force. The
+runtime dialog explains that branches are not switched.
+
+Action, preparation, log, and handoff-emission errors no longer disable jobs.
+Execution completion never restores an earlier enabled snapshot, so an explicit
+disable during a run remains effective. Interval preparation failures advance
+nextAt to avoid a scheduler-tick retry loop. Preparation errors create error log
+entries too, preserving any current run output. Retired existing-conversation
+configurations still undergo their existing disabled-schedule migration on read.
+
+Failure notifications carry repository/run IDs. Toasts and notification history
+offer Open log and Disable automation; disabled jobs show the latter as disabled.
+NotificationCenter can open the log from any app page and selects that failed
+run, even after newer successful runs. Opening from a notification closes any
+existing panel-owned log dialog. Removing the automation removes those actions.
+
+Validation: production TypeScript/dropdown/Vite build, saved-prompt, handoff, CI,
+and four-window zoom viewport fixtures passed (runner exit 0), and diff whitespace
+passed. Regression coverage includes automatic filtering versus manual override,
+action/preparation failures remaining enabled, failure-log selection after a
+newer success, explicit disable persistence, and disabling during execution.
+The saved-prompt fixture now resolves Vite's actual savedPrompts/automationLogs
+import URLs rather than copying api.ts's unrelated timestamp, avoiding duplicate
+state stores during development tests. That fixture's WebKit child printed an
+allocator diagnostic after successful assertions; Vite's chunk warning remains.
+No paid agent run, settings write to the user's configured jobs, commit, or push.
+
+## GitHub credential storage and reconnect refresh (2026-10-04)
+
+Read-only Secret Service metadata diagnosis: org.freedesktop.secrets is currently
+owned by GNOME Keyring, has only a session collection, and ReadAlias(default)
+returns /. KDE's separate compatibility endpoint has a default kdewallet
+collection. Neither endpoint's service-attribute search found Cerberus GitHub
+entries. No secret values were retrieved, provider configuration changed, or
+collections created. The pinned keyring 3.6.3 legacy default-target lookup calls
+ReadAlias(default) when its initial item search is empty; the resulting NoResult
+becomes the user's storage error. github.rs then obscured every storage cause
+with a generic reconnect instruction.
+
+Added github_credentials.rs shared by OAuth persistence/status/disconnect,
+repository API calls, and Copilot (through oauth::github_token). Linux writes
+target a named GitCerberus collection, independent of the default alias. Legacy
+reads search service/user across collections without the default-alias fallback.
+New entries take precedence; legacy fallback is only used when the named entry
+is absent. Saving must succeed and match a fresh credential lookup before sign-in
+reports success. Disconnect deletes matching service/user entries across the
+active service's collections. Native macOS/Windows entry naming is preserved.
+Storage access, missing tokens, and ambiguous credentials have distinct messages;
+no plaintext storage or cross-provider token recovery was introduced. A stable
+Secret Service provider and user sign-in are still required on this machine.
+
+App.tsx also dropped forced catalog refreshes while an older lookup was in
+flight. Reconnection now queues a fresh lookup and invalidates the older result,
+preventing pre-reconnection warnings from being published after sign-in.
+
+Validation: four new credential tests passed, production build passed, and the
+saved-prompt WebKit fixture passed with a mocked OAuth reconnect while a catalog
+request is in flight (including observing the visible repository warnings).
+New module rustfmt and diff whitespace passed. Full Rust suite: 93 passed,
+4 ignored, 1 existing Cursor wrapper-child cleanup test failed; isolated rerun
+also failed its immediate process-state assertion. Cursor source was unchanged.
+The remaining suite passed with that test excluded. WebKit child again printed
+an allocator diagnostic after successful fixture assertions/runner exit 0;
+Vite retains its chunk warning. No actual OAuth flow, paid agent call, credential
+write, commit, or push was performed.
+
+## Safeguarded branch removal from commit history (2026-10-04)
+
+Commit history now has an icon button to remove the selected local branch. The
+current app checkout's branch is disabled; native checks also protect the primary
+worktree and app-linked folder. A cancellable preparation dialog lists the branch
+tip, linked worktrees, and exact remote ref. Confirmation uses a revalidated plan
+and displays completed steps plus any later error. It refreshes branches/history
+after success or partial failure and selects an available branch if needed.
+
+branch_removal.rs validates refs, parses worktree porcelain -z without losing
+spaces/newlines, checks Git's upstream-or-HEAD merge eligibility before worktree
+removal, calls worktree remove without force, then branch -d without -D. Remote
+defaults to origin, with REMOTE environment override; absent origin allows local
+only removal. Exact ls-remote distinguishes exit 2 (absent) from access failure.
+A matching remote ref is rechecked, removed using normal push --delete, and the
+remote fetched/pruned. No branch/checkout is switched or force-deleted. Changes
+since confirmation are refused; completed steps are not automatically undone.
+Remote operations use configured Git credentials, not a new app token flow.
+
+Validation: eight native tests passed using temporary repositories and local bare
+remotes, covering clean worktree/local/remote deletion, absent remote ref, dirty
+and locked worktrees, unmerged/primary branches, stale tips, remote access failure,
+and rejected remote deletion with partial success. Production build, shared card
+WebKit fixture, and four-window zoom viewport matrix passed. UI regression covers
+confirmation/cancellation at 100/140/150%, target preservation, refreshed branch
+selection, failed preflight, and partial results. Rust suite excluding the already
+failing Cursor cleanup test passed (101 passed, 4 ignored, 1 filtered). New module
+rustfmt and diff whitespace passed. WebKit printed its existing allocator warning
+after successful fixture assertions/runner exit 0; Vite retains its chunk warning.
+Removed generated untracked bytecode for the two Python automation fixtures.
+No user branch/worktree/remote was removed, no GitHub push performed, and no
+project commit created. All accumulated changes remain uncommitted.
+
+## Explicit forced deletion of unmerged branches (2026-10-04)
+
+User authorized a force option for leftover alternate CI-correction branches.
+Removal plans now report merge status instead of rejecting unmerged branches.
+Merged branches retain branch -d. An unmerged plan shows its branch/full commit,
+then Continue to forced deletion opens the second confirmation, requiring an
+unchecked acknowledgement before Force delete branch is enabled. The native
+command requires confirmation of the exact inspected unmerged head; changed
+tips, merge status, worktrees, or remote tips require fresh review. Only then
+does branch -D replace -d. Worktree removal remains non-forced, with primary and
+app-linked checkouts, dirty files, and locked worktrees still protected. Results
+identify forced local deletion explicitly. The dialog height accounts for zoom
+so its warning/acknowledgement scroll internally with the footer accessible.
+
+Validation: ten native removal tests passed, including refusal without/wrong
+force confirmation, confirmed deletion of an unmerged branch with a clean linked
+worktree, and preservation of a dirty linked worktree even with confirmation.
+Production build and WebKit UI fixture passed; UI covers the second-step gate,
+unchecked acknowledgement, exact commit submission, cancellation at 100/140/150%,
+and forced-dialog bounds at 150%. New-module formatting and diff whitespace pass.
+Existing WebKit allocator and Vite chunk-size diagnostics remain. No live user
+branch was removed, no project commit or remote GitHub push performed; changes
+remain uncommitted.
+
+## Boolean handoff trigger variables (2026-10-04)
+
+Handoff condition editor now saves optional handoffVariables as comma-separated,
+case-sensitive identifiers. Every requested name must be JSON boolean true in
+the incoming payload's variables object, e.g. {"variables":{"v":true}}. Plain
+text remains compatible with triggers without requirements. Native inspection
+and atomic claiming both filter; false/missing/string/invalid payloads remain
+pending, while later matching emissions can run. Composite and standalone
+schedulers pass the same requirements. Outgoing agent instructions and help
+explain the format; scripts/notification payloads can emit the same JSON.
+
+Validation: eight native handoff tests pass, including strict matching and
+concurrent filtered claims; WebKit scheduler fixture confirms nonmatching queue
+entries are preserved. Production build passes (existing chunk-size warning).
+Automation UI fixture covers variable entry, condition chip, and dialog bounds
+at 100/140/150% zoom. Changes remain uncommitted.
+
+## Handoff flags wording and help (2026-10-05)
+
+Trigger UI calls boolean variables flags. Emitting agents receive instructions
+to interpret ordinary task wording (set v, mark v true, raise ready, conditional
+flags), preserve names/case, and write actual JSON booleans in the existing
+variables object alongside details. No schema migration or natural-language
+parsing of payloads; deterministic trigger matching is unchanged. Emit handoffs
+popover explains Agent wording and Shell JSON output with a quoted output path.
+Documentation and fixtures updated. Production build and handoff scheduler
+fixture pass; automation UI fixture checks flag labels and both help examples.
+Changes remain uncommitted.
+
+## Conditional handoff emissions (2026-10-05)
+
+Emit handoffs accepts parentheses: summary, (review). Parenthesized names remain
+in saved settings/edit fields, but runtime paths, shell environment keys, name
+suggestions and pairing use undecorated names. Agents receive explicit optional
+emission instructions; absent files emit nothing. Shell scripts decide by
+writing inside an if condition. Empty payload files still emit. Duplicate names
+with different decoration are rejected; conditional names require Agent/Shell
+(not Notification, which emits automatically). Suggestions retain parentheses
+when completing a conditional name. Help includes Agent wording and Shell if
+commands, and docs explain lifecycle and syntax.
+
+Fixed an existing ordering bug: agent prompt augmentation now happens after
+outgoing paths are populated, ensuring instructions actually reach agents.
+Validation: production build, WebKit handoff scheduler (skip and active emission,
+undecorated paths, persistence, prompt instructions), and automation UI checks
+pass. Existing Vite chunk warning remains. Changes are uncommitted.
+
+## OR condition sets (2026-10-05)
+
+SavedPrompt.conditionSets stores arrays of AND conditions; rows are combined in
+OR. Legacy conditions remain a single set. automationConditions returns the
+union for monitoring subscriptions; automationConditionSets returns rows for
+evaluation. Pending events are keyed by job/repository/set and cannot satisfy
+other rows. A match clears all pending rows for that job/repository to prevent
+double runs. CI dispatch now handles both pass and fail alternatives. Shell
+CERBERUS_CONDITIONS reports the matched set. Branch/repository scope and repeated
+condition parameters remain shared, explicitly explained in editor/docs.
+
+Editor provides colored rows, OR labels, AND separators, per-row adding/removing,
+and an inline Add condition set button. Empty rows block saving; Manual remains
+exclusive. Clicking an alternative parameter chip promotes that row into the
+primary editing position; colors/order follow the displayed rows.
+
+Validation: build, WebKit scheduler (separate partial matches, either OR row,
+clear-after-run, CI pass/fail alternatives), automation UI (rows, different
+colors, selectors at 100/140/150%, existing compact layouts), and card/branch
+removal fixture pass. Existing Vite chunk and WebKit child allocator diagnostics
+remain. During validation styles.css contained component source instead of CSS;
+restored committed CSS plus prior copy/notification/branch/flag styles and new
+row styles. Card fixture confirms prior copy/branch behavior. InfoPopover now
+uses clamped top placement to stay in the zoomed viewport. All changes remain
+uncommitted, no push or live automation run.
+
+## Automation defaults, help, and card sizing (2026-10-05)
+
+New automation creation (including incoming drafts) selects every current local
+repository and includes future repositories by default. Editing retains saved
+scope. While future inclusion is on, displayed targets follow the linked local
+repository list; deselecting any repository snapshots the remaining targets and
+turns future inclusion off. Manual still chooses its repository at run time.
+
+Handoff help is a short summary with Agent wording, Shell output path, conditional
+emission, and a boolean flag example. Detailed instructions moved to the separate
+desktop/docs/handoffs.md guide, linked from the docs index and automation docs.
+Automation list is a flexible, internally scrolling column. Cards never shrink,
+and titles/summaries wrap to their content height rather than being truncated.
+
+Validation: build and WebKit automation UI pass (default current/future scope and
+existing workflows); card fixture passes with 30 extra long-title cards at
+100/140/150% zoom, confirming no card shrink/clipping and independent list scroll.
+Existing Vite chunk and WebKit child allocator diagnostics remain. Changes are
+uncommitted; no live automation execution or push.
+
+## Codex catalog disappearance regression (2026-10-07)
+
+Read-only probe of the configured VS Code Codex app-server in the app's assigned
+account home returned account:null from account/read, but model/list returned
+eight models including gpt-6.1-sol, gpt-6-astra, and gpt-6-sol. Existing native
+chatgpt_capabilities rejected the missing account before requesting models; the
+hook then dropped data and the selector silently showed only Provider default.
+No auth secrets were read/output, no login change or paid turn was executed.
+
+Native catalog discovery is now independent of account verification, with quota
+requests skipped for an unverified/mismatched account and a usageError explaining
+reconnection. Agent execution verification remains unchanged. The frontend keeps
+the last successful per-account catalog after failed refreshes and displays model
+availability/account warnings in an info popover beside model controls. Saved
+model selections survive. No hardcoded model list was added.
+
+Validation: two native catalog tests (signed-out catalog/no quota read, verified
+account pagination/usage), hook refresh-cache/account isolation checks, production
+build, and automation WebKit UI fixture pass. Changes remain uncommitted.
+
+## Checkpoint review and validation (2026-10-07)
+
+All pending source, fixture, documentation, and new module files reviewed for
+this checkpoint. No deleted files, generated artifacts, or credential-pattern
+matches are included. The accumulated work includes repository-wide commit
+monitoring and branch refresh, safeguarded/confirmed force branch removal,
+shared copy controls, live execution logs and failure actions, provider editing
+permissions/progress, GitHub credential persistence, boolean/conditional
+handoffs, OR condition sets, all-repository defaults, and Codex catalog recovery.
+Detailed docs match the current implementation; branch-trigger manual replay
+remains a discussed design rather than an implemented feature.
+
+Checks: production build (dropdown lint, TypeScript, Vite); ten frontend logic
+scripts; five WebKit integration fixtures including viewport/zoom; full native
+CI-style serial suite (108 passed, 4 explicitly ignored live-provider checks);
+Clippy all targets completes with warnings. Default-parallel Rust testing passed
+once and then hit the known unchanged Cursor wrapper-child cleanup race; serial
+CI configuration passes. Repository-wide cargo fmt --check fails on pre-existing
+formatting (confirmed against unchanged HEAD agent_edits.rs); new branch-removal
+and credential modules pass rustfmt checks, and git diff --check passes. Existing
+Vite chunk-size and occasional WebKit child allocator diagnostics remain.
+
+Checkpoint review updated the chat fixture's mocked API/browser adapters and the
+CI fixture to wait for dialog focus/menu rendering. Removed unused production
+handoff wrappers (test-only now) and resolved a new Clippy formatting warning.
+No live user branch deletion, paid agent run, credential change, or push was
+performed. This checkpoint is intended to include all reviewed pending changes.

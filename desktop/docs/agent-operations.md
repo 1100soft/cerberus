@@ -24,11 +24,43 @@ The Identity card labels `premium_interactions` as **Premium requests** only whe
 
 ## Provider setup rules
 
+GitHub repository access and Copilot use the same native token. On Linux, a
+`Secret Service: no result found` error can mean that the active password manager
+has no default collection. New connections use the named GitCerberus collection
+and verify that the saved token can be read before confirming sign-in. The system
+password manager may prompt to create or unlock that collection. Keep the same
+Secret Service provider active between sign-in and execution; switching between
+GNOME Keyring and KDE's service can make another provider's saved tokens invisible.
+Unlock or repair unavailable storage before reconnecting accounts. No plaintext
+token fallback is used. Reconnection queues a fresh repository catalog lookup
+after any in-flight lookup and discards pre-reconnection results.
+
 Conversation providers are queried only after configuration and opt-in. Provider installers must display their exact command plan and wait for explicit in-app approval. Do not silently install tools or run a paid inference call as a diagnostic. GitHub identities and provider billing accounts are separate assignments.
 
 The desktop `open_external_url` command accepts exact approved destinations in `src-tauri/src/lib.rs`. When adding a usage link, update that allowlist and its URL test. In the browser demo, `api.openExternalUrl` opens a new tab.
 
 ## Verification
+
+Commit history's trash button removes the selected local branch after a review
+dialog lists the linked worktrees and matching remote branch. Removal uses
+`git worktree remove` without force and `git branch -d` by default. Unmerged
+branches require a second confirmation showing the branch and commit, plus an
+explicit acknowledgement, before `git branch -D` is allowed. That confirmation
+is bound to the inspected commit and merge status; changed plans require review
+again. Forced branch deletion never forces worktree removal. Git's merge
+check uses the branch's upstream when available, otherwise HEAD. The primary
+worktree and the app-linked checkout are protected; switch their checkout before
+removing their branch. Dirty and locked worktrees remain protected by Git.
+
+The remote defaults to origin; the app's `REMOTE` environment variable can select
+another configured remote. If origin is not configured, removal is local only.
+Remote existence is checked by exact `refs/heads/<branch>` before confirmation;
+network/authentication failures stop preparation. The plan is revalidated before
+execution. A matching remote branch is deleted with a normal Git push, followed
+by fetch/prune. This uses Git's configured authentication. A later push or fetch
+can fail after local removal: the dialog reports completed steps and the error,
+and refreshes the branch list. Cancellation is available during preparation;
+execution runs through Git's steps once confirmed, without automatic rollback.
 
 From `desktop/`:
 
