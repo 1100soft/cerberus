@@ -1,10 +1,11 @@
+import type { AutomationRetry } from './savedPrompts';
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { CodexAccount, CodexThreadPage, CodexMessagePage, Commit, GithubCatalog, GithubAuthStatus, GithubDeviceFlow, Identity, ImportResult, Repository, RepositoryUpdate } from "../types";
 import { identitiesWithRepositoryAccess } from "./repositories";
 
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
-export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string};
+export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;retry?:AutomationRetry};
 export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'>;
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
@@ -117,6 +118,10 @@ export const api = {
   async claimHandoff(repositoryId:string,name:string,variables:string[]=[]):Promise<{id:string;path:string}|null>{
     if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed&&!variables.length);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
     return invoke('claim_handoff',{repositoryId,name,variables});
+  },
+  async retryHandoff(repositoryId:string,name:string,id:string):Promise<{id:string;path:string}>{
+    if(!inTauri())return {id,path:`/tmp/gitcerberus-demo-handoffs/${repositoryId}/${name}/${id}.txt`};
+    return invoke('retry_handoff',{repositoryId,name,id});
   },
   async finishHandoff(repositoryId:string,name:string,id:string):Promise<void>{
     if(!inTauri()){const key=`${repositoryId}:${name}`;demoHandoffs.set(key,(demoHandoffs.get(key)||[]).filter(item=>item.id!==id));return;}

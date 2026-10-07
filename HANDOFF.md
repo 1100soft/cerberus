@@ -1,9 +1,9 @@
-# GitCerberus handoff — 2026-10-03
+# GitCerberus handoff — 2026-10-07
 
 ## First read
 
 - Repository: `/home/eh930/project/apps/cerberus`; branch `wip`.
-- This document describes the committed Automation and Agent UI checkpoint and the CI reliability and desktop workflow checkpoint below. Review current Git status before continuing; repository state is authoritative.
+- This document includes the automation triggers, live logs, provider permissions, credentials, model catalog, copy controls, and worktree-aware Git operations checkpoint below. Review current Git status before continuing; repository state is authoritative.
 - Current docs: [README](README.md), [documentation index](docs/README.md), [desktop architecture](desktop/docs/architecture.md), [desktop operations](desktop/docs/agent-operations.md), and [UI conventions](desktop/AGENTS.md).
 - The 2026-09-27 handoff is in [docs/archive/HANDOFF-2026-09-27.md](docs/archive/HANDOFF-2026-09-27.md). Older notes remain in `docs/archive/HANDOFF-previous.md`.
 
@@ -521,3 +521,82 @@ model selections survive. No hardcoded model list was added.
 Validation: two native catalog tests (signed-out catalog/no quota read, verified
 account pagination/usage), hook refresh-cache/account isolation checks, production
 build, and automation WebKit UI fixture pass. Changes remain uncommitted.
+
+## Checkpoint review and validation (2026-10-07)
+
+All pending source, fixture, documentation, and new module files reviewed for
+this checkpoint. No deleted files, generated artifacts, or credential-pattern
+matches are included. The accumulated work includes repository-wide commit
+monitoring and branch refresh, safeguarded/confirmed force branch removal,
+shared copy controls, live execution logs and failure actions, provider editing
+permissions/progress, GitHub credential persistence, boolean/conditional
+handoffs, OR condition sets, all-repository defaults, and Codex catalog recovery.
+Detailed docs match the current implementation; branch-trigger manual replay
+remains a discussed design rather than an implemented feature.
+
+Checks: production build (dropdown lint, TypeScript, Vite); ten frontend logic
+scripts; five WebKit integration fixtures including viewport/zoom; full native
+CI-style serial suite (108 passed, 4 explicitly ignored live-provider checks);
+Clippy all targets completes with warnings. Default-parallel Rust testing passed
+once and then hit the known unchanged Cursor wrapper-child cleanup race; serial
+CI configuration passes. Repository-wide cargo fmt --check fails on pre-existing
+formatting (confirmed against unchanged HEAD agent_edits.rs); new branch-removal
+and credential modules pass rustfmt checks, and git diff --check passes. Existing
+Vite chunk-size and occasional WebKit child allocator diagnostics remain.
+
+Checkpoint review updated the chat fixture's mocked API/browser adapters and the
+CI fixture to wait for dialog focus/menu rendering. Removed unused production
+handoff wrappers (test-only now) and resolved a new Clippy formatting warning.
+No live user branch deletion, paid agent run, credential change, or push was
+performed. This checkpoint is intended to include all reviewed pending changes.
+
+## ChatGPT Secret Service recovery (2026-10-07)
+
+The active GNOME Secret Service still returned `/` for ReadAlias(default), even
+though its persistent GitCerberus collection was unlocked. KDE's separate
+compatibility endpoint had a kdewallet default. At the user's request to solve
+the problem, set the active provider's default alias to the existing GitCerberus
+collection. GNOME persisted the alias under ~/.local/share/keyrings/default.
+A temporary noncredential item passed write/read/delete and was deleted. The
+configured Codex runtime now reports Not logged in rather than a storage error
+for the Cerberus ChatGPT identity. No real credential was read, deleted, migrated,
+or created; browser sign-in is still required once. No provider was stopped or
+replaced, and no plaintext fallback was enabled.
+
+Codex RPC storage errors now explain storage repair, with read-only Linux
+default-alias/lock diagnostics. Missing-account handling checks storage before
+recommending reconnect. Browser login now verifies persistence through a fresh
+Codex process before marking the identity connected. Regression coverage includes
+a login process holding credentials that a new process cannot read.
+
+Validation: full native serial suite passed (110 tests, 4 live-provider tests
+ignored), ChatGPT account and capability frontend checks passed, Clippy all
+targets completed with existing warnings, and git diff --check passed.
+The temporary OS verification item was removed. No commit or push was made.
+
+## Preserve and retry blocked actions (2026-10-07)
+
+Handoff finish/stale cleanup retain payloads in archived/<name>/<emission>.txt
+rather than deleting them. Explicit retry_handoff reclaims the exact ID and
+original claimed path; archives are never polled as pending triggers. Failed
+automation logs retain frozen job/account/prompt/model, incoming handoff, event
+context, and conversation linkage. Retry is exposed on automation cards and in
+the conversation list toolbar/context menu; composer retry delegates to the same
+automation retry when applicable. Existing external-provider chats are reused.
+Responses beginning Blocked retain retry context as well as provider errors.
+
+Restored the exact reviewer-written revise payload from the earlier recovery
+copy into Cerberus Git metadata's archived/revise/7e68d8c5-51a5-45cb-8c88-718092522651.txt.
+Updated only the original login-failed revision log
+abd2ef63-4211-4a11-9c11-0c65f2901144 with retry metadata linking that emission.
+Its legacy definition is reconstructed from the saved automation with the
+original logged command when the new frontend loads. Legacy conversations link
+by original emission ID in their injected prompt. No queue event, paid agent
+run, commit, or push was initiated. Previous keyring fixes remain uncommitted.
+
+Validation: production build/TypeScript/dropdown lint; all frontend checks;
+saved-prompt WebKit checks (blocked handoff + frozen-command retry, original
+conversation retry), handoff checks; native serial suite 111 passed, 4 ignored.
+Clippy all targets completed with existing warnings; viewport checks passed at
+all fixture sizes/zooms. A native log round-trip check verifies retry metadata
+survives persistence and is removed after a successful retry.

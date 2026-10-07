@@ -61,7 +61,7 @@ fn pending(repository:&Path,name:&str)->Result<Vec<PathBuf>,String>{
 pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
     // A process interruption cannot cause another run of the same emission.
     // Claims older than the 15-minute runner limit plus a safety margin are
-    // discarded, including when no automation with that name remains enabled.
+    // archived without retriggering, including when no automation remains enabled.
     let claimed_root=root(repository)?.join("claimed");
     let mut removed=0;
     if claimed_root.exists(){for namespace in fs::read_dir(claimed_root).map_err(|error|error.to_string())?.filter_map(Result::ok){
@@ -74,15 +74,8 @@ pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
             if !old{continue;}
             let Some(id)=path.file_stem().and_then(|stem|stem.to_str())else{continue};
             if !valid_id(id){continue;}
-            let consumed=file(repository,"consumed",&name,id)?;
-            if fs::rename(&path,&consumed).is_ok(){let _=fs::remove_file(consumed);removed+=1;}
-        }
-    }}
-    let consumed_root=root(repository)?.join("consumed");
-    if consumed_root.exists(){for namespace in fs::read_dir(consumed_root).map_err(|error|error.to_string())?.filter_map(Result::ok){
-        if !namespace.file_type().is_ok_and(|kind|kind.is_dir()){continue;}
-        for item in fs::read_dir(namespace.path()).map_err(|error|error.to_string())?.filter_map(Result::ok){
-            if item.file_type().is_ok_and(|kind|kind.is_file()){let _=fs::remove_file(item.path());}
+            let consumed=file(repository,"archived",&name,id)?;
+            if fs::rename(&path,&consumed).is_ok(){removed+=1;}
         }
     }}
     Ok(removed)
@@ -117,7 +110,9 @@ pub fn has_pending_matching(
         .iter()
         .any(|path| matches_variables(path, variables)))
 }
+#[cfg(test)]
 pub fn has_pending(repository:&Path,name:&str)->Result<bool,String>{Ok(!pending(repository,name)?.is_empty())}
+#[cfg(test)]
 pub fn claim(repository:&Path,name:&str)->Result<Option<Claim>,String>{claim_matching(repository,name,&[])}
 pub fn claim_matching(
     repository: &Path,
@@ -156,11 +151,23 @@ pub fn claim_matching(
 pub fn finish(repository:&Path,name:&str,id:&str)->Result<(),String>{
     let source=file(repository,"claimed",name,id)?;
     if !source.exists(){return Ok(());}
-    // Move out of the recoverable queue before deleting. A cleanup failure
-    // cannot turn a completed action back into a pending event later.
-    let consumed=file(repository,"consumed",name,id)?;
+    // Retain the exact payload outside the queue for explicit retries.
+    let consumed=file(repository,"archived",name,id)?;
     fs::rename(source,&consumed).map_err(|error|error.to_string())?;
-    fs::remove_file(consumed).map_err(|error|error.to_string())
+    Ok(())
+}
+// Explicit retries claim one archived emission; they never enqueue a new event.
+pub fn retry(repository:&Path,name:&str,id:&str)->Result<Claim,String>{
+    let source=file(repository,"archived",name,id)?;
+    let destination=file(repository,"claimed",name,id)?;
+    if destination.exists(){return Err("This handoff is already claimed by a running action.".into());}
+    if !source.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file()) {return Err("The original handoff payload is unavailable.".into());}
+    fs::rename(&source,&destination).map_err(|error|error.to_string())?;
+    if let Err(error)=fs::File::open(&destination).and_then(|file|file.set_modified(SystemTime::now())){
+        let _=fs::rename(&destination,&source);
+        return Err(format!("Could not timestamp retry claim: {error}"));
+    }
+    Ok(Claim{id:id.into(),path:destination.to_string_lossy().into_owned()})
 }
 pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
     let source=file(repository,"claimed",name,id)?;
@@ -186,6 +193,23 @@ pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
         for id in ["one","two"]{fs::write(output_path(root.path(),"review",id).unwrap(),id).unwrap();assert!(publish(root.path(),"review",id).unwrap());}
         let first=claim(root.path(),"review").unwrap().unwrap();let second=claim(root.path(),"review").unwrap().unwrap();assert_ne!(first.id,second.id);assert!(claim(root.path(),"review").unwrap().is_none());
         assert_eq!(fs::read_to_string(&first.path).unwrap(),first.id);finish(root.path(),"review",&first.id).unwrap();assert!(!Path::new(&first.path).exists());release(root.path(),"review",&second.id).unwrap();assert_eq!(claim(root.path(),"review").unwrap().unwrap().id,second.id);
+    }
+    #[test]fn archived_payload_retries_exact_emission_without_enqueueing(){
+        let repo=tempfile::tempdir().unwrap();
+        std::process::Command::new("git").args(["init","-q"]).arg(repo.path()).status().unwrap();
+        write_payload(repo.path(),"revise","original","original context").unwrap();
+        publish(repo.path(),"revise","original").unwrap();
+        let initial=claim(repo.path(),"revise").unwrap().unwrap();
+        finish(repo.path(),"revise",&initial.id).unwrap();
+        cleanup_stale(repo.path()).unwrap();
+        assert!(!has_pending(repo.path(),"revise").unwrap());
+        let restored=retry(repo.path(),"revise",&initial.id).unwrap();
+        assert_eq!(initial.id,restored.id);
+        assert_eq!(initial.path,restored.path);
+        assert_eq!(fs::read_to_string(&restored.path).unwrap(),"original context");
+        assert!(retry(repo.path(),"revise",&initial.id).is_err());
+        finish(repo.path(),"revise",&initial.id).unwrap();
+        assert!(retry(repo.path(),"revise",&initial.id).is_ok());
     }
     #[test]fn concurrent_claim_has_one_winner(){
         let root=tempfile::tempdir().unwrap();assert!(Command::new("git").args(["init","-q"]).current_dir(root.path()).status().unwrap().success());

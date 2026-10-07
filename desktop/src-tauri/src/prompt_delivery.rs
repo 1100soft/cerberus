@@ -38,7 +38,8 @@ impl SessionLock {
 impl Drop for SessionLock {fn drop(&mut self){if let Some(active)=ACTIVE.get(){if let Ok(mut active)=active.lock(){active.remove(&self.0);}}}}
 
 fn drain(mut input:impl Read+Send+'static,limit:usize,output:Option<tauri::ipc::Channel<Value>>,stream:&'static str)->std::thread::JoinHandle<String>{
-    std::thread::spawn(move||{let mut retained=Vec::new();let mut buffer=[0u8;4096];while let Ok(size)=input.read(&mut buffer){if size==0{break;}if let Some(output)=&output{let _=output.send(json!({"stream":stream,"text":String::from_utf8_lossy(&buffer[..size])}));}let remaining=limit.saturating_sub(retained.len());retained.extend_from_slice(&buffer[..size.min(remaining)]);}String::from_utf8_lossy(&retained).trim().to_owned()})
+    std::thread::spawn(move||{let mut retained=Vec::new();let mut buffer=[0u8;4096];while let Ok(size)=input.read(&mut buffer){if size==0{break;}
+        if let Some(output)=&output{let _=output.send(json!({"stream":stream,"text":String::from_utf8_lossy(&buffer[..size])}));}let remaining=limit.saturating_sub(retained.len());retained.extend_from_slice(&buffer[..size.min(remaining)]);}String::from_utf8_lossy(&retained).trim().to_owned()})
 }
 
 fn response_text(value:&Value)->Option<&str>{

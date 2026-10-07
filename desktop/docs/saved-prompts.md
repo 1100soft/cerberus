@@ -118,3 +118,20 @@ of conditions; older `conditions` records remain supported.
 The in-app handoff popover gives a brief summary and Agent/Shell examples. The separate [handoff guide](handoffs.md) provides detailed instructions and commands. Automation cards grow to display their full names and scope/condition summaries. They do not shrink as more cards are added; the containing automation list scrolls within its pane.
 
 Codex model discovery is independent of the account/usage check. A missing or expired ChatGPT session shows an account warning while preserving the runtime's model catalog; it still needs reconnection before agent execution. A failed catalog refresh retains the last successful catalog for that account and exposes its error through the model-availability info button. No static model list is substituted.
+
+## Retrying blocked actions
+
+Failed runs retain the original automation definition, repository/account/model,
+trigger context, conversation ID, and incoming handoff in the run log. The retry
+icon on an automation card retries that specific failed run. In the conversation
+list, select the blocked conversation and use **Retry blocked action**, or choose
+it from the conversation's context menu. A pre-execution failure can also use
+**Retry last message**. These actions replay the original request, preserving the
+handoff, even when the automation's prompt has since been edited. Existing
+conversations are reused when possible. An agent response beginning with
+“Blocked” is treated as a blocked action and retains the same retry context.
+
+Handoffs are archived outside the pending queue, so a blocked action does not
+loop automatically. Explicit retry reclaims the exact original emission. Review
+partial changes before retrying a run that already performed work. **Run once**
+starts a separate manual execution and does not replay a prior handoff.

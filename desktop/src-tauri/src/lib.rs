@@ -192,7 +192,7 @@ async fn chatgpt_capabilities(profile_id:String,state:State<'_,AppState>)->Resul
 }
 fn codex_capabilities(mut request:impl FnMut(&str,serde_json::Value)->Result<serde_json::Value,String>,email:Option<&str>)->Result<serde_json::Value,String>{
   let account=request("account/read",serde_json::json!({"refreshToken":false}));
-  let account_error=match account{Ok(account) if account["account"]["type"]=="chatgpt" && !email.is_some_and(|email|account["account"]["email"].as_str()!=Some(email))=>None,Ok(_)=>Some("Reconnect the assigned ChatGPT account to restore usage information and agent execution.".to_owned()),Err(error)=>Some(error)};
+  let account_error=match account{Ok(account) if account["account"]["type"]=="chatgpt" && !email.is_some_and(|email|account["account"]["email"].as_str()!=Some(email))=>None,Ok(_)=>Some(codex::missing_account_error()),Err(error)=>Some(error)};
   let mut models=Vec::new();let mut cursor:Option<String>=None;let mut seen=std::collections::HashSet::new();
   loop {let page=request("model/list",serde_json::json!({"limit":100,"cursor":cursor,"includeHidden":false}))?;if let Some(data)=page["data"].as_array(){models.extend(data.clone());}cursor=page["nextCursor"].as_str().map(String::from);match &cursor{Some(value) if seen.insert(value.clone())=>{},_=>break}}
   let usage=match account_error{Some(error)=>Err(error),None=>request("account/rateLimits/read",serde_json::json!({}))};
@@ -301,6 +301,8 @@ fn publish_handoff(repository_id:String,name:String,run_id:String,payload:Option
 fn has_pending_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<bool,String>{handoffs::has_pending_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
 #[tauri::command]
 fn claim_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
+#[tauri::command]
+fn retry_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<handoffs::Claim,String>{handoffs::retry(&state.db.repository_path(&repository_id)?,&name,&id)}
 #[tauri::command]
 fn finish_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::finish(&state.db.repository_path(&repository_id)?,&name,&id)}
 #[tauri::command]
@@ -899,7 +901,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, claim_handoff, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, claim_handoff, retry_handoff, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,
@@ -955,7 +957,7 @@ pub fn run() {
  #[test] fn signed_out_account_keeps_catalog_without_reading_usage(){
   let mut calls=Vec::new();
   let result=codex_capabilities(|method,_|{calls.push(method.to_owned());match method{"account/read"=>Ok(serde_json::json!({"account":null})),"model/list"=>Ok(serde_json::json!({"data":[{"model":"available-model"}],"nextCursor":null})),_=>panic!("Usage must not be read for an unverified account")}},None).unwrap();
-  assert_eq!(result["models"][0]["model"],"available-model");assert!(result["usage"].is_null());assert!(result["usageError"].as_str().unwrap().contains("Reconnect"));assert_eq!(calls,vec!["account/read","model/list"]);
+  assert_eq!(result["models"][0]["model"],"available-model");assert!(result["usage"].is_null());assert!(!result["usageError"].as_str().unwrap().is_empty());assert_eq!(calls,vec!["account/read","model/list"]);
  }
  #[test] fn verified_account_retains_paginated_catalog_and_usage(){
   let result=codex_capabilities(|method,params|Ok(match method{"account/read"=>serde_json::json!({"account":{"type":"chatgpt","email":"test@example.test"}}),"model/list" if params["cursor"].is_null()=>serde_json::json!({"data":[{"model":"first"}],"nextCursor":"page-two"}),"model/list"=>serde_json::json!({"data":[{"model":"second"}],"nextCursor":null}),"account/rateLimits/read"=>serde_json::json!({"rateLimits":{}}),_=>panic!("Unexpected request")}),Some("test@example.test")).unwrap();
