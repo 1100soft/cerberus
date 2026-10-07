@@ -7,7 +7,7 @@ import json from 'highlight.js/lib/languages/json';
 import diff from 'highlight.js/lib/languages/diff';
 import { api, type AutomationLog, type AutomationLogSummary } from '../lib/api';
 import { currentAutomationLogs, subscribeAutomationLogs } from '../lib/automationLogs';
-import { subscribeSavedPrompts, type SavedPrompt } from '../lib/savedPrompts';
+import { acknowledgeAutomationError, subscribeSavedPrompts, type SavedPrompt } from '../lib/savedPrompts';
 import { ShellCode } from './ShellCode';
 import { Select } from './Select';
 import type { Repository } from '../types';
@@ -18,6 +18,7 @@ function HighlightedCode({value}:{value:string}){
   return <pre className="automation-log-code"><code dangerouslySetInnerHTML={{__html:html}}/></pre>;
 }
 export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:SavedPrompt;repositories:Repository[];onClose:()=>void;initialRun?:{repositoryId:string;runId:string}}){
+  useEffect(()=>acknowledgeAutomationError(job.id),[job.id,job.lastAt]);
   const [summaries,setSummaries]=useState<AutomationLogSummary[]>([]);
   const initialSelection=initialRun?`${initialRun.repositoryId}:${initialRun.runId}`:'';
   const [selected,setSelected]=useState(initialSelection);

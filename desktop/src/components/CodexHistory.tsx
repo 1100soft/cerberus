@@ -1,4 +1,3 @@
-import { canRetryConversation, retryConversationAction, refreshBlockedAutomations, subscribeSavedPrompts } from '../lib/savedPrompts';
 import { CopyButton } from './CopyButton';
 import { IdentitySignIn } from './IdentitySignIn';
 import { VSCodeIcon, CursorIcon, ClaudeIcon } from './Icons';
@@ -56,8 +55,6 @@ const providers: Provider[] = ["codex", "cursor", "copilot", "claude"];
 
 function ConversationBrowser({ repository, revision, enabled, onCursorConversation }: { repository: Repository; revision: number; enabled: Provider[]; onCursorConversation: (id?: string) => void }) {
   const [archived, setArchived] = useState(false);
-  const [,setRetryRevision]=useState(0);
-  useEffect(()=>{void refreshBlockedAutomations();return subscribeSavedPrompts(()=>setRetryRevision(value=>value+1));},[]);
   const chats = useAgentChats().filter(chat => chat.repositoryId === repository.id);
   const listedChats = chats.filter(chat => !chat.originKey && !!chat.archived === archived);
   const enabledKey = enabled.join(",");
@@ -85,11 +82,10 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
     if(!text)throw new Error('No conversation messages are available to copy.');
     return text;
   };
-  const menuAction=async(action:'rename'|'archive'|'copy'|'share'|'retry')=>{
+  const menuAction=async(action:'rename'|'archive'|'copy'|'share')=>{
     const target=contextMenu;if(!target)return;const chat=target.chat,thread=target.thread;const title=chat?.name||thread?.name||thread?.preview||'Untitled conversation';
     try {
-      if(action==='retry'){if(!chat)throw new Error('No conversation selected.');await retryConversationAction(chat.id);}
-      else if(action==='rename'){const name=window.prompt('Conversation name',title)?.trim();if(!name)return;if(chat)renameAgentChat(chat.id,name);else if(thread?.provider==='codex'){await api.codexUpdateThread(repository.id,thread.id,'rename',name);await refreshThreadList(repository.id,archived,enabled);}else if(thread){const next={...cursorNames,[thread.id]:name};setCursorNames(next);localStorage.setItem('gitcerberus.cursorConversationNames',JSON.stringify(next));}}
+      if(action==='rename'){const name=window.prompt('Conversation name',title)?.trim();if(!name)return;if(chat)renameAgentChat(chat.id,name);else if(thread?.provider==='codex'){await api.codexUpdateThread(repository.id,thread.id,'rename',name);await refreshThreadList(repository.id,archived,enabled);}else if(thread){const next={...cursorNames,[thread.id]:name};setCursorNames(next);localStorage.setItem('gitcerberus.cursorConversationNames',JSON.stringify(next));}}
       else if(action==='archive'){if(chat)archiveAgentChat(chat.id,!chat.archived);else if(thread?.provider==='codex'){await api.codexUpdateThread(repository.id,thread.id,archived?'unarchive':'archive');await refreshThreadList(repository.id,archived,enabled);}else if(thread){await api.cursorArchiveThread(repository.id,thread.id,!archived);await refreshThreadList(repository.id,archived,enabled);}}
       else {const available=thread ? (await completeMessages(repository.id,thread,()=>false)).messages : undefined;const transcript=(chat?.messages||available||[]).map(message=>`${message.role}: ${message.text}`).join('\n\n');if(!transcript)throw new Error('No conversation messages are available to copy.');if(action==='share' && navigator.share)await navigator.share({title,text:transcript});else await navigator.clipboard.writeText(transcript);}
       setMenuError('');
@@ -334,7 +330,7 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
     {menuError && <p className="config-error" role="alert">{menuError}</p>}
     <div className="codex-conversations">
       <div className="codex-thread-list" aria-label="Conversations" aria-busy={loading}><ConversationSearch repositoryId={repository.id} enabled={enabled} chats={chats} onResults={receiveRepoHits} onNavigate={navigateRepoMatch} />
-        <div className="conversation-list-tools">{appChat&&canRetryConversation(appChat.id)&&<button type="button" onClick={()=>{void retryConversationAction(appChat.id).catch(error=>setMenuError(String(error)));}}>Retry blocked action</button>}<label className="codex-archive"><input type="checkbox" checked={archived} onChange={event => setArchived(event.target.checked)} />Archived</label></div>
+        <div className="conversation-list-tools"><label className="codex-archive"><input type="checkbox" checked={archived} onChange={event => setArchived(event.target.checked)} />Archived</label></div>
         {entries.map(entry=>entry.chat ? <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.chat.profile.provider} ${appChat?.id === entry.chat.id ? 'active' : ''}`} aria-pressed={appChat?.id === entry.chat.id} title={`${entry.chat.profile.provider} · ${entry.chat.profile.label} · ${new Date(entry.time).toLocaleString()} · ${entry.chat.status}`} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,chat:entry.chat});}}><span className="conversation-provider-mark">{providerIcon[entry.chat.profile.provider as Provider] || <MessageSquare/>}</span><b>{entry.chat.name}</b>{(entry.chat.running || matchingThread(entry.chat)?.working) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button> : entry.thread && <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.thread.provider} ${selectedKey === entry.key ? 'active' : ''}`} aria-pressed={selectedKey === entry.key} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,thread:entry.thread});}}><span className="conversation-provider-mark">{providerIcon[entry.thread.provider]}</span><b title={`${providerName(entry.thread.provider)} · ${new Date(updatedMillis(entry.thread.updatedAt)).toLocaleString()}${entry.thread.gitInfo?.branch ? ` · ${entry.thread.gitInfo.branch}` : ''}${entry.thread.provider === "copilot" || entry.thread.provider === "claude" ? " · Live activity unavailable" : ""}
 ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.thread.preview || "Untitled conversation"}</b>{(entry.thread.working || chats.some(chat=>chat.originKey===entry.key && chat.running)) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button>)}
         {loading && <p className="panel-copy" role="status">Loading conversations…</p>}
@@ -353,7 +349,7 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         </>}
       </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></div>
     </div>
-    {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canRetry={!!contextMenu.chat&&canRetryConversation(contextMenu.chat.id)} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} getCopyText={copyConversationText} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
+    {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} getCopyText={copyConversationText} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
     {reviewEdits && <EditReview edits={reviewEdits} onClose={()=>setReviewEdits(undefined)} />}
   </>;
 }

@@ -1068,7 +1068,7 @@ input[type="number"] { text-align: right; }
 .automation-page .saved-prompt-list article strong, .automation-page .saved-prompt-list article small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .automation-page .saved-prompt-list article > div:first-child { overflow: visible; }
 
-.automation-list-header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-
-.handoff-retention-field { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.automation-list-header { flex-wrap: wrap; }
+.automation-runtime-dialog .automation-dialog-content { display: flex; flex-direction: column; gap: 12px; }
+.handoff-retention-field { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .handoff-retention-field input { width: 8em; }

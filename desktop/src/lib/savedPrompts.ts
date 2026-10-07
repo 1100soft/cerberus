@@ -4,7 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useSyncExternalStore } from 'react';
 import { addAutomationNotice } from './automationNotifications';
 import type { Provider } from './conversationCache';
-import { getAgentChat, updateAgentChat, latestAgentChat, subscribeAgentChats, runExternalAutomation, sendAgentMessage, waitForAgentChat, type AgentProfile } from './agentChats';
+import { getAgentChat, latestAgentChat, subscribeAgentChats, runExternalAutomation, sendAgentMessage, waitForAgentChat, type AgentProfile } from './agentChats';
 import { automationAccount } from './automationAccounts';
 import { appendAutomationOutput, beginAutomationOutput, endAutomationOutput } from './automationOutput';
 import { isGithubRemote } from './repositories';
@@ -15,59 +15,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
-export type AutomationRetry={job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
-const blockedRuns=new Map<string,AutomationLog>();
-const retryingRuns=new Set<string>();
-const expiredRuns=new Set<string>();
-let blockedGeneration=0;
-const retryKey=(log:Pick<AutomationLog,'automationId'|'repositoryId'|'runId'>)=>`${log.automationId}:${log.repositoryId}:${log.runId}`;
-export function blockedAutomationRuns(id:string){return [...blockedRuns.values()].filter(log=>log.automationId===id&&log.retry&&!expiredRuns.has(retryKey(log))).sort((a,b)=>b.createdAt-a.createdAt);}
-function originalConversationRun(chatId:string){
-  const chat=getAgentChat(chatId);if(!chat||chat.running)return;
-  const log=[...blockedRuns.values()].find(log=>log.retry?.chatId===chatId||(!log.retry?.chatId&&log.retry?.incoming&&chat.repositoryId===log.repositoryId&&chat.messages.some(message=>message.role==='user'&&message.text.includes(log.retry!.incoming!.id))));
-  if(log?.retry)log.retry.chatId=chatId;
-  return log;
-}
-export function blockedConversationRun(chatId:string){const log=originalConversationRun(chatId);return log&&!expiredRuns.has(retryKey(log))?log:undefined;}
-export function canRetryConversation(chatId:string){
-  const chat=getAgentChat(chatId),log=originalConversationRun(chatId);
-  if(!chat||chat.running||(log&&expiredRuns.has(retryKey(log)))||(!log&&chat.automationRetry))return false;
-  return !!log||!!chat.retryable;
-}
-export async function retryConversationAction(chatId:string){
-  const chat=getAgentChat(chatId);if(!chat||chat.running)throw new Error('Wait for the conversation to finish.');
-  const original=originalConversationRun(chatId);if(original&&expiredRuns.has(retryKey(original)))throw new Error('The original handoff has expired. Request a new handoff from the upstream agent.');
-  const log=blockedConversationRun(chatId);if(log)return retryBlockedAutomation(log);
-  if(chat.automationRetry)throw new Error('Load the original blocked automation before retrying.');
-  await sendAgentMessage(chat.repositoryId,chat.profile,chat.messages.at(-2)?.text||'',chat.mode||'analyze',chat.id,[],chat.session,false,true,chat.model,undefined,chat.reasoningEffort);
-}
-export async function refreshBlockedAutomations(){
-  const generation=blockedGeneration;
-  for(const job of jobs){try{
-    const logs=await api.listAutomationLogs(job.id);
-    for(const summary of logs.filter(item=>item.status==='error')){
-      const log=await api.readAutomationLog(job.id,summary.repositoryId,summary.runId);
-      if(log.retry?.incoming){const incoming=log.retry.incoming;try{if(await api.handoffRetained(incoming.repositoryId,incoming.name,incoming.id))expiredRuns.delete(retryKey(log));else expiredRuns.add(retryKey(log));}catch(error){console.warn('Could not inspect retained handoff:',error);}}
-      if(log.retry&&generation===blockedGeneration&&!retryingRuns.has(retryKey(log))){if(!log.retry.job)log.retry.job={...job,prompt:log.command};blockedRuns.set(retryKey(log),log);}
-    }
-  }catch(error){console.warn('Could not load blocked automation runs:',error);}}
-  for(const listener of listeners)listener();
-}
-export async function retryBlockedAutomation(log:AutomationLog){
-  const key=retryKey(log),retry=blockedRuns.get(key)?.retry;
-  if(!retry||retryingRuns.has(key)||expiredRuns.has(key))throw new Error('This action is no longer available to retry.');
-  if(running.has(log.automationId))throw new Error('Wait for this automation to finish before retrying.');
-  retryingRuns.add(key);running.add(log.automationId);blockedGeneration++;
-  let incoming=retry.incoming;
-  try{
-    if(incoming)incoming={...incoming,...await api.retryHandoff(incoming.repositoryId,incoming.name,incoming.id)};
-    await runSavedPrompt(log.automationId,true,log.repositoryId,incoming,retry.ciRun,retry.eventBranch,retry.eventSha,retry.matchedConditions,retry);
-    await api.writeAutomationLog({...log,retry:undefined});
-    blockedRuns.delete(key);
-    for(const listener of listeners)listener();
-  }finally{retryingRuns.delete(key);running.delete(log.automationId);}
-}
+export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export function automationConditionSets(job:SavedPrompt):Trigger[][]{return job.conditionSets?.length?job.conditionSets:[job.conditions?.length&&job.conditions[0]===job.trigger?job.conditions:[job.trigger]];}
 export function automationConditions(job:SavedPrompt):Trigger[]{return [...new Set(automationConditionSets(job).flat())];}
 const exclusiveEvents=new Set<Trigger>(['commit','ciPass','ciFail']);
@@ -115,7 +63,7 @@ function markCiHandled(jobId:string,repositoryId:string,run:GithubCiRun){
   localStorage.setItem(ciHandledKey,JSON.stringify(next));
   Object.assign(ciHandled,next);
 }
-export type HandoffClaim={id:string;path:string;name:string;repositoryId:string};
+export type HandoffClaim={id:string;path:string;name:string;repositoryId:string;retained?:boolean};
 export function validHandoffName(name:string){return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name);}
 export function emittedHandoff(value:string){const conditional=value.startsWith('(')&&value.endsWith(')');return {name:conditional?value.slice(1,-1):value,conditional};}
 export function validEmittedHandoff(value:string){return validHandoffName(emittedHandoff(value).name);}
@@ -144,7 +92,7 @@ let jobs:SavedPrompt[]=read();
 let checking=false;
 let recheck=false;
 
-function read():SavedPrompt[] {try {const data=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(data)?data.filter(item=>item&&typeof item.id==='string'&&typeof item.prompt==='string'&&typeof item.threadId==='string').map(item=>item.kind==='git'||item.kind==='shell'||item.kind==='notification'||item.target==='new'?item:{...item,enabled:false,state:'error',lastResult:'Existing-conversation delivery was retired. Create a new in-app automation from this prompt.'}):[];}catch{return [];}}
+function read():SavedPrompt[] {try {const data=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(data)?data.filter(item=>item&&typeof item.id==='string'&&typeof item.prompt==='string'&&typeof item.threadId==='string').map(item=>item.kind==='git'||item.kind==='shell'||item.kind==='notification'||item.target==='new'?item:{...item,state:'error',lastResult:'Existing-conversation delivery was retired. Create a new in-app automation from this prompt.'}):[];}catch{return [];}}
 function publish(next:SavedPrompt[]){const serialized=JSON.stringify(next);localStorage.setItem(key,serialized);if(localStorage.getItem(key)!==serialized)throw new Error('Automation could not be saved on this device.');jobs=next;for(const listener of listeners)listener();}
 export function subscribeSavedPrompts(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function savedPrompts(){return jobs;}
@@ -155,7 +103,8 @@ export function reorderSavedPrompts(ids:string[]){
   if(ids.length!==jobs.length||new Set(ids).size!==jobs.length||ids.some(id=>!jobs.some(job=>job.id===id)))throw new Error('Automation order is out of date.');
   const byId=new Map(jobs.map(job=>[job.id,job]));publish(ids.map(id=>byId.get(id)!));
 }
-function change(id:string,update:Partial<SavedPrompt>){publish(jobs.map(job=>job.id===id?{...job,...update}:job));}
+export function acknowledgeAutomationError(id:string){const job=jobs.find(item=>item.id===id);if(job?.state==='error'&&job.errorUnread!==false)change(id,{errorUnread:false});}
+function change(id:string,update:Partial<SavedPrompt>){if(update.state==='error')update={...update,errorUnread:true};publish(jobs.map(job=>job.id===id?{...job,...update}:job));}
 async function repositoryAgentBusy(repositoryId:string){
   if(latestAgentChat(repositoryId)?.running)return true;
   const status=await Promise.allSettled([api.codexThreads(repositoryId,false),api.cursorThreads(repositoryId,false)]);
@@ -163,11 +112,15 @@ async function repositoryAgentBusy(repositoryId:string){
   return status.every(item=>item.status==='fulfilled')?false:repositoryHistoryWorking(repositoryId);
 }
 
-export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string,matchedConditions?:Trigger[],retry?:AutomationRetry):Promise<void>{
-  const job=retry?.job||jobs.find(item=>item.id===id);if(!job||job.handoffOnly||(running.has(id)&&!retry)||job.state==='running'){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
-  if(!manual&&!job.enabled){if(incoming)await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);return;}
+async function releaseIncomingHandoff(incoming:HandoffClaim){
+  if(incoming.retained)await api.finishHandoff(incoming.repositoryId,incoming.name,incoming.id);
+  else await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);
+}
+export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string,matchedConditions?:Trigger[]):Promise<void>{
+  const job=jobs.find(item=>item.id===id);if(!job||job.handoffOnly||running.has(id)||job.state==='running'){if(incoming)await releaseIncomingHandoff(incoming);return;}
+  if(!manual&&!job.enabled){if(incoming)await releaseIncomingHandoff(incoming);return;}
   running.add(id);
-
+  let incomingStarted=false;
   let currentLog:AutomationLog|undefined;
   try{
     change(id,{state:'running',lastResult:'Running automation…'});
@@ -197,7 +150,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       currentLog=log;
       await beginAutomationLog(log);
       if(job.kind==='notification'){
-
+        incomingStarted=true;
         addAutomationNotice({automationId:id,repositoryId,title:`${job.title} · ${repositoryLabel}`,message:job.prompt,status:'message'});
         const emissionId=runId;let emissionError='';
         for(const {name,conditional} of (job.emitsHandoffs||[]).map(emittedHandoff)){if(conditional)continue;try{if(await api.publishHandoff(repositoryId,name,emissionId,job.prompt))void tick();}catch(error){failures++;emissionError+=` Could not emit ${name}: ${String(error)}`;}}
@@ -211,20 +164,19 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       addAutomationNotice({automationId:id,repositoryId,title:`${job.title} started`,message:repositoryLabel,status:'started'});
       const outgoing:Record<string,string>={};
       const ciContext=ciRun?`GitHub Actions ${ciRun.conclusion==='success'?'passed':'failed'}: ${ciRun.name}. Branch: ${ciRun.headBranch||'unknown'}. Commit: ${ciRun.headSha}. Run: ${ciRun.htmlUrl}.\n\n`:'';
-      let stdout='',stderr='',response='',activity='',result='',failure='',agentStarted=false,chatId:string|undefined;
-      const retryContext:AutomationRetry={job:{...job},manual:retry?.manual??manual,incoming,ciRun,eventBranch,eventSha,matchedConditions};
+      let stdout='',stderr='',response='',activity='',result='',failure='',agentStarted=false;
       const unsubscribeProgress=subscribeAgentChats(()=>{const chat=latestAgentChat(repositoryId);if(chat&&chat.updatedAt>=createdAt){activity=chat.activity.slice(-2_000_000);response=chat.messages.filter(message=>message.role==='assistant').map(message=>message.text).join('\n\n').slice(-2_000_000);updateAutomationLog(log,{response,activity});}});
       try{
         for(const {name} of (job.emitsHandoffs||[]).map(emittedHandoff))outgoing[name]=await api.handoffOutputPath(repositoryId,name,runId);
-        const actionPrompt=automationPromptWithHandoffs(ciContext+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing,(job.emitsHandoffs||[]).map(emittedHandoff).filter(item=>item.conditional).map(item=>item.name));
-        if(job.kind==='shell'){const shell=await api.runAutomationShell(repositoryId,job.prompt,chunk=>{
+        const actionPrompt=automationPromptWithHandoffs(ciContext+(eventSha?`Trigger commit: ${eventSha}. Branch: ${eventBranch||'unknown'}.\n\n`:'')+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing,(job.emitsHandoffs||[]).map(emittedHandoff).filter(item=>item.conditional).map(item=>item.name));
+        if(job.kind==='shell'){incomingStarted=true;const shell=await api.runAutomationShell(repositoryId,job.prompt,chunk=>{
           if(chunk.stream==='stderr')stderr=(stderr+chunk.text).slice(-2_000_000);else stdout=(stdout+chunk.text).slice(-2_000_000);
           updateAutomationLog(log,{stdout,stderr});
           appendAutomationOutput(id,{repositoryId,stream:chunk.stream==='stderr'?'stderr':'stdout',text:chunk.text});
-        },incoming?.repositoryId===repositoryId?incoming.path:undefined,outgoing,{CERBERUS_REPOSITORY_ID:repositoryId,CERBERUS_REPOSITORY_NAME:repositoryLabel,CERBERUS_AUTOMATION_ID:id,CERBERUS_AUTOMATION_NAME:job.title,CERBERUS_RUN_ID:runId,CERBERUS_CONDITIONS:(retry?retry.manual:manual)?'manual':(matchedConditions||automationConditions(job)).join(','),CERBERUS_BRANCH:eventBranch||ciRun?.headBranch||'',CERBERUS_COMMIT_SHA:eventSha||ciRun?.headSha||'',CERBERUS_CI_RUN_URL:ciRun?.htmlUrl||'',CERBERUS_CI_CONCLUSION:ciRun?.conclusion||''});result=shell.result;stdout=shell.stdout||shell.result;stderr=shell.stderr;}
+        },incoming?.repositoryId===repositoryId?incoming.path:undefined,outgoing,{CERBERUS_REPOSITORY_ID:repositoryId,CERBERUS_REPOSITORY_NAME:repositoryLabel,CERBERUS_AUTOMATION_ID:id,CERBERUS_AUTOMATION_NAME:job.title,CERBERUS_RUN_ID:runId,CERBERUS_CONDITIONS:manual?'manual':(matchedConditions||automationConditions(job)).join(','),CERBERUS_BRANCH:eventBranch||ciRun?.headBranch||'',CERBERUS_COMMIT_SHA:eventSha||ciRun?.headSha||'',CERBERUS_CI_RUN_URL:ciRun?.htmlUrl||'',CERBERUS_CI_CONCLUSION:ciRun?.conclusion||''});result=shell.result;stdout=shell.stdout||shell.result;stderr=shell.stderr;}
         else if(job.kind==='git'){
           if(!job.gitAction)throw new Error('Choose a Git action.');
-
+          incomingStarted=true;
           const args=job.gitAction==='commit'?{message:job.prompt}:job.gitAction==='stage'||job.gitAction==='unstage'?{path:job.prompt}:{};
           await api.git(repositoryId,job.gitAction,args);
           result=`Git ${job.gitAction} completed.`;
@@ -233,26 +185,20 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
           const chatgpt=currentChatgptAccounts();
           const account=job.accountsByRepository?.[repositoryId]||(repository?automationAccount(repository,job.provider,chatgpt.profiles,chatgpt.settings,currentExternalIdentities(),await api.identities()):undefined)|| (job.profile&&job.route?{profile:job.profile,route:job.route}:undefined);
           if(!account)throw new Error('The assigned agent account is unavailable.');
-          retryContext.job.accountsByRepository={...job.accountsByRepository,[repositoryId]:account};
-          agentStarted=true;
+          agentStarted=true;incomingStarted=true;
           if(account.route==='profile'){
-            const previous=retry?.chatId?getAgentChat(retry.chatId):undefined;
-            chatId=await sendAgentMessage(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',previous?.id,[],previous?.session,!previous||(!previous.session&&!previous.retryable),!!previous?.retryable,job.model,job.title,job.reasoningEffort);
-            retryContext.chatId=chatId;
+            const chatId=await sendAgentMessage(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',undefined,[],undefined,true,false,job.model,job.title,job.reasoningEffort);
             result=await waitForAgentChat(chatId);
             activity=getAgentChat(chatId)?.activity||'';
-          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',retry?.chatId,job.title);result=run.text;chatId=run.chatId;retryContext.chatId=chatId;activity=getAgentChat(run.chatId)?.activity||'';}
+          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',job.title);result=run.text;activity=getAgentChat(run.chatId)?.activity||'';}
           response=result;
-          if(/^blocked\b/i.test(result.trim()))throw new Error(result);
           window.dispatchEvent(new CustomEvent('saved-prompt-finished',{detail:{repositoryId,provider:job.provider}}));
         }
-      }catch(error){failure=String(error);failures++;if(agentStarted){const recent=latestAgentChat(repositoryId);if(recent&&recent.updatedAt>=createdAt){activity=recent.activity||activity;chatId=recent.id;retryContext.chatId=chatId;}}}
+      }catch(error){failure=String(error);failures++;if(agentStarted){const recent=latestAgentChat(repositoryId);if(recent&&recent.updatedAt>=createdAt)activity=recent.activity||activity;}}
       unsubscribeProgress();
       for(const name of Object.keys(outgoing)){try{if(await api.publishHandoff(repositoryId,name,runId))void tick();}catch(error){failure=[failure,`Could not emit ${name}: ${String(error)}`].filter(Boolean).join(' · ');failures++;}}
       try{
-        const finalLog:AutomationLog={automationId:id,repositoryId,runId,createdAt,kind:job.kind==='shell'?'shell':job.kind==='git'?'git':'agent',status:failure?'error':'completed',command:job.prompt,stdout,stderr:failure?[stderr,failure].filter(Boolean).join('\n'):stderr,response,activity,retry:failure?retryContext:undefined};
-        if(failure){blockedGeneration++;blockedRuns.set(retryKey(finalLog),finalLog);if(chatId)updateAgentChat(chatId,{automationRetry:true});}
-        await finishAutomationLog(finalLog);
+        await finishAutomationLog({automationId:id,repositoryId,runId,createdAt,kind:job.kind==='shell'?'shell':job.kind==='git'?'git':'agent',status:failure?'error':'completed',command:job.prompt,stdout,stderr:failure?[stderr,failure].filter(Boolean).join('\n'):stderr,response,activity});
       }catch(error){failure=[failure,`Log could not be saved: ${String(error)}`].filter(Boolean).join(' · ');if(!failure.includes(' · '))failures++;}
       currentLog=undefined;
       addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} ${failure?'failed':'completed'}`,message:`${repositoryLabel}${failure?` · ${failure}`:''}`,status:failure?'failed':'completed'});
@@ -269,13 +215,11 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
   }catch(error){
     const failedLog=currentLog||{automationId:id,repositoryId:runtimeRepositoryId||job.repositoryId,runId:crypto.randomUUID(),createdAt:Date.now(),kind:job.kind==='shell'?'shell':job.kind==='git'?'git':job.kind==='notification'?'notification':'agent',status:'running',command:job.prompt,stdout:'',stderr:'',response:'',activity:''} as AutomationLog;
     const latest=currentAutomationLogs(id).find(item=>item.repositoryId===failedLog.repositoryId&&item.runId===failedLog.runId)||failedLog;
-    const blockedLog:AutomationLog={...latest,status:'error',stderr:[latest.stderr,String(error)].filter(Boolean).join('\n'),retry:{job:{...job},manual:retry?.manual??manual,incoming,ciRun,eventBranch,eventSha,matchedConditions}};
-    blockedGeneration++;blockedRuns.set(retryKey(blockedLog),blockedLog);
-    try{await finishAutomationLog(blockedLog);}catch(logError){console.warn('Could not save failed automation log:',logError);}
+    try{await finishAutomationLog({...latest,status:'error',stderr:[latest.stderr,String(error)].filter(Boolean).join('\n')});}catch(logError){console.warn('Could not save failed automation log:',logError);}
     addAutomationNotice({automationId:id,repositoryId:failedLog.repositoryId,runId:failedLog.runId,title:`${job.title} failed`,message:String(error),status:'failed'});
     try{change(id,{state:'error',lastResult:String(error),lastAt:Date.now(),nextAt:Date.now()+job.minutes*60_000});}catch{window.dispatchEvent(new CustomEvent('automation-storage-error',{detail:String(error)}));}
   }
-  finally{if(incoming)try{await api.finishHandoff(incoming.repositoryId,incoming.name,incoming.id);}catch(error){console.warn('Could not finish handoff:',error);}running.delete(id);for(const [repositoryId,active] of workingRepositories)if(active.has(id))setRepositoryWorking(repositoryId,id,false);if(job.kind==='shell')endAutomationOutput(id);}
+  finally{if(incoming)try{if(incomingStarted||incoming.retained)await api.finishHandoff(incoming.repositoryId,incoming.name,incoming.id);else await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);}catch(error){console.warn('Could not finish handoff:',error);}running.delete(id);for(const [repositoryId,active] of workingRepositories)if(active.has(id))setRepositoryWorking(repositoryId,id,false);if(job.kind==='shell')endAutomationOutput(id);}
 }
 
 async function tick(now=Date.now()){
@@ -529,10 +473,9 @@ async function syncFileWatchers(){
   const errors=await api.watchAutomationRepositories(ids);
   await Promise.allSettled(ids.filter(id=>!fresh.includes(id)).map(id=>recordAutomationCommit(id)));
   if(errors.length)console.warn('Automation file watchers:',errors.join('; '));
-  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()).catch(error=>console.warn('Handoff cleanup:',error));}
+  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).catch(error=>console.warn('Handoff cleanup:',error));}
 }
 export function startSavedPromptScheduler(){
-  void refreshBlockedAutomations();
   // The dashboard remains mounted when the Tauri window is hidden. A crash or
   // restart leaves a running job paused for inspection instead of retrying it.
   let stopped=false;let unlisten:(()=>void)|undefined;let unlistenGit:(()=>void)|undefined;

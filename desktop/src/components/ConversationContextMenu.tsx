@@ -1,9 +1,9 @@
 import { CopyButton } from './CopyButton';
-import { Archive, ArchiveRestore, Share2, Pencil, RefreshCw } from 'lucide-react';
+import { Archive, ArchiveRestore, Share2, Pencil } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-type Action = 'rename' | 'archive' | 'copy' | 'share' | 'retry';
-export function ConversationContextMenu({x,y,title,archived,canManage=true,canRetry=false,getCopyText,onAction,onClose}:{x:number;y:number;title:string;archived:boolean;canManage?:boolean;canRetry?:boolean;getCopyText:()=>Promise<string>;onAction:(action:Action)=>void;onClose:()=>void}) {
+type Action = 'rename' | 'archive' | 'copy' | 'share';
+export function ConversationContextMenu({x,y,title,archived,canManage=true,getCopyText,onAction,onClose}:{x:number;y:number;title:string;archived:boolean;canManage?:boolean;getCopyText:()=>Promise<string>;onAction:(action:Action)=>void;onClose:()=>void}) {
   const menu=useRef<HTMLDivElement>(null);
   const [position,setPosition]=useState({left:x,top:y});
   useLayoutEffect(()=>{
@@ -28,7 +28,6 @@ export function ConversationContextMenu({x,y,title,archived,canManage=true,canRe
   },[onClose]);
   const choose=(action:Action)=>{onClose();onAction(action);};
   return <div ref={menu} className="context-menu" role="menu" style={position}><p>{title}</p>
-    {canRetry && <button role="menuitem" onClick={()=>choose('retry')}><RefreshCw/>Retry blocked action</button>}
     {canManage && <button role="menuitem" onClick={()=>choose('rename')}><Pencil/>Rename</button>}
     {canManage && <button role="menuitem" onClick={()=>choose('archive')}>{archived?<ArchiveRestore/>:<Archive/>}{archived?'Unarchive':'Archive'}</button>}
     {canManage && <hr/>}

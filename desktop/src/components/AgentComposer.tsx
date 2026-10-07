@@ -1,4 +1,3 @@
-import { retryConversationAction } from '../lib/savedPrompts';
 import { ArrowUp, SquarePen } from 'lucide-react';
 import { assignedChatgpt,useChatgptAccounts } from '../lib/chatgptAccounts';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -76,7 +75,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
     {assignedId && (!assignedProfile || assignedProfile.disconnected) && (!provider || provider==='codex') && <small role="alert">The assigned ChatGPT identity is disconnected. Reconnect it in Identities or assign another account.</small>}
     {continuing && profile && <small role="status">{!resumeStatus ? 'Checking whether this conversation can continue…' : resumeStatus.available ? 'Continuing the existing conversation.' : `New chat required: ${resumeStatus.reason}`}</small>}
     {needsNew && <small>{contextReady ? '“Start new chat” copies the loaded messages. The original conversation is kept.' : 'Stored messages could not be loaded. “Start new chat” sends only the new prompt and keeps the original conversation.'}</small>}
-    {chat?.retryable && !needsNew && !active && profile && <button type="button" disabled={sending} onClick={async () => { setSending(true); setError(''); try { await retryConversationAction(chat.id); } catch(e) { setError(String(e)); } finally { setSending(false); } }}>Retry last message</button>}
+    {chat?.retryable && !needsNew && !active && profile && <button type="button" disabled={sending} onClick={async () => { setSending(true); setError(''); try { await sendAgentMessage(repositoryId,profile,chat.messages.at(-2)?.text || '',mode,chat.id,[],chat.session,false,true); } catch(e) { setError(String(e)); } finally { setSending(false); } }}>Retry last message</button>}
     {chat && !active && resumeStatus?.available && chat.status !== 'Completed' && <button type="button" disabled={!draft.trim() || sending} onClick={() => { void send(true); }}>Start new chat instead</button>}
     {chat?.status.includes('no credits remaining') && <button type="button" onClick={() => api.openExternalUrl('https://platform.openai.com/settings/organization/billing/').catch(e => setError(String(e)))}>Open API billing</button>}
     {storageError && <p role="alert">{storageError}</p>}

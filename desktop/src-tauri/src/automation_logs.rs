@@ -15,8 +15,6 @@ pub struct Entry {
     pub stderr:String,
     pub response:String,
     pub activity:String,
-    #[serde(default,skip_serializing_if="Option::is_none")]
-    pub retry:Option<serde_json::Value>,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
@@ -77,22 +75,17 @@ pub fn read(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Resul
     use super::*;
     #[test]fn running_entry_updates_in_place(){
         let root=tempfile::tempdir().unwrap();
-        let mut entry=Entry{automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new(),retry:None};
+        let mut entry=Entry{automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();assert_eq!(list(root.path(),"live").unwrap()[0].status,"running");
         entry.activity="working".into();write(root.path(),&entry).unwrap();
         assert_eq!(read(root.path(),"live","repo","run").unwrap().activity,"working");
-        entry.status="error".into();entry.retry=Some(serde_json::json!({"job":{"prompt":"original"},"incoming":{"name":"revise","id":"original"}}));
-        write(root.path(),&entry).unwrap();
-        assert_eq!(read(root.path(),"live","repo","run").unwrap().retry,entry.retry);
-        entry.retry=None;
         entry.status="completed".into();entry.response="done".into();write(root.path(),&entry).unwrap();
         assert_eq!(list(root.path(),"live").unwrap().len(),1);
         assert_eq!(read(root.path(),"live","repo","run").unwrap().response,"done");
-        assert!(read(root.path(),"live","repo","run").unwrap().retry.is_none());
     }
     #[test]fn entries_are_scoped_to_automation_and_repository(){
         let root=tempfile::tempdir().unwrap();
-        let entry=Entry{automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new(),retry:None};
+        let entry=Entry{automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();
         assert_eq!(list(root.path(),"job-1").unwrap().len(),1);
         assert!(list(root.path(),"job-2").unwrap().is_empty());

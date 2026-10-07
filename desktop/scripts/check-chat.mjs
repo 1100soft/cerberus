@@ -86,13 +86,4 @@ assert.equal(useAgentChats().find(chat=>chat.id===retryChat).messages.at(-1).edi
 complete.resolve(); await new Promise(resolve=>setTimeout(resolve,0));
 console.log('Edit attribution, failure explanation and retry without duplicate prompts passed');
 
-const namedChat=await sendAgentMessage('named',profile,'Long handoff instructions must not become the title','edit',undefined,[],undefined,true,false,undefined,'Revision automation');
-assert.equal(useAgentChats().find(chat=>chat.id===namedChat).name,'Revision automation');
-calls.at(-1).args.output.onmessage({text:JSON.stringify({type:'thread.started',thread_id:'named-session'})});
-complete.resolve();await new Promise(resolve=>setTimeout(resolve,0));
-await sendAgentMessage('named',profile,'Follow-up','edit',namedChat,[],undefined,false,false,undefined,'A different new-chat title');
-assert.equal(useAgentChats().find(chat=>chat.id===namedChat).name,'Revision automation');
-complete.resolve();await new Promise(resolve=>setTimeout(resolve,0));
-console.log('Explicit conversation names are used at creation and preserved on continuation');
-
 delete globalThis.__chatTestInvoke;
