@@ -1,4 +1,4 @@
-use std::{io::Read,path::Path,process::{Command,Stdio},time::{Duration,Instant}};
+use std::{io::Read,path::Path,process::{Command,Stdio},time::Duration};
 use serde::Serialize;
 use tauri::ipc::Channel;
 
@@ -38,10 +38,10 @@ pub fn run_stream_with_context(repository:&Path,script:&str,channel:Option<Chann
     let mut child=command.spawn().map_err(|error|format!("Could not start shell: {error}"))?;
     let stdout=drain(child.stdout.take().ok_or("Shell output unavailable")?,1_900_000,"stdout",channel.clone());
     let stderr=drain(child.stderr.take().ok_or("Shell error output unavailable")?,1_900_000,"stderr",channel);
-    let deadline=Instant::now()+Duration::from_secs(900);
+    let mut deadline=crate::awake::ActiveDeadline::new(Duration::from_secs(900));
     let status=loop{
         if let Some(status)=child.try_wait().map_err(|error|error.to_string())?{break status;}
-        if Instant::now()>=deadline{
+        if deadline.expired(){
             #[cfg(unix)] unsafe{libc::killpg(child.id() as i32,libc::SIGKILL);}
             let _=child.kill();let _=child.wait();let _=stdout.join();let _=stderr.join();
             return Err("Shell script timed out after 15 minutes.".into());

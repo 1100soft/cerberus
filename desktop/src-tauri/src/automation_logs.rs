@@ -24,6 +24,7 @@ pub struct Entry {
     pub stderr:String,
     pub response:String,
     pub activity:String,
+    #[serde(default,skip_serializing_if="Option::is_none")] pub conversation:Option<serde_json::Value>,
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub retry:Option<serde_json::Value>,
 }
@@ -86,7 +87,7 @@ pub fn read(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Resul
     use super::*;
     #[test]fn running_entry_updates_in_place(){
         let root=tempfile::tempdir().unwrap();
-        let mut entry=Entry{context:Context::default(),retry:None,automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
+        let mut entry=Entry{context:Context::default(),conversation:None,retry:None,automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();assert_eq!(list(root.path(),"live").unwrap()[0].status,"running");
         entry.context.branch=Some("correction/test".into());entry.context.commit_sha=Some("selected-commit".into());entry.activity="working".into();write(root.path(),&entry).unwrap();
         assert_eq!(read(root.path(),"live","repo","run").unwrap().activity,"working");assert_eq!(list(root.path(),"live").unwrap()[0].context.branch.as_deref(),Some("correction/test"));
@@ -101,7 +102,7 @@ pub fn read(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Resul
     }
     #[test]fn entries_are_scoped_to_automation_and_repository(){
         let root=tempfile::tempdir().unwrap();
-        let entry=Entry{context:Context::default(),retry:None,automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};
+        let entry=Entry{context:Context::default(),conversation:None,retry:None,automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();
         assert_eq!(list(root.path(),"job-1").unwrap().len(),1);
         assert!(list(root.path(),"job-2").unwrap().is_empty());

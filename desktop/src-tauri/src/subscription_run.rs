@@ -79,7 +79,9 @@ pub fn run(
         .ok_or("Codex returned no turn identifier")?
         .to_owned();
     emit(&output, json!({"type":"turn.started"}))?;
+    let mut deadline=crate::awake::ActiveDeadline::new(std::time::Duration::from_secs(900));
     loop {
+        if deadline.expired(){client.interrupt(&thread,&turn);return Err("Codex timed out after 15 minutes of active execution. The conversation is preserved.".into());}
         if cancel.load(Ordering::SeqCst) {
             client.interrupt(&thread, &turn);
             return Err("Run stopped. Any edits already made remain in the checkout.".into());
@@ -328,6 +330,7 @@ for line in sys.stdin:
             Channel::new(|_| Ok(())),
         )
         .unwrap_err();
-        assert!(error.contains("Reconnect"));
+        // Headless Linux may require storage repair before reconnecting.
+        assert_eq!(error, crate::codex::missing_account_error());
     }
 }

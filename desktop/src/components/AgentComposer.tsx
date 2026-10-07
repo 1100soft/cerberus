@@ -57,7 +57,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
     if(chat && chat.profile.id!==profile.id){setResumeStatus({available:false,reason:'This chat uses another account. Start a new chat with the assigned account to keep billing separate.'});return;}
     if (!target) { setResumeStatus({available:false,reason:'No resumable session was recorded for this chat.'}); return; }
     if (!inTauri()) { setResumeStatus({available:false,reason:'Session resume requires the desktop app.'}); return; }
-    invoke<ResumeStatus>('agent_resume_status', {profileId:profile.id,repositoryId,target,automationRunId:chat?.automationContext?.runId||null}).then(status => { if (live) setResumeStatus(status); }).catch(e => { if (live) setResumeStatus({available:false,reason:String(e)}); });
+    invoke<ResumeStatus>('agent_resume_status', {profileId:profile.id,repositoryId,target,automationRunId:chat?.automationContext?.runId||null,automationCommit:chat?.automationContext?.commit||null}).then(status => { if (live) setResumeStatus(status); }).catch(e => { if (live) setResumeStatus({available:false,reason:String(e)}); });
     return () => { live = false; };
   }, [repositoryId, profile?.id, targetKey, continuing, chat?.running]);
   const needsNew = continuing && resumeStatus?.available === false;

@@ -1,3 +1,6 @@
+import { initializeAgentChats, useAgentChats } from './lib/agentChats';
+import { useAutomationRuns } from './lib/savedPrompts';
+import { subscribe as subscribeConversationCache, repositoryHistoryWorking } from './lib/conversationCache';
 import { ChatgptLoginDialog } from './components/ChatgptIdentities';
 import { revealRepository } from './lib/repositoryScroll';
 import { useWorkspaceFocus } from './lib/workspaceFocus';
@@ -35,6 +38,10 @@ function sameRepositoryList(current:Repository[],next:Repository[]){
 }
 
 export function App() {
+  const liveChats=useAgentChats(),liveAutomationRuns=useAutomationRuns();
+  useEffect(()=>{void initializeAgentChats();},[]);
+  const [conversationStorageError,setConversationStorageError]=useState('');
+  useEffect(()=>{const notice=(event:Event)=>setConversationStorageError(String((event as CustomEvent).detail));window.addEventListener('chat-storage-error',notice);return()=>window.removeEventListener('chat-storage-error',notice);},[]);
   useEffect(() => { document.body.classList.add("custom-tooltips"); return () => document.body.classList.remove("custom-tooltips"); }, []);
   useZoomTooltips();
   useEffect(() => watchCursorCompletion(), []);
@@ -91,6 +98,11 @@ export function App() {
   const catalogInFlight = useRef(false);
   const catalogRefreshQueued = useRef(false);
   const repositories = useMemo(() => mergeRepositories(localRepositories, githubRepositories), [localRepositories, githubRepositories]);
+  useEffect(()=>{
+    const update=()=>{void api.localActivityPresence(liveChats.some(chat=>chat.running)||liveAutomationRuns.length>0||repositories.some(repo=>repositoryHistoryWorking(repo.id))).catch(error=>console.warn('Sleep protection:',error));};
+    update();const timer=window.setInterval(update,30000);const unsubscribe=subscribeConversationCache(update);
+    return()=>{window.clearInterval(timer);unsubscribe();};
+  },[liveChats.some(chat=>chat.running),liveAutomationRuns.length,repositories.map(repo=>repo.id).join(',')]);
   const localIds=localRepositories.map(repo=>repo.id).join('|');
   useEffect(()=>{
     let cancelled=false;
@@ -402,7 +414,7 @@ export function App() {
         <button className={showAgents ? "active" : ""} onClick={() => { setShowAgents(true); setShowIdentities(false); setShowAutomation(false); }}><Bell /><span className="nav-label">Agents</span></button>
         <button className={showAutomation ? "active" : ""} onClick={() => { setAutomationDraft(undefined); setShowAutomation(true); setShowAgents(false); setShowIdentities(false); }}><Clock3 /><span className="nav-label">Automation</span></button>
       </nav>
-      <div className="aside-bottom"><button onClick={() => { setShowShortcuts(open => !open); }}><Settings />Keyboard shortcuts</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
+      <div className="aside-bottom">{conversationStorageError&&<p className="config-error" role="alert">{conversationStorageError}</p>}<button onClick={() => { setShowShortcuts(open => !open); }}><Settings />Keyboard shortcuts</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
     </aside>
 
     <main style={{ "--pane-top": `${paneSplit}fr`, "--pane-bottom": `${100 - paneSplit}fr` } as React.CSSProperties}>

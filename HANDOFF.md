@@ -649,3 +649,48 @@ Recovery note: the combined implementation stores retention in `handoff-retentio
 Final verification: production build (dropdown lint, TypeScript, Vite), chat/agent logic, workflow actionlint, WebKit automation-actions/CI/handoff/viewport checks, and native serial suite (114 passed, 4 live-provider tests ignored). Clippy completed with existing warnings. Parallel native testing exposed the known Cursor child-cleanup race; serial verification passed. Saved-prompt browser coverage also checks frozen-prompt retries and expired handoff visibility.
 
 Checkpoint review restored the consumed-input marker for successful Agent, Git, and Notification actions after the stash reconciliation. Successful actions retain their handoffs outside the pending queue rather than requeueing them.
+
+
+## Durable conversations, sleep protection, and contextual retries (2026-10-08)
+
+The browser conversation record stopped at approximately the WebView's 5 MB quota;
+newer completed activities still existed in native automation logs. Added per-chat
+atomic SQLite upserts (agent-conversations.db), compact browser fallback records,
+stream/session checkpointing, log metadata, and startup display recovery. Legacy
+history was recovered into the durable store with backups under app data's
+handoff-recovery/conversations-20261008. Recovered the original first review's final
+reply from its assistant.message + assistant.idle events and repaired its running
+log to completed. Large Unicode activity cannot exceed native byte limits on log
+checkpointing anymore.
+
+The later review rerun (190d2a60) reviewed 718984a, not CI correction 993893e. The
+correction review (37d469fd) completed and emitted integrate. Its downstream
+integration (40d043d1) stopped before completion; its exact integrate emission
+37d469fd remains consumed/retained. Recovery links that failed run to the original
+Copilot session and handoff; it does not launch a turn. Cards show active and blocked
+contexts only; the retry button is inside its specific failed row. Completed runs
+remain in the log dialog.
+
+Removed five clean completed app worktrees and their private/automation-* refs,
+after proving their commits remained referenced elsewhere. Kept correction/
+desktop-ci-37687266495-20261007 at 993893e and the interrupted integration checkout.
+Native success cleanup applies the same policy. Dirty work and unique commits stay;
+a continuation can recreate a cleaned checkout at its recorded revision. Included
+the already-approved missing-login diagnostic assertion from the correction.
+
+Native jobs acquire RAII sleep inhibitors. Detected local activity adds an expiring
+heartbeat lease. Linux uses a logind fd, macOS caffeinate -i, Windows execution
+state on a dedicated worker thread. Runner and UI completion timers exclude long
+suspend gaps; live connections continue on wake. Provider disconnects and process
+termination still require explicit retry/resume, with saved session/input intact.
+The real Linux inhibitor lifecycle test registered and released its lock successfully;
+macOS and Windows behavior is implemented but not exercised on this Linux machine.
+No paid provider turn, push, or new commit was initiated for these changes.
+
+Validation: production build/type checking/dropdown checks passed; native serial
+tests passed (117, with five environment/provider tests ignored); the real Linux
+logind lock lifecycle test was run separately and passed. Conversation quota,
+streaming checkpoints, suspend waits, exact-context recovery, existing chat checks,
+WebKit automation action/persistence fixtures, and viewport/zoom checks passed.
+Clippy completed with existing warnings; formatting of new modules and diff
+whitespace checks passed. Native changes require a desktop rebuild/restart.

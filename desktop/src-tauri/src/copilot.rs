@@ -23,14 +23,16 @@ pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,reposit
         }else{client.create_session(config).await.map_err(|e|e.to_string())?};
         let id=session.id().as_str().to_owned();
         let mut events=session.subscribe();
+        if let Some(output)=&output{let _=output.send(json!({"type":"session.start","data":{"sessionId":id}}));}
+        let mut deadline=crate::awake::ActiveDeadline::new(Duration::from_secs(900));
         let reply_future=async {let reply=if let Some(flag)=cancelled{
             tokio::select! {
-                result=session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(900)))=>result.map_err(|e|e.to_string())?,
+                result=session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(7*24*3600)))=>result.map_err(|e|e.to_string())?,
                 _=async {while !flag.load(Ordering::SeqCst){tokio::time::sleep(Duration::from_millis(100)).await;}}=>{let _=session.abort().await;let _=session.disconnect().await;return Err("Draft stopped".into());}
             }
-        }else{session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(900))).await.map_err(|e|e.to_string())?};Ok::<_,String>(reply)};
+        }else{session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(7*24*3600))).await.map_err(|e|e.to_string())?};Ok::<_,String>(reply)};
         tokio::pin!(reply_future);
-        let reply=loop{tokio::select!{reply=&mut reply_future=>break reply?,event=events.recv(),if output.is_some()=>{match event{Ok(event)=>{if let Some(output)=&output{let _=output.send(serde_json::to_value(event).map_err(|error|error.to_string())?);}},Err(_)=>{tokio::time::sleep(Duration::from_millis(10)).await;}}}}};
+        let reply=loop{tokio::select!{reply=&mut reply_future=>break reply?,_=tokio::time::sleep(Duration::from_millis(250))=>{if deadline.expired(){let _=session.abort().await;return Err("Copilot timed out after 15 minutes of active execution. The conversation is preserved.".into());}},event=events.recv(),if output.is_some()=>{match event{Ok(event)=>{if let Some(output)=&output{let _=output.send(serde_json::to_value(event).map_err(|error|error.to_string())?);}},Err(_)=>{tokio::time::sleep(Duration::from_millis(10)).await;}}}}};
         let direct=reply.as_ref().and_then(|event|response_text(&event.data));
         let (text,diagnostic)=if let Some(text)=direct{(text.to_owned(),String::new())}else{
             let messages=session.get_events().await.map_err(|e|e.to_string())?;

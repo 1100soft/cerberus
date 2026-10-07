@@ -1,10 +1,11 @@
+import { conversationFromLog } from './conversationRecovery';
 import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAutomationLogs } from './automationLogs';
 import { api, inTauri, type GithubCiRun, type GithubRepositoryEvent, type AutomationLog } from './api';
 import { listen } from '@tauri-apps/api/event';
 import { useSyncExternalStore } from 'react';
 import { addAutomationNotice } from './automationNotifications';
 import type { Provider } from './conversationCache';
-import { getAgentChat, updateAgentChat, latestAgentChat, subscribeAgentChats, runExternalAutomation, sendAgentMessage, waitForAgentChat, type AgentProfile } from './agentChats';
+import { getAgentChat, currentAgentChats, initializeAgentChats, restoreAgentConversation, updateAgentChat, latestAgentChat, subscribeAgentChats, runExternalAutomation, sendAgentMessage, waitForAgentChat, type AgentProfile } from './agentChats';
 import { automationAccount } from './automationAccounts';
 import { appendAutomationOutput, beginAutomationOutput, endAutomationOutput } from './automationOutput';
 import { isGithubRemote } from './repositories';
@@ -241,10 +242,12 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       let stdout='',stderr='',response='',activity='',result='',failure='',agentStarted=false;
       const retryContext:AutomationRetry={job:{...job},manual:retry?.manual??manual,incoming,ciRun,eventBranch,eventSha,matchedConditions};
       let agentChatId:string|undefined;
-      const unsubscribeProgress=subscribeAgentChats(()=>{const chat=agentChatId?getAgentChat(agentChatId):undefined;if(chat&&chat.updatedAt>=createdAt){activity=chat.activity.slice(-2_000_000);response=chat.messages.filter(message=>message.role==='assistant').map(message=>message.text).join('\n\n').slice(-2_000_000);updateAutomationLog(log,{response,activity});}});
+      const attachConversation=()=>{const chat=agentChatId?getAgentChat(agentChatId):undefined;if(!chat)return;Object.assign(log,{conversation:{id:chat.id,profile:chat.profile,name:chat.name,session:chat.session,automationContext:chat.automationContext,mode:chat.mode,model:chat.model,reasoningEffort:chat.reasoningEffort,prompt:chat.messages.filter(m=>m.role==='user').at(-1)?.text||job.prompt}});};
+      const unsubscribeProgress=subscribeAgentChats(()=>{const chat=agentChatId?getAgentChat(agentChatId):undefined;if(chat&&chat.updatedAt>=createdAt){attachConversation();activity=chat.activity.slice(-2_000_000);response=chat.messages.filter(message=>message.role==='assistant').map(message=>message.text).join('\n\n').slice(-2_000_000);updateAutomationLog(log,{response,activity,conversation:(log as AutomationLog).conversation});}});
       try{
         for(const {name} of (job.emitsHandoffs||[]).map(emittedHandoff))outgoing[name]=await api.handoffOutputPath(repositoryId,name,runId);
-        const agentContext=(retry?.chatId?getAgentChat(retry.chatId)?.automationContext:undefined)||((eventSha||eventBranch||ciRun||incoming)?{runId,commit:eventSha||ciRun?.headSha||(eventBranch?`refs/heads/${eventBranch}`:undefined)}:undefined);
+        let agentContext=(retry?.chatId?getAgentChat(retry.chatId)?.automationContext:undefined)||((eventSha||eventBranch||ciRun||incoming)?{runId,commit:eventSha||ciRun?.headSha||(eventBranch?`refs/heads/${eventBranch}`:undefined)}:undefined);
+        if(job.kind==='prompt'&&agentContext&&!agentContext.commit)agentContext={...agentContext,commit:(await api.repositoryCommitState(repositoryId)).head};
         const actionPrompt=automationPromptWithHandoffs((job.kind==='prompt'&&agentContext?'This automation runs in an isolated worktree at the selected revision. The triggering branch is context, not the checkout branch. Preserve any changes for review; do not modify the original working tree.\n\n':'')+ciContext+(eventSha?`Trigger commit: ${eventSha}. Branch: ${eventBranch||'unknown'}.\n\n`:'')+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing,(job.emitsHandoffs||[]).map(emittedHandoff).filter(item=>item.conditional).map(item=>item.name));
         if(job.kind==='shell'){incomingStarted=true;const shell=await api.runAutomationShell(repositoryId,job.prompt,chunk=>{
           if(chunk.stream==='stderr')stderr=(stderr+chunk.text).slice(-2_000_000);else stdout=(stdout+chunk.text).slice(-2_000_000);
@@ -267,21 +270,22 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
           if(account.route==='profile'){
             const previous=retry?.chatId?getAgentChat(retry.chatId):undefined;
             agentChatId=await sendAgentMessage(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',previous?.id,[],previous?.session,!previous||(!previous.session&&!previous.retryable),!!previous?.retryable,job.model,job.title,job.reasoningEffort,agentContext);
-            retryContext.chatId=agentChatId;
+            retryContext.chatId=agentChatId;attachConversation();
             result=await waitForAgentChat(agentChatId!);
             activity=getAgentChat(agentChatId!)?.activity||'';
-          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',job.title,agentContext,id=>{agentChatId=id;retryContext.chatId=id;},retry?.chatId);result=run.text;agentChatId=run.chatId;retryContext.chatId=agentChatId;activity=getAgentChat(run.chatId)?.activity||'';}
+          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',job.title,agentContext,id=>{agentChatId=id;retryContext.chatId=id;attachConversation();},retry?.chatId);result=run.text;agentChatId=run.chatId;retryContext.chatId=agentChatId;activity=getAgentChat(run.chatId)?.activity||'';}
           response=result;
           if(/^blocked\b/i.test(result.trim()))throw new Error(result);
           window.dispatchEvent(new CustomEvent('saved-prompt-finished',{detail:{repositoryId,provider:job.provider}}));
         }
       }catch(error){failure=String(error);failures++;if(agentStarted){const recent=agentChatId?getAgentChat(agentChatId):undefined;if(recent&&recent.updatedAt>=createdAt)activity=recent.activity||activity;}}
-      unsubscribeProgress();
+      attachConversation();unsubscribeProgress();
       for(const name of Object.keys(outgoing)){try{if(await api.publishHandoff(repositoryId,name,runId))void tick();}catch(error){failure=[failure,`Could not emit ${name}: ${String(error)}`].filter(Boolean).join(' · ');failures++;}}
       try{
         const finalLog:AutomationLog={...log,kind:job.kind==='shell'?'shell':job.kind==='git'?'git':'agent',status:failure?'error':'completed',command:job.prompt,stdout,stderr:failure?[stderr,failure].filter(Boolean).join('\n'):stderr,response,activity,retry:failure?retryContext:undefined};
         if(failure){blockedGeneration++;blockedRuns.set(retryKey(finalLog),finalLog);if(agentChatId)updateAgentChat(agentChatId,{automationRetry:true});}
         await finishAutomationLog(finalLog);
+        if(!failure&&job.kind==='prompt')try{const chat=agentChatId?getAgentChat(agentChatId):undefined;if(chat){await api.saveAgentConversation(chat);if(chat.automationContext)await api.cleanupAutomationCheckout(repositoryId,chat.automationContext.runId);}}catch(error){console.warn('Could not finalize conversation or cleanup checkout:',error);}
       }catch(error){failure=[failure,`Log could not be saved: ${String(error)}`].filter(Boolean).join(' · ');if(!failure.includes(' · '))failures++;}
       currentLog=undefined;
       addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} ${failure?'failed':'completed'}`,message:`${repositoryLabel}${failure?` · ${failure}`:''}`,status:failure?'failed':'completed'});
@@ -561,8 +565,34 @@ async function syncFileWatchers(){
   if(errors.length)console.warn('Automation file watchers:',errors.join('; '));
   if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()).catch(error=>console.warn('Handoff cleanup:',error));}
 }
+export async function recoverAutomationConversations(){
+  await initializeAgentChats();
+  for(const job of jobs.filter(job=>job.kind==='prompt'||!job.kind))try{
+    const summaries=await api.listAutomationLogs(job.id);
+    for(const summary of summaries.filter(item=>item.kind==='agent')){
+      const log=await api.readAutomationLog(job.id,summary.repositoryId,summary.runId);
+      const profile=log.conversation?.profile||log.retry?.job?.accountsByRepository?.[log.repositoryId]?.profile||job.accountsByRepository?.[log.repositoryId]?.profile||job.profile;
+      if(!profile)continue;
+      const existing=currentAgentChats().find(chat=>chat.id===log.conversation?.id||chat.id===log.retry?.chatId||chat.automationContext?.runId===log.runId||!!log.conversation?.session&&chat.session?.sessionId===log.conversation.session.sessionId);
+      if(existing?.running||existing&&existing.activity&&existing.messages.at(-1)?.text&&existing.updatedAt>log.createdAt)continue;
+      const recovered=conversationFromLog(log,profile,job.title,existing);
+      restoreAgentConversation(recovered);
+      if(log.status==='running'&&!currentAutomationRuns().some(run=>run.id===log.runId)){
+        if(recovered.status==='Completed')await api.writeAutomationLog({...log,status:'completed',response:recovered.messages.at(-1)?.text||log.response});
+        else{
+          const incoming=log.handoffName&&log.handoffId?{name:log.handoffName,id:log.handoffId,repositoryId:log.repositoryId,path:'',retained:true}:undefined;
+          const retry:AutomationRetry=log.retry||{job:{...job,prompt:log.command},incoming,eventBranch:log.branch,eventSha:log.commitSha,chatId:recovered.id};
+          const interruptedLog:AutomationLog={...log,status:'error',stderr:log.stderr||'Interrupted before completion was recorded. Retry this run to resume its saved conversation and input.',retry,conversation:log.conversation||{id:recovered.id,profile:recovered.profile,name:recovered.name,session:recovered.session,automationContext:recovered.automationContext,mode:recovered.mode,model:recovered.model,reasoningEffort:recovered.reasoningEffort,prompt:recovered.messages[0]?.text||log.command}};
+          await api.writeAutomationLog(interruptedLog);blockedRuns.set(retryKey(interruptedLog),interruptedLog);blockedGeneration++;
+          updateAgentChat(recovered.id,{automationRetry:true});
+          if(job.state==='running'&&!isJobRunning(job.id))change(job.id,{state:'error',lastResult:interruptedLog.stderr});
+        }
+      }
+    }
+  }catch(error){console.warn('Could not recover automation conversation history:',error);}
+}
 export function startSavedPromptScheduler(){
-  void refreshBlockedAutomations();
+  void recoverAutomationConversations().then(refreshBlockedAutomations);
   // The dashboard remains mounted when the Tauri window is hidden. A crash or
   // restart leaves a running job paused for inspection instead of retrying it.
   let stopped=false;let unlisten:(()=>void)|undefined;let unlistenGit:(()=>void)|undefined;

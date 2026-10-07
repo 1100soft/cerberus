@@ -123,11 +123,11 @@ Right-click an automation card, or focus it and press Shift+F10, for Open log, E
 
 ## Concurrent execution contexts
 
-An automation card contains its definition and a Runs section. Each active context has its own status, repository, branch/commit or handoff, timestamp, and log button. Recent completed contexts appear below; the log dialog exposes full retained history. Run once stays available while other contexts execute. An identical active context cannot be started twice. Opening a specific run pins its log selection; another run starting does not steal focus. Interrupted runs are labeled separately from active executions.
+An automation card contains its definition and a Runs section. Each active context has its own status, repository, branch/commit or handoff, timestamp, and log button. Completed contexts appear only in the log dialog. Blocked contexts appear separately on the card with the exact repository, commit or handoff, time, and their own retry button. Run once stays available while other contexts execute. An identical active context cannot be started twice. Opening a specific run pins its log selection; another run starting does not steal focus. Interrupted runs are labeled separately from active executions.
 
 Execution guards use automation + repository + branch + commit + handoff emission, rather than a single automation-wide lock. Scheduled contexts in separate repositories can progress concurrently, and completing one does not clear another’s running state or output. Explicit disabling affects future triggers; failures never disable the definition.
 
-Agent actions with commit, branch, CI, or handoff inputs start in independent worktrees under the application data directory’s `automation-worktrees/<repository>/<run>` folder, on `private/automation-<run>` branches. Commit/CI actions start at the selected SHA. A branch-only context starts at that branch; a handoff without a selected revision starts at the repository’s HEAD. The original checkout stays intact. The worktree and any agent edits remain after completion for review and conversation resume. Use safeguarded branch removal after review to clean them. File-change and ordinary interval/manual agent jobs retain the primary checkout so they can see current uncommitted files, and its one-writer guard remains in effect. Shell actions retain their existing working directory and receive the selected context through environment variables.
+Agent actions with commit, branch, CI, or handoff inputs start in independent worktrees under the application data directory’s `automation-worktrees/<repository>/<run>` folder, on `private/automation-<run>` branches. Commit/CI actions start at the selected SHA. A branch-only context starts at that branch; a handoff without a selected revision starts at the repository’s HEAD. The original checkout stays intact. Clean app-owned checkouts are removed after successful completion when their commits are still reachable from another local or remote ref. Dirty worktrees, unique commits, agent-created branches, and blocked contexts remain for review and resume. A later continuation recreates a removed clean checkout at its recorded revision. Use safeguarded branch removal after review to clean retained work. File-change and ordinary interval/manual agent jobs retain the primary checkout so they can see current uncommitted files, and its one-writer guard remains in effect. Shell actions retain their existing working directory and receive the selected context through environment variables.
 
 Commit history shows date and time in Git date order. The manual commit picker sorts recent choices by commit time, newest first, with visible timestamps. Reselecting the current branch/repository/condition set does not start a loader. History requests survive repository metadata refreshes, have a 30-second UI timeout, and offer refresh/retry; late cancelled/timed-out responses cannot overwrite the current branch’s commits. Native history runs off the UI thread.
 
@@ -157,3 +157,28 @@ Agent automation conversations use the automation's name in the app conversation
 list, including when handoff instructions are prepended to the prompt. Retries
 preserve the existing conversation name, including user renames. Provider-owned
 conversation titles outside Cerberus are managed separately by the provider.
+
+## Conversation durability and sleep
+
+Full app conversation records, including streamed activity and provider session IDs,
+are checkpointed into `agent-conversations.db` in the application data directory.
+The browser stores a compact fallback index instead of multi-megabyte transcripts.
+This avoids the WebView localStorage quota. Completed automation logs also retain
+the conversation identity, account, original prompt, session, and checkout revision.
+On startup the app recovers missing conversations from those logs. Interrupted runs
+keep their exact input and offer explicit retry; recovery never starts a provider turn.
+Legacy records without a saved definition use their logged command and the available
+account assignment when reconstructing display/retry metadata.
+
+The app holds a system sleep inhibitor while its native agent/shell jobs run and
+while it detects active local agents or automation contexts. It releases the lock
+when work finishes. Linux uses logind; macOS uses `caffeinate -i`; Windows requests
+system execution through a dedicated thread. Detected activity has a heartbeat lease,
+so a stopped WebView cannot keep an otherwise idle app awake indefinitely.
+
+Agent waits and runner deadlines exclude long scheduling gaps during system sleep.
+If the process and provider connection survive, work continues after waking without
+resending the prompt. Forced sleep, logout, app termination, and provider/network
+failures can still disconnect a session. Its transcript, session ID, worktree, and
+handoff remain available for explicit retry/resume. Sleep protection cannot promise
+that a remote provider will keep a disconnected request alive.

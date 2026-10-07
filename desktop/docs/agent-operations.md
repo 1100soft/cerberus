@@ -108,3 +108,16 @@ it. On the diagnosed desktop, the existing unlocked `GitCerberus` collection
 was made GNOME Keyring's default. A temporary write/read/delete probe passed;
 Codex then reported an ordinary signed-out state. Reconnect once to restore
 the missing ChatGPT credential. Keep the same provider active across sessions.
+
+App-owned automation conversations use durable SQLite storage rather than relying
+on the WebView storage quota. Output and session identifiers are saved during a
+turn, not only at completion. Successful runs release clean app-created worktrees
+when every commit remains referenced elsewhere; dirty or uniquely committed work
+is kept. Cleanup never removes the agent's separate correction branch or a blocked
+run's checkout. Resuming a cleaned conversation recreates its original revision.
+
+Sleep protection requests an OS inhibitor during active app jobs or detected local
+agent work. Long suspend gaps do not consume the runner's active timeout budget.
+A surviving connection continues on wake; a broken connection requires explicit
+retry with the saved session and inputs. No upstream handoff or paid turn is replayed
+automatically merely because the machine wakes.

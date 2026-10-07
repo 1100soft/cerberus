@@ -95,8 +95,8 @@ pub fn prepare(
     {
         return Err("Automation checkout storage cannot be a symbolic link.".into());
     }
-    // Keep the branch/worktree after completion, including uncommitted agent edits.
-    // Normal worktree-aware branch removal can clean it after review.
+    // Keep this checkout for execution and resume. Successful runs may clean it
+    // only after their transcript is saved and their commits are referenced elsewhere.
     git(
         repository,
         &[
@@ -145,5 +145,123 @@ mod tests {
         assert_eq!(fs::read_to_string(first.join("dirty.txt")).unwrap(), "kept");
         assert!(path(root.path(), "repo", "../escape").is_err());
         assert!(prepare(root.path(), repo.path(), "repo", "bad", Some("--help")).is_err());
+    }
+}
+
+/// Remove only clean app-owned checkouts, preserving every uniquely referenced commit.
+pub fn cleanup(
+    root: &Path,
+    repository: &Path,
+    repository_id: &str,
+    run_id: &str,
+) -> Result<bool, String> {
+    let checkout = path(root, repository_id, run_id)?;
+    if !checkout.exists() {
+        return Ok(false);
+    }
+    let checkout = existing(root, repository, repository_id, run_id)?;
+    if !git(
+        &checkout,
+        &["status", "--porcelain", "--untracked-files=all"],
+    )?
+    .is_empty()
+    {
+        return Ok(false);
+    }
+    let branch = format!("private/automation-{run_id}");
+    let current = git(&checkout, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if current != "HEAD" && current != branch {
+        return Ok(false);
+    }
+    let head = git(&checkout, &["rev-parse", "HEAD"])?;
+    let refs = git(
+        repository,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            &format!("--contains={head}"),
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )?;
+    if !refs
+        .lines()
+        .any(|name| !name.starts_with("refs/heads/private/automation-"))
+    {
+        return Ok(false);
+    }
+    let reference = format!("refs/heads/{branch}");
+    let tip = git(repository, &["rev-parse", "--verify", &reference]).ok();
+    // An agent can detach or switch branches. Never discard a different branch tip.
+    if tip.as_ref().is_some_and(|tip| tip != &head) {
+        return Ok(false);
+    }
+    git(
+        repository,
+        &[
+            "worktree",
+            "remove",
+            checkout.to_str().ok_or("Invalid checkout path")?,
+        ],
+    )?;
+    if let Some(tip) = tip {
+        git(repository, &["update-ref", "-d", &reference, &tip])?;
+    }
+    Ok(true)
+}
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    #[test]
+    fn clean_referenced_checkouts_are_removed_but_dirty_and_unique_work_are_kept() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q"]).unwrap();
+        git(
+            repo.path(),
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "base",
+            ],
+        )
+        .unwrap();
+        let clean = prepare(root.path(), repo.path(), "repo", "clean", None).unwrap();
+        assert!(cleanup(root.path(), repo.path(), "repo", "clean").unwrap());
+        assert!(!clean.exists());
+        let dirty = prepare(root.path(), repo.path(), "repo", "dirty", None).unwrap();
+        fs::write(dirty.join("kept.txt"), "keep").unwrap();
+        assert!(!cleanup(root.path(), repo.path(), "repo", "dirty").unwrap());
+        let unique = prepare(root.path(), repo.path(), "repo", "unique", None).unwrap();
+        git(
+            &unique,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "unique",
+            ],
+        )
+        .unwrap();
+        assert!(!cleanup(root.path(), repo.path(), "repo", "unique").unwrap());
+        git(
+            repo.path(),
+            &[
+                "branch",
+                "correction/retained",
+                &git(&unique, &["rev-parse", "HEAD"]).unwrap(),
+            ],
+        )
+        .unwrap();
+        assert!(cleanup(root.path(), repo.path(), "repo", "unique").unwrap());
     }
 }
