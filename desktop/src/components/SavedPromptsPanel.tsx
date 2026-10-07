@@ -1,6 +1,7 @@
+import { HandoffRetentionDialog } from './HandoffRetentionDialog';
 import { CopyButton } from './CopyButton';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { ClipboardPaste, Play, Plus, Trash2, X, WandSparkles, Square, Pencil, RefreshCw } from 'lucide-react';
+import { ClipboardPaste, Play, Plus, Trash2, X, WandSparkles, Square, Pencil, RefreshCw, Settings2 } from 'lucide-react';
 import { InfoPopover } from './InfoPopover';
 import { Select } from './Select';
 import { HandoffNameInput, SuggestedTextInput } from './HandoffNameInput';
@@ -38,6 +39,7 @@ function legacyGitScript(job:SavedPrompt){
 }
 export function SavedPromptsPanel({repositories,profiles,chatgptSettings,external,identities,draft}:Props){
   const [revision,setRevision]=useState(0);
+  const [retentionOpen,setRetentionOpen]=useState(false);
   const [selectedIds,setSelectedIds]=useState<string[]>([]);
   const [provider,setProvider]=useState<Provider>('codex');
   const [draftProvider,setDraftProvider]=useState<Provider>('codex');
@@ -200,7 +202,8 @@ export function SavedPromptsPanel({repositories,profiles,chatgptSettings,externa
   };
   const selectedAll=localRepositories.length>0&&targets.length===localRepositories.length;
   return <section className="saved-prompts" aria-label="Saved automations">
-    <header className="automation-list-header"><div><h2>Automations</h2><p className="panel-copy">Watch repositories for events, or run at intervals. Run now uses one repository.</p></div><button type="button" onClick={()=>{setEditingJob(null);setKind('prompt');setName('');setSelectedIds(localRepositories.map(item=>item.id));setProvider('codex');setDraftProvider('codex');setDraftRepositoryId('');resetActionTexts();setTrigger('manual');setMoreConditions([]);setConditionEmpty(true);setOtherSets([]);setShowDraft(false);setEditingCondition(null);setModel('');setReasoningEffort('');setMinutes(60);setDebounceSeconds(300);setChangeThreshold(10);setCommitBranch('*');setCommitAllExcept(false);setHandoffName('');setHandoffVariablesText('');setEmitsText('');setIncludeFuture(true);instructionText.reset();setDraftSession(null);setDraftMessages([]);setNotice('');setDialogOpen(true);}}><Plus size={16}/> New automation</button></header>
+    <header className="automation-list-header"><div><h2>Automations</h2><p className="panel-copy">Watch repositories for events, or run at intervals. Run now uses one repository.</p></div><div className="automation-list-header-actions"><button type="button" onClick={()=>{setEditingJob(null);setKind('prompt');setName('');setSelectedIds(localRepositories.map(item=>item.id));setProvider('codex');setDraftProvider('codex');setDraftRepositoryId('');resetActionTexts();setTrigger('manual');setMoreConditions([]);setConditionEmpty(true);setOtherSets([]);setShowDraft(false);setEditingCondition(null);setModel('');setReasoningEffort('');setMinutes(60);setDebounceSeconds(300);setChangeThreshold(10);setCommitBranch('*');setCommitAllExcept(false);setHandoffName('');setHandoffVariablesText('');setEmitsText('');setIncludeFuture(true);instructionText.reset();setDraftSession(null);setDraftMessages([]);setNotice('');setDialogOpen(true);}}><Plus size={16}/> New automation</button><button type="button" aria-label="Handoff retention settings" title="Handoff retention settings" onClick={()=>setRetentionOpen(true)}><Settings2 size={16}/></button></div></header>
+    {retentionOpen&&<HandoffRetentionDialog repositoryIds={localRepositories.map(repository=>repository.id)} onClose={()=>{setRetentionOpen(false);requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('button[aria-label="Handoff retention settings"]')?.focus());}}/>}
     {notice&&!dialogOpen&&<p role="status" className="panel-copy">{notice}</p>}
     {savedPairWarnings.length>0&&<div className="automation-pair-warnings" role="status">{savedPairWarnings.map(message=><p key={message}>{message}</p>)}</div>}
     <div className="saved-prompt-list">{jobs.map(job=>{const legacy=job.kind!=='git'&&job.kind!=='shell'&&job.kind!=='notification'&&job.target!=='new';const ids=job.repositoryIds?.length?job.repositoryIds:[job.repositoryId];const names=job.includeFutureRepositories?'all repositories':ids.map(id=>repositories.find(item=>item.id===id)?.displayName||id).join(', ');const label=job.trigger==='manual'?'Choose one repository at run time':job.trigger==='interval'?`Runs in ${names}`:`Watches ${names}`;const dragItem=reorderCards.item(job.id);return <article key={job.id} {...dragItem} {...reorderCards.source(job.id,job.title)} className={dragItem.className} role="button" tabIndex={0} aria-label={`Open ${job.title}`} onClick={event=>{if((event.target as HTMLElement).closest('button, input, label'))return;setDetailJobId(job.id);}} onKeyDown={event=>{if((event.target as HTMLElement).closest('button, input, label'))return;if(event.key==='Enter'||event.key===' '){event.preventDefault();setDetailJobId(job.id);}}}>

@@ -49,7 +49,7 @@ export async function sendAgentMessage(repositoryId: string, profile: AgentProfi
   const task = chatPrompt(target ? [] : previous, prompt);
   const id = existing?.id || crypto.randomUUID();
   const messages = [...previous, {id:crypto.randomUUID(), role:'user', text:prompt}, {id:crypto.randomUUID(), role:'assistant', text:''}];
-  const record: AgentChat = {id, repositoryId, profile, automationRetry:existing?.automationRetry,mode,model,reasoningEffort,name: existing?.name || originName || prompt.slice(0,100), archived:existing?.archived, originKey:startNew ? undefined : existing?.originKey || originKey, session:target, messages, running:true, status:'Working…', activity:'', updatedAt:Date.now()};
+  const record: AgentChat = {id, repositoryId, profile, automationRetry:existing?.automationRetry,mode,model,reasoningEffort,name: existing?.name || originName?.trim() || prompt.slice(0,100), archived:existing?.archived, originKey:startNew ? undefined : existing?.originKey || originKey, session:target, messages, running:true, status:'Working…', activity:'', updatedAt:Date.now()};
   chats = existing ? chats.map(chat => chat.id === id ? record : chat) : [record, ...chats]; persist(); emit();
   let started = false;
   let edits:FileEdit[] = [];
@@ -92,13 +92,13 @@ export function waitForAgentChat(id:string,timeoutMs=960_000):Promise<string>{
   });
 }
 
-export async function runExternalAutomation(repositoryId:string,profile:AgentProfile,prompt:string,mode:'analyze'|'edit'|'full',retryChatId?:string):Promise<{text:string;chatId:string}>{
+export async function runExternalAutomation(repositoryId:string,profile:AgentProfile,prompt:string,mode:'analyze'|'edit'|'full',retryChatId?:string,conversationName?:string):Promise<{text:string;chatId:string}>{
   if(chats.some(chat=>chat.repositoryId===repositoryId&&chat.running))throw new Error('A task is already running in this repository.');
   const existing=retryChatId?getAgentChat(retryChatId):undefined;
   if(existing&&existing.profile.id!==profile.id)throw new Error('Retry requires the original agent account.');
   const id=existing?.id||crypto.randomUUID();
   const messages:CodexMessage[]=[{id:crypto.randomUUID(),role:'user',text:prompt},{id:crypto.randomUUID(),role:'assistant',text:''}];
-  const record:AgentChat={id,repositoryId,profile,name:existing?.name||prompt.slice(0,100),archived:existing?.archived,session:existing?.session,messages:existing?.session?[...existing.messages,...messages]:messages,status:'Working…',activity:'',running:true,updatedAt:Date.now()};
+  const record:AgentChat={id,repositoryId,profile,name:existing?.name||conversationName?.trim()||prompt.slice(0,100),archived:existing?.archived,session:existing?.session,messages:existing?.session?[...existing.messages,...messages]:messages,status:'Working…',activity:'',running:true,updatedAt:Date.now()};
   chats=existing?chats.map(chat=>chat.id===id?record:chat):[record,...chats];persist();emit();
   try{
     const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt,existing?.session?.sessionId,undefined,event=>{const chat=getAgentChat(id);if(chat)updateAgentChat(id,{activity:(chat.activity+'\n'+JSON.stringify(event)).slice(-2_000_000)});});

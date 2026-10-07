@@ -1,6 +1,35 @@
-use serde::Serialize;
+use serde::{Deserialize,Serialize};
 use std::{fs, path::{Path,PathBuf}, process::Command, time::{Duration,SystemTime}};
 
+const DEFAULT_RETENTION_HOURS:u64=24;
+#[derive(Clone,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct Settings {pub retention_hours:u64}
+impl Default for Settings {fn default()->Self{Self{retention_hours:DEFAULT_RETENTION_HOURS}}}
+impl Settings {
+    pub fn duration(&self)->Result<Duration,String>{
+        if !(1..=8760).contains(&self.retention_hours){return Err("Handoff retention must be a whole number from 1 to 8760 hours.".into());}
+        Ok(Duration::from_secs(self.retention_hours*3600))
+    }
+}
+pub fn settings(data_dir:&Path)->Result<Settings,String>{
+    let path=data_dir.join("handoff-settings.json");
+    let value=match fs::read(path){Ok(bytes)=>serde_json::from_slice::<Settings>(&bytes).map_err(|error|error.to_string())?,Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Settings::default(),Err(error)=>return Err(error.to_string())};
+    value.duration()?;Ok(value)
+}
+pub fn save_settings(data_dir:&Path,value:Settings)->Result<Settings,String>{
+    value.duration()?;
+    fs::create_dir_all(data_dir).map_err(|error|error.to_string())?;
+    let mut output=tempfile::NamedTempFile::new_in(data_dir).map_err(|error|error.to_string())?;
+    use std::io::Write;
+    output.write_all(&serde_json::to_vec_pretty(&value).map_err(|error|error.to_string())?).map_err(|error|error.to_string())?;
+    output.as_file().sync_all().map_err(|error|error.to_string())?;
+    output.persist(data_dir.join("handoff-settings.json")).map_err(|error|error.to_string())?;
+    Ok(value)
+}
+fn expired(path:&Path,retention:Duration)->bool{
+    path.metadata().and_then(|meta|meta.modified()).ok().and_then(|time|SystemTime::now().duration_since(time).ok()).is_some_and(|age|age>=retention)
+}
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Claim { pub id:String, pub path:String }
@@ -58,7 +87,9 @@ fn pending(repository:&Path,name:&str)->Result<Vec<PathBuf>,String>{
     let mut files=fs::read_dir(directory).map_err(|error|error.to_string())?.filter_map(Result::ok).map(|item|item.path()).filter(|path|path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file())&&path.extension().is_some_and(|extension|extension=="txt")&&path.file_stem().and_then(|stem|stem.to_str()).is_some_and(valid_id)).collect::<Vec<_>>();
     files.sort();Ok(files)
 }
-pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
+#[cfg(test)]
+pub fn cleanup_stale(repository:&Path)->Result<usize,String>{cleanup_with_retention(repository,Duration::from_secs(DEFAULT_RETENTION_HOURS*3600))}
+pub fn cleanup_with_retention(repository:&Path,retention:Duration)->Result<usize,String>{
     // A process interruption cannot cause another run of the same emission.
     // Claims older than the 15-minute runner limit plus a safety margin are
     // archived without retriggering, including when no automation remains enabled.
@@ -75,7 +106,16 @@ pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
             let Some(id)=path.file_stem().and_then(|stem|stem.to_str())else{continue};
             if !valid_id(id){continue;}
             let consumed=file(repository,"archived",&name,id)?;
-            if fs::rename(&path,&consumed).is_ok(){removed+=1;}
+            if fs::rename(&path,&consumed).is_ok(){fs::File::open(&consumed).and_then(|file|file.set_modified(SystemTime::now())).map_err(|error|error.to_string())?;removed+=1;}
+        }
+    }}
+    let archived=root(repository)?.join("archived");
+    if archived.symlink_metadata().is_ok_and(|meta|meta.file_type().is_symlink()){return Err("Handoff archive is a symbolic link.".into());}
+    if archived.exists(){for namespace in fs::read_dir(archived).map_err(|error|error.to_string())?.filter_map(Result::ok){
+        if !namespace.file_type().is_ok_and(|kind|kind.is_dir()){continue;}
+        for item in fs::read_dir(namespace.path()).map_err(|error|error.to_string())?.filter_map(Result::ok){
+            let path=item.path();
+            if item.file_type().is_ok_and(|kind|kind.is_file())&&expired(&path,retention){fs::remove_file(path).map_err(|error|error.to_string())?;removed+=1;}
         }
     }}
     Ok(removed)
@@ -154,14 +194,21 @@ pub fn finish(repository:&Path,name:&str,id:&str)->Result<(),String>{
     // Retain the exact payload outside the queue for explicit retries.
     let consumed=file(repository,"archived",name,id)?;
     fs::rename(source,&consumed).map_err(|error|error.to_string())?;
-    Ok(())
+    fs::File::open(consumed).and_then(|file|file.set_modified(SystemTime::now())).map_err(|error|error.to_string())
 }
 // Explicit retries claim one archived emission; they never enqueue a new event.
-pub fn retry(repository:&Path,name:&str,id:&str)->Result<Claim,String>{
+#[cfg(test)]
+pub fn retry(repository:&Path,name:&str,id:&str)->Result<Claim,String>{retry_with_retention(repository,name,id,Duration::from_secs(DEFAULT_RETENTION_HOURS*3600))}
+pub fn retained(repository:&Path,name:&str,id:&str,retention:Duration)->Result<bool,String>{
+    let path=file(repository,"archived",name,id)?;
+    Ok(path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file())&&!expired(&path,retention))
+}
+pub fn retry_with_retention(repository:&Path,name:&str,id:&str,retention:Duration)->Result<Claim,String>{
     let source=file(repository,"archived",name,id)?;
     let destination=file(repository,"claimed",name,id)?;
     if destination.exists(){return Err("This handoff is already claimed by a running action.".into());}
     if !source.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file()) {return Err("The original handoff payload is unavailable.".into());}
+    if expired(&source,retention){return Err("The original handoff has expired under the configured retention period. Request a new handoff from the upstream agent.".into());}
     fs::rename(&source,&destination).map_err(|error|error.to_string())?;
     if let Err(error)=fs::File::open(&destination).and_then(|file|file.set_modified(SystemTime::now())){
         let _=fs::rename(&destination,&source);
@@ -193,6 +240,33 @@ pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
         for id in ["one","two"]{fs::write(output_path(root.path(),"review",id).unwrap(),id).unwrap();assert!(publish(root.path(),"review",id).unwrap());}
         let first=claim(root.path(),"review").unwrap().unwrap();let second=claim(root.path(),"review").unwrap().unwrap();assert_ne!(first.id,second.id);assert!(claim(root.path(),"review").unwrap().is_none());
         assert_eq!(fs::read_to_string(&first.path).unwrap(),first.id);finish(root.path(),"review",&first.id).unwrap();assert!(!Path::new(&first.path).exists());release(root.path(),"review",&second.id).unwrap();assert_eq!(claim(root.path(),"review").unwrap().unwrap().id,second.id);
+    }
+    #[test]fn retention_settings_default_validate_and_persist(){
+        let root=tempfile::tempdir().unwrap();
+        assert_eq!(settings(root.path()).unwrap().retention_hours,24);
+        assert!(save_settings(root.path(),Settings{retention_hours:0}).is_err());
+        assert!(save_settings(root.path(),Settings{retention_hours:8761}).is_err());
+        save_settings(root.path(),Settings{retention_hours:48}).unwrap();
+        assert_eq!(settings(root.path()).unwrap().retention_hours,48);
+    }
+    #[test]fn retention_expires_archives_but_preserves_pending_and_active(){
+        let repo=tempfile::tempdir().unwrap();
+        std::process::Command::new("git").args(["init","-q"]).arg(repo.path()).status().unwrap();
+        for id in ["archived","pending","active"]{write_payload(repo.path(),"revise",id,"context").unwrap();publish(repo.path(),"revise",id).unwrap();}
+        let active=claim(repo.path(),"revise").unwrap().unwrap();assert_eq!(active.id,"active");
+        let old=claim(repo.path(),"revise").unwrap().unwrap();assert_eq!(old.id,"archived");
+        finish(repo.path(),"revise",&old.id).unwrap();
+        let archived=file(repo.path(),"archived","revise","archived").unwrap();
+        fs::File::open(&archived).unwrap().set_modified(SystemTime::now()-Duration::from_secs(25*3600)).unwrap();
+        fs::File::open(file(repo.path(),"pending","revise","pending").unwrap()).unwrap().set_modified(SystemTime::now()-Duration::from_secs(25*3600)).unwrap();
+        let day=Duration::from_secs(24*3600);
+        assert!(!retained(repo.path(),"revise","archived",day).unwrap());
+        assert!(retained(repo.path(),"revise","archived",Duration::from_secs(48*3600)).unwrap());
+        assert!(retry_with_retention(repo.path(),"revise","archived",day).err().unwrap().contains("expired"));
+        assert_eq!(cleanup_with_retention(repo.path(),day).unwrap(),1);
+        assert!(!archived.exists());
+        assert!(Path::new(&active.path).exists());
+        assert!(file(repo.path(),"pending","revise","pending").unwrap().exists());
     }
     #[test]fn archived_payload_retries_exact_emission_without_enqueueing(){
         let repo=tempfile::tempdir().unwrap();

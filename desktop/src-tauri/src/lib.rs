@@ -302,15 +302,26 @@ fn has_pending_handoff(repository_id:String,name:String,variables:Option<Vec<Str
 #[tauri::command]
 fn claim_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
 #[tauri::command]
-fn retry_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<handoffs::Claim,String>{handoffs::retry(&state.db.repository_path(&repository_id)?,&name,&id)}
+fn retry_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<handoffs::Claim,String>{handoffs::retry_with_retention(&state.db.repository_path(&repository_id)?,&name,&id,handoffs::settings(&state.data_dir)?.duration()?)}
+#[tauri::command]
+fn handoff_settings(state:State<AppState>)->Result<handoffs::Settings,String>{handoffs::settings(&state.data_dir)}
+#[tauri::command]
+fn save_handoff_settings(retention_hours:u64,state:State<AppState>)->Result<handoffs::Settings,String>{handoffs::save_settings(&state.data_dir,handoffs::Settings{retention_hours})}
+#[tauri::command]
+fn handoff_retained(repository_id:String,name:String,id:String,state:State<AppState>)->Result<bool,String>{handoffs::retained(&state.db.repository_path(&repository_id)?,&name,&id,handoffs::settings(&state.data_dir)?.duration()?)}
 #[tauri::command]
 fn finish_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::finish(&state.db.repository_path(&repository_id)?,&name,&id)}
 #[tauri::command]
 fn release_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::release(&state.db.repository_path(&repository_id)?,&name,&id)}
 #[tauri::command]
 async fn cleanup_stale_handoffs(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<usize,String>{
+    let retention=handoffs::settings(&state.data_dir)?.duration()?;
     let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok()).collect::<Vec<_>>();
-    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|path|handoffs::cleanup_stale(&path).ok()).sum()).await.map_err(|error|error.to_string())
+    tauri::async_runtime::spawn_blocking(move||{
+        let mut removed=0;let mut errors=Vec::new();
+        for path in paths{match handoffs::cleanup_with_retention(&path,retention){Ok(count)=>removed+=count,Err(error)=>errors.push(format!("{}: {error}",path.display()))}}
+        if errors.is_empty(){Ok(removed)}else{Err(errors.join("; "))}
+    }).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
 fn write_automation_log(entry:automation_logs::Entry,state:State<AppState>)->Result<(),String>{automation_logs::write(&state.data_dir,&entry)}
@@ -901,7 +912,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, claim_handoff, retry_handoff, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, claim_handoff, retry_handoff, handoff_settings, save_handoff_settings, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,

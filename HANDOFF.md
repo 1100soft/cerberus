@@ -600,3 +600,40 @@ conversation retry), handoff checks; native serial suite 111 passed, 4 ignored.
 Clippy all targets completed with existing warnings; viewport checks passed at
 all fixture sizes/zooms. A native log round-trip check verifies retry metadata
 survives persistence and is removed after a successful retry.
+
+## Configurable handoff retention (2026-10-07)
+
+Automation header settings opens a focused retention dialog. Native per-device
+handoff-settings.json defaults to 24 hours, validates whole hours 1–8760, and
+uses atomic persistence. The browser demo keeps the same setting in localStorage.
+Archive timestamps start at the latest finished consuming run; retries renew
+retention. Pending payloads and live claims are untouched. Stale claims archive
+after their existing 30-minute lease, then receive the retention period.
+Periodic/startup cleanup expires archives; saving settings also invokes cleanup.
+Native retry checks age independently so expiry is enforced before deletion.
+Blocked-run refresh checks retained payload availability and hides expired retry
+actions in both automation and conversation lists. No real user's retention
+setting was changed, and the recovered revise archive remains retained.
+
+Validation: production build/TypeScript/dropdown lint; ten frontend checks;
+saved-prompt WebKit fixture including settings persistence, 100/140/150% modal
+zoom, frozen-context retry, and expired retry visibility; viewport matrix;
+native serial suite 113 passed, 4 ignored; Clippy with existing warnings;
+git diff --check. Native tests cover default/config persistence and expiry while
+preserving old pending payloads and live claims. No commit or push.
+
+## Automation conversation names (2026-10-07)
+
+Both profile-based sendAgentMessage and external-provider runExternalAutomation
+receive the saved automation title when creating an in-app conversation. This
+prevents injected handoff instructions from becoming list titles. Existing chat
+names (including user renames) are preserved on retries and continuations.
+Naming is app metadata; external provider-owned titles are not modified. The
+legacy AgentComposer is not mounted, so no unrelated manual composer UI was
+introduced. Tests cover explicit profile-chat naming and continuation, plus
+external automation naming and blocked-action retry naming in WebKit.
+
+Naming validation: production build/TypeScript/dropdown lint, chat logic checks,
+and saved-prompt WebKit checks passed. The fixture now waits for log completion
+and checks the newly created named conversations rather than older fixture
+records retained by WebKit storage. Whitespace review passes. No commit or push.

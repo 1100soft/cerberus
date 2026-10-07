@@ -41,6 +41,24 @@ script = r"""
  (await wait(()=>document.querySelector('[aria-label="Toggle navigation"]'))).click();
  (await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Automation')))).click();
  assert(!document.querySelector('.saved-prompt-form'),'Creation form is visible before New automation');
+
+ window.__automationStage='handoff retention settings';
+ localStorage.removeItem('gitcerberus.handoffRetentionHours');
+ (await wait(()=>document.querySelector('[aria-label="Handoff retention settings"]'))).click();
+ const retentionDialog=await wait(()=>document.querySelector('[role="dialog"][aria-label="Handoff retention settings"]'));
+ const retentionInput=await wait(()=>{const input=retentionDialog.querySelector('input');return input&&!input.disabled?input:null;});
+ assert(retentionInput.value==='24','Handoff retention does not default to 24 hours');
+ for(const zoom of [1,1.4,1.5]){document.body.style.zoom=String(zoom);await pause();const rect=retentionDialog.getBoundingClientRect();assert(rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,'Retention dialog overflows at zoom '+zoom);}
+ document.body.style.zoom='1';await pause();
+
+ Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(retentionInput,'48');retentionInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();
+ retentionDialog.querySelector('footer button').click();await wait(()=>!document.querySelector('[role="dialog"][aria-label="Handoff retention settings"]'));
+ assert((await api.handoffSettings()).retentionHours===48,'Handoff retention was not saved');
+ (await wait(()=>document.querySelector('[aria-label="Handoff retention settings"]'))).click();
+ const savedRetentionDialog=await wait(()=>document.querySelector('[role="dialog"][aria-label="Handoff retention settings"]'));
+ await wait(()=>savedRetentionDialog.querySelector('input').value==='48');
+ savedRetentionDialog.querySelector('[aria-label="Close handoff retention settings"]').click();
+ await api.saveHandoffSettings(24);
  (await wait(()=>document.querySelector('.automation-list-header button'))).click();
  await wait(()=>document.querySelector('.automation-dialog'));
  assert(document.querySelector('[role="group"][aria-label="Automation type"]'),'Agent/Shell choice missing');
@@ -209,7 +227,7 @@ script = r"""
  assert((await wait(()=>document.querySelector('.automation-detail-pane[aria-label="Automation log"] .automation-log-lines'))).textContent.includes('fixture result'),'Read-only live terminal did not display shell output');await wait(()=>shellCalls.length===1);
  assert(shellCalls[0].repo===jobs[0].repositoryIds[0],'Run now did not target the default in-scope repository');
  assert(defaultRepositoryLabel.includes(shellCalls[0].repo)||defaultRepositoryLabel.includes('backend-api'),'Displayed repository did not match the default run');
- assert((await wait(()=>document.querySelector('[aria-label="Automation log run"]'))).textContent.includes('completed'),'Per-repository log picker is empty');
+ await wait(()=>document.querySelector('[aria-label="Automation log run"]')?.textContent.includes('completed'));
  assert((await wait(()=>document.querySelector('.automation-detail-pane[aria-label="Automation log"] .automation-log-lines'))).textContent.includes('fixture result'),'Shell output was not retained in the log viewer');
  const logBounds=document.querySelector('.automation-log-dialog').getBoundingClientRect();assert(logBounds.left>=-1&&logBounds.right<=innerWidth+1&&logBounds.top>=-1&&logBounds.bottom<=innerHeight+1,'Automation log viewer exceeds the window');
  window.__automationStage='manual details';
@@ -269,6 +287,7 @@ script = r"""
  assert(calls.length===2&&calls[0].identity==='claude-0'&&calls[1].identity==='claude-1','Agent did not use each repository account');
  assert(calls.every(call=>call.mode==='full'),'Write automation did not receive Git/network permissions');
  assert(JSON.parse(localStorage.getItem('gitcerberus.agentChats')).some(chat=>chat.session?.sessionId==='session-'+targetIds[1]),'New chat not recorded in app history');
+ assert(targetIds.every(id=>JSON.parse(localStorage.getItem('gitcerberus.agentChats')).find(chat=>chat.session?.sessionId==='session-'+id)?.name==='New Claude conversation'),'Automation title was not used as conversation name');
  window.__automationStage='file change debounce';
  savePrompt({...jobs[0],id:'file-change-fixture',title:'File change fixture',repositoryIds:[targetIds[0]],repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'fileChange',debounceSeconds:30,enabled:true,state:undefined});
  const beforeFileRuns=shellCalls.length,clock=Date.now();
@@ -472,13 +491,24 @@ script = r"""
  await promptModule.runSavedPrompt(blockedAgent.id,false,targetId,{repositoryId:targetId,name:'revise',id:'original-emission',path:'/fixture/original-handoff.txt'});
  const blockedAgentRun=promptModule.blockedAutomationRuns(blockedAgent.id)[0];
  assert(blockedAgentRun.retry.chatId,'Blocked agent lost its conversation link');
+ assert(JSON.parse(localStorage.getItem('gitcerberus.agentChats')).find(chat=>chat.id===blockedAgentRun.retry.chatId).name===blockedAgent.title,'Blocked automation conversation title is wrong');
  assert(promptModule.canRetryConversation(blockedAgentRun.retry.chatId),'Conversation retry option unavailable');
  const conversationId=blockedAgentRun.retry.chatId;
  api.runNewAgentConversation=async(repo,provider,identity,mode,prompt)=>{agentRequests.push(prompt);return {text:'Revision complete',sessionId:'retried-session'};};
  await promptModule.retryConversationAction(conversationId);
  assert(agentRequests.length===2&&agentRequests[0]===agentRequests[1],'Conversation retry changed the original prompt or handoff');
  assert(JSON.parse(localStorage.getItem('gitcerberus.agentChats')).find(chat=>chat.id===conversationId).status==='Completed','Retry did not update original conversation');
+ assert(JSON.parse(localStorage.getItem('gitcerberus.agentChats')).find(chat=>chat.id===conversationId).name===blockedAgent.title,'Retry changed the automation conversation title');
  assert(!promptModule.canRetryConversation(conversationId),'Completed conversation still offers blocked retry');
+
+ api.runNewAgentConversation=async()=>{throw Error('Expired handoff fixture blocked');};
+ await promptModule.runSavedPrompt(blockedAgent.id,false,targetId,{repositoryId:targetId,name:'revise',id:'original-emission',path:'/fixture/original-handoff.txt'});
+ const expiredRun=promptModule.blockedAutomationRuns(blockedAgent.id)[0];
+ const originalRetained=api.handoffRetained;api.handoffRetained=async()=>false;
+ await promptModule.refreshBlockedAutomations();
+ assert(promptModule.blockedAutomationRuns(blockedAgent.id).length===0,'Expired handoff still offers automation retry');
+ assert(!promptModule.canRetryConversation(expiredRun.retry.chatId),'Expired handoff still offers conversation retry');
+ api.handoffRetained=originalRetained;
  api.finishHandoff=originalFinish;api.retryHandoff=originalRetry;
 
  document.querySelector('.notification-trigger').click();await pause();

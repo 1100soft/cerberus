@@ -135,3 +135,13 @@ Handoffs are archived outside the pending queue, so a blocked action does not
 loop automatically. Explicit retry reclaims the exact original emission. Review
 partial changes before retrying a run that already performed work. **Run once**
 starts a separate manual execution and does not replay a prior handoff.
+
+The settings button beside **New automation** opens handoff retention settings.
+Archived handoffs default to 24 hours of retention after the latest run finishes.
+Choose 1–8760 whole hours; pending payloads and active runs are preserved.
+Expired handoffs cannot be retried and require a new upstream emission.
+
+Agent automation conversations use the automation's name in the app conversation
+list, including when handoff instructions are prepended to the prompt. Retries
+preserve the existing conversation name, including user renames. Provider-owned
+conversation titles outside Cerberus are managed separately by the provider.

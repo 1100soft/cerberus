@@ -19,18 +19,25 @@ export type SavedPrompt = {id:string;repositoryId:string;repositoryIds?:string[]
 export type AutomationRetry={job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
 const blockedRuns=new Map<string,AutomationLog>();
 const retryingRuns=new Set<string>();
+const expiredRuns=new Set<string>();
 let blockedGeneration=0;
 const retryKey=(log:Pick<AutomationLog,'automationId'|'repositoryId'|'runId'>)=>`${log.automationId}:${log.repositoryId}:${log.runId}`;
-export function blockedAutomationRuns(id:string){return [...blockedRuns.values()].filter(log=>log.automationId===id&&log.retry).sort((a,b)=>b.createdAt-a.createdAt);}
-export function blockedConversationRun(chatId:string){
+export function blockedAutomationRuns(id:string){return [...blockedRuns.values()].filter(log=>log.automationId===id&&log.retry&&!expiredRuns.has(retryKey(log))).sort((a,b)=>b.createdAt-a.createdAt);}
+function originalConversationRun(chatId:string){
   const chat=getAgentChat(chatId);if(!chat||chat.running)return;
   const log=[...blockedRuns.values()].find(log=>log.retry?.chatId===chatId||(!log.retry?.chatId&&log.retry?.incoming&&chat.repositoryId===log.repositoryId&&chat.messages.some(message=>message.role==='user'&&message.text.includes(log.retry!.incoming!.id))));
   if(log?.retry)log.retry.chatId=chatId;
   return log;
 }
-export function canRetryConversation(chatId:string){const chat=getAgentChat(chatId);return !!chat&&!chat.running&&(!!blockedConversationRun(chatId)||!!chat.retryable);}
+export function blockedConversationRun(chatId:string){const log=originalConversationRun(chatId);return log&&!expiredRuns.has(retryKey(log))?log:undefined;}
+export function canRetryConversation(chatId:string){
+  const chat=getAgentChat(chatId),log=originalConversationRun(chatId);
+  if(!chat||chat.running||(log&&expiredRuns.has(retryKey(log)))||(!log&&chat.automationRetry))return false;
+  return !!log||!!chat.retryable;
+}
 export async function retryConversationAction(chatId:string){
   const chat=getAgentChat(chatId);if(!chat||chat.running)throw new Error('Wait for the conversation to finish.');
+  const original=originalConversationRun(chatId);if(original&&expiredRuns.has(retryKey(original)))throw new Error('The original handoff has expired. Request a new handoff from the upstream agent.');
   const log=blockedConversationRun(chatId);if(log)return retryBlockedAutomation(log);
   if(chat.automationRetry)throw new Error('Load the original blocked automation before retrying.');
   await sendAgentMessage(chat.repositoryId,chat.profile,chat.messages.at(-2)?.text||'',chat.mode||'analyze',chat.id,[],chat.session,false,true,chat.model,undefined,chat.reasoningEffort);
@@ -41,6 +48,7 @@ export async function refreshBlockedAutomations(){
     const logs=await api.listAutomationLogs(job.id);
     for(const summary of logs.filter(item=>item.status==='error')){
       const log=await api.readAutomationLog(job.id,summary.repositoryId,summary.runId);
+      if(log.retry?.incoming){const incoming=log.retry.incoming;try{if(await api.handoffRetained(incoming.repositoryId,incoming.name,incoming.id))expiredRuns.delete(retryKey(log));else expiredRuns.add(retryKey(log));}catch(error){console.warn('Could not inspect retained handoff:',error);}}
       if(log.retry&&generation===blockedGeneration&&!retryingRuns.has(retryKey(log))){if(!log.retry.job)log.retry.job={...job,prompt:log.command};blockedRuns.set(retryKey(log),log);}
     }
   }catch(error){console.warn('Could not load blocked automation runs:',error);}}
@@ -48,7 +56,7 @@ export async function refreshBlockedAutomations(){
 }
 export async function retryBlockedAutomation(log:AutomationLog){
   const key=retryKey(log),retry=blockedRuns.get(key)?.retry;
-  if(!retry||retryingRuns.has(key))throw new Error('This action is no longer available to retry.');
+  if(!retry||retryingRuns.has(key)||expiredRuns.has(key))throw new Error('This action is no longer available to retry.');
   if(running.has(log.automationId))throw new Error('Wait for this automation to finish before retrying.');
   retryingRuns.add(key);running.add(log.automationId);blockedGeneration++;
   let incoming=retry.incoming;
@@ -229,11 +237,11 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
           agentStarted=true;
           if(account.route==='profile'){
             const previous=retry?.chatId?getAgentChat(retry.chatId):undefined;
-            chatId=await sendAgentMessage(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',previous?.id,[],previous?.session,!previous||(!previous.session&&!previous.retryable),!!previous?.retryable,job.model,undefined,job.reasoningEffort);
+            chatId=await sendAgentMessage(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',previous?.id,[],previous?.session,!previous||(!previous.session&&!previous.retryable),!!previous?.retryable,job.model,job.title,job.reasoningEffort);
             retryContext.chatId=chatId;
             result=await waitForAgentChat(chatId);
             activity=getAgentChat(chatId)?.activity||'';
-          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',retry?.chatId);result=run.text;chatId=run.chatId;retryContext.chatId=chatId;activity=getAgentChat(run.chatId)?.activity||'';}
+          }else {const run=await runExternalAutomation(repositoryId,account.profile,actionPrompt,job.mode==='analyze'?'analyze':'full',retry?.chatId,job.title);result=run.text;chatId=run.chatId;retryContext.chatId=chatId;activity=getAgentChat(run.chatId)?.activity||'';}
           response=result;
           if(/^blocked\b/i.test(result.trim()))throw new Error(result);
           window.dispatchEvent(new CustomEvent('saved-prompt-finished',{detail:{repositoryId,provider:job.provider}}));
@@ -521,7 +529,7 @@ async function syncFileWatchers(){
   const errors=await api.watchAutomationRepositories(ids);
   await Promise.allSettled(ids.filter(id=>!fresh.includes(id)).map(id=>recordAutomationCommit(id)));
   if(errors.length)console.warn('Automation file watchers:',errors.join('; '));
-  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).catch(error=>console.warn('Handoff cleanup:',error));}
+  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()).catch(error=>console.warn('Handoff cleanup:',error));}
 }
 export function startSavedPromptScheduler(){
   void refreshBlockedAutomations();
