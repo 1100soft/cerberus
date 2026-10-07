@@ -58,10 +58,12 @@ fn pending(repository:&Path,name:&str)->Result<Vec<PathBuf>,String>{
     let mut files=fs::read_dir(directory).map_err(|error|error.to_string())?.filter_map(Result::ok).map(|item|item.path()).filter(|path|path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file())&&path.extension().is_some_and(|extension|extension=="txt")&&path.file_stem().and_then(|stem|stem.to_str()).is_some_and(valid_id)).collect::<Vec<_>>();
     files.sort();Ok(files)
 }
-pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
+#[cfg(test)]
+pub fn cleanup_stale(repository:&Path)->Result<usize,String>{cleanup_with_retention(repository,24)}
+pub fn cleanup_with_retention(repository:&Path,hours:u64)->Result<usize,String>{
     // A process interruption cannot cause another run of the same emission.
     // Claims older than the 15-minute runner limit plus a safety margin are
-    // discarded, including when no automation with that name remains enabled.
+    // archived without automatically retriggering, even when the automation is disabled.
     let claimed_root=root(repository)?.join("claimed");
     let mut removed=0;
     if claimed_root.exists(){for namespace in fs::read_dir(claimed_root).map_err(|error|error.to_string())?.filter_map(Result::ok){
@@ -75,16 +77,18 @@ pub fn cleanup_stale(repository:&Path)->Result<usize,String>{
             let Some(id)=path.file_stem().and_then(|stem|stem.to_str())else{continue};
             if !valid_id(id){continue;}
             let consumed=file(repository,"consumed",&name,id)?;
-            if fs::rename(&path,&consumed).is_ok(){let _=fs::remove_file(consumed);removed+=1;}
+            if fs::rename(&path,&consumed).is_ok(){let _=fs::File::open(consumed).and_then(|file|file.set_modified(SystemTime::now()));removed+=1;}
         }
     }}
-    let consumed_root=root(repository)?.join("consumed");
+    for area in ["consumed","archived"] {
+    let consumed_root=root(repository)?.join(area);
     if consumed_root.exists(){for namespace in fs::read_dir(consumed_root).map_err(|error|error.to_string())?.filter_map(Result::ok){
         if !namespace.file_type().is_ok_and(|kind|kind.is_dir()){continue;}
         for item in fs::read_dir(namespace.path()).map_err(|error|error.to_string())?.filter_map(Result::ok){
-            if item.file_type().is_ok_and(|kind|kind.is_file()){let _=fs::remove_file(item.path());}
+            if item.file_type().is_ok_and(|kind|kind.is_file())&&item.metadata().and_then(|meta|meta.modified()).ok().and_then(|time|SystemTime::now().duration_since(time).ok()).is_some_and(|age|age>Duration::from_secs(hours*3600)){let _=fs::remove_file(item.path());}
         }
     }}
+    }
     Ok(removed)
 }
 fn matches_variables(path: &Path, variables: &[String]) -> bool {
@@ -138,7 +142,8 @@ pub fn claim_matching(
             continue;
         };
         let destination = file(repository, "claimed", name, &id)?;
-        if fs::rename(&source, &destination).is_ok() {
+        if fs::hard_link(&source, &destination).is_ok() {
+            if let Err(error)=fs::remove_file(&source){let _=fs::remove_file(&destination);return Err(error.to_string());}
             // The payload may have waited in the queue for hours. Lease age
             // begins at claim time, not at the agent's original write.
             if let Err(error) =
@@ -155,14 +160,44 @@ pub fn claim_matching(
     }
     Ok(None)
 }
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct Selection {pub id:String,pub preview:String,pub retained:bool}
+pub fn selections(repository:&Path,name:&str,variables:&[String])->Result<Vec<Selection>,String>{
+    let mut result=Vec::new();
+    for area in ["pending","consumed","archived"] {
+        for entry in fs::read_dir(folder(repository,area,name)?).map_err(|error|error.to_string())?.filter_map(Result::ok) {
+            let path=entry.path();
+            if !entry.file_type().is_ok_and(|kind|kind.is_file())||!path.metadata().is_ok_and(|meta|meta.len()<=2_000_000)||!matches_variables(&path,variables){continue;}
+            let Some(id)=path.file_stem().and_then(|stem|stem.to_str())else{continue};
+            if !valid_id(id){continue;}
+            result.push(Selection{id:id.into(),preview:fs::read_to_string(&path).map_err(|error|error.to_string())?.chars().take(500).collect(),retained:area!="pending"});
+        }
+    }
+    result.sort_by(|a,b|a.id.cmp(&b.id));Ok(result)
+}
+pub fn claim_selected(repository:&Path,name:&str,id:&str,variables:&[String])->Result<Claim,String>{
+    let destination=file(repository,"claimed",name,id)?;
+    if destination.exists(){return Err("This handoff is already being used by another run.".into());}
+    for area in ["pending","consumed","archived"] {
+        let source=file(repository,area,name,id)?;
+        if !source.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file())||!matches_variables(&source,variables){continue;}
+        // A hard link creates the claim atomically without overwriting an active claim.
+        fs::hard_link(&source,&destination).map_err(|error|error.to_string())?;
+        if let Err(error)=fs::remove_file(&source){let _=fs::remove_file(&destination);return Err(error.to_string());}
+        fs::File::open(&destination).and_then(|file|file.set_modified(SystemTime::now())).map_err(|error|error.to_string())?;
+        return Ok(Claim{id:id.into(),path:destination.to_string_lossy().into_owned()});
+    }
+    Err("The selected handoff is no longer available or its flags do not match.".into())
+}
 pub fn finish(repository:&Path,name:&str,id:&str)->Result<(),String>{
     let source=file(repository,"claimed",name,id)?;
     if !source.exists(){return Ok(());}
-    // Move out of the recoverable queue before deleting. A cleanup failure
-    // cannot turn a completed action back into a pending event later.
+    // Retain the original payload outside the pending queue. Cleanup cannot
+    // turn a completed action into an automatically pending event.
     let consumed=file(repository,"consumed",name,id)?;
     fs::rename(source,&consumed).map_err(|error|error.to_string())?;
-    fs::remove_file(consumed).map_err(|error|error.to_string())
+    fs::File::open(consumed).and_then(|file|file.set_modified(SystemTime::now())).map_err(|error|error.to_string())
 }
 pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
     let source=file(repository,"claimed",name,id)?;
@@ -283,5 +318,52 @@ mod variable_tests {
                 .count(),
             1
         );
+    }
+}
+
+#[cfg(test)] mod selection_tests {
+    use super::*;
+    #[test] fn selected_handoffs_keep_original_ids_and_require_flags(){
+        let repo=tempfile::tempdir().unwrap();Command::new("git").args(["init","-q"]).arg(repo.path()).status().unwrap();
+        write_payload(repo.path(),"review","original",r#"{"variables":{"ready":true}}"#).unwrap();publish(repo.path(),"review","original").unwrap();
+        assert!(selections(repo.path(),"review",&["missing".into()]).unwrap().is_empty());
+        let claim=claim_selected(repo.path(),"review","original",&["ready".into()]).unwrap();
+        assert!(claim_selected(repo.path(),"review","original",&[]).is_err());
+        finish(repo.path(),"review",&claim.id).unwrap();
+        let items=selections(repo.path(),"review",&[]).unwrap();assert_eq!(items[0].id,"original");assert!(items[0].retained);
+        assert!(!has_pending(repo.path(),"review").unwrap());
+        let retry=claim_selected(repo.path(),"review","original",&[]).unwrap();assert_eq!(retry.id,claim.id);finish(repo.path(),"review",&retry.id).unwrap();
+        let path=file(repo.path(),"consumed","review","original").unwrap();fs::File::open(path).unwrap().set_modified(SystemTime::now()-Duration::from_secs(7200)).unwrap();
+        cleanup_with_retention(repo.path(),1).unwrap();assert!(selections(repo.path(),"review",&[]).unwrap().is_empty());
+    }
+}
+
+pub fn retained(repository:&Path,name:&str,id:&str,hours:u64)->Result<bool,String>{
+    cleanup_with_retention(repository,hours)?;
+    for area in ["pending","consumed","archived"]{let path=file(repository,area,name,id)?;if path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file()&&meta.len()<=2_000_000){return Ok(true);}}
+    Ok(false)
+}
+pub fn retry_with_retention(repository:&Path,name:&str,id:&str,hours:u64)->Result<Claim,String>{
+    if !retained(repository,name,id,hours)?{return Err("The original handoff has expired or is unavailable.".into());}
+    claim_selected(repository,name,id,&[])
+}
+
+#[cfg(test)] mod retry_retention_tests {
+    use super::*;
+    #[test] fn exact_retry_preserves_payload_and_refuses_active_claim_or_expiry(){
+        let temp=tempfile::tempdir().unwrap();let repo=temp.path();
+        assert!(Command::new("git").args(["init","-q"]).arg(repo).status().unwrap().success());
+        write_payload(repo,"revise","original","original payload").unwrap();publish(repo,"revise","original").unwrap();
+        let original=claim(repo,"revise").unwrap().unwrap();finish(repo,"revise","original").unwrap();
+        assert!(retained(repo,"revise","original",24).unwrap());
+        let retried=retry_with_retention(repo,"revise","original",24).unwrap();
+        assert_eq!(original.id,retried.id);assert_eq!(original.path,retried.path);
+        assert_eq!(fs::read_to_string(&retried.path).unwrap(),"original payload");
+        assert!(retry_with_retention(repo,"revise","original",24).is_err());
+        finish(repo,"revise","original").unwrap();
+        let archive=file(repo,"consumed","revise","original").unwrap();
+        fs::File::open(archive).unwrap().set_modified(SystemTime::now()-Duration::from_secs(7200)).unwrap();
+        assert!(!retained(repo,"revise","original",1).unwrap());
+        assert!(retry_with_retention(repo,"revise","original",1).is_err());
     }
 }

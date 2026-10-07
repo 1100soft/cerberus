@@ -1067,3 +1067,23 @@ input[type="number"] { text-align: right; }
 .automation-page .saved-prompt-list article { flex: 0 0 auto; overflow: visible; }
 .automation-page .saved-prompt-list article strong, .automation-page .saved-prompt-list article small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .automation-page .saved-prompt-list article > div:first-child { overflow: visible; }
+
+.automation-list-header { flex-wrap: wrap; }
+.automation-runtime-dialog .automation-dialog-content { display: flex; flex-direction: column; gap: 12px; }
+.handoff-retention-field { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.handoff-retention-field input { width: 8em; }
+
+/* Each card owns a definition and independent execution contexts. */
+.automation-page .saved-prompt-list article { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 10px 14px; }
+.automation-page .saved-prompt-list .saved-prompt-actions { flex-wrap: wrap; justify-content: flex-end; }
+.automation-page .saved-prompt-list article > [role="status"] { max-width: none; }
+.automation-context-runs { grid-column: 1 / -1; min-width: 0; display: grid; gap: 5px; padding-top: 10px; border-top: 1px solid var(--border-control); }
+.automation-context-heading { display: flex; justify-content: space-between; gap: 10px; }
+.automation-context-run { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; width: 100%; padding: 7px 9px; text-align: left; border: 1px solid var(--border-control); border-radius: 6px; color: var(--text-primary); background: var(--surface-control); cursor: pointer; }
+.automation-context-run.active { border-color: var(--accent-codex-border); }
+.automation-context-status { display: inline-flex; gap: 5px; align-items: center; font-size: 11px; }
+.automation-context-label { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.automation-context-run time { font-size: 11px; opacity: .7; }
+@media (max-width: 680px) { .automation-page .saved-prompt-list article { grid-template-columns: minmax(0,1fr); } .automation-page .saved-prompt-list .saved-prompt-actions { margin-left: 0; justify-content: flex-start; } }
+
+.automation-list-header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

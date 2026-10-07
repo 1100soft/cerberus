@@ -7,7 +7,7 @@ import json from 'highlight.js/lib/languages/json';
 import diff from 'highlight.js/lib/languages/diff';
 import { api, type AutomationLog, type AutomationLogSummary } from '../lib/api';
 import { currentAutomationLogs, subscribeAutomationLogs } from '../lib/automationLogs';
-import { subscribeSavedPrompts, type SavedPrompt } from '../lib/savedPrompts';
+import { acknowledgeAutomationError, subscribeSavedPrompts, type SavedPrompt } from '../lib/savedPrompts';
 import { ShellCode } from './ShellCode';
 import { Select } from './Select';
 import type { Repository } from '../types';
@@ -18,9 +18,11 @@ function HighlightedCode({value}:{value:string}){
   return <pre className="automation-log-code"><code dangerouslySetInnerHTML={{__html:html}}/></pre>;
 }
 export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:SavedPrompt;repositories:Repository[];onClose:()=>void;initialRun?:{repositoryId:string;runId:string}}){
+  useEffect(()=>acknowledgeAutomationError(job.id),[job.id,job.lastAt]);
   const [summaries,setSummaries]=useState<AutomationLogSummary[]>([]);
   const initialSelection=initialRun?`${initialRun.repositoryId}:${initialRun.runId}`:'';
   const [selected,setSelected]=useState(initialSelection);
+  const selectionPinned=useRef(!!initialRun);
   const preferredSelection=useRef(initialSelection);
   const [entry,setEntry]=useState<AutomationLog|null>(null);
   const [error,setError]=useState('');
@@ -42,18 +44,19 @@ export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:S
   const activeKey=active?`${active.repositoryId}:${active.runId}`:'';
   useEffect(()=>{
     if(preferredSelection.current){if(logs.some(item=>`${item.repositoryId}:${item.runId}`===preferredSelection.current)){setSelected(preferredSelection.current);preferredSelection.current='';lastActive.current=activeKey;}return;}
+    if(selectionPinned.current&&selected&&logs.some(item=>`${item.repositoryId}:${item.runId}`===selected))return;
     if(activeKey&&activeKey!==lastActive.current){lastActive.current=activeKey;setSelected(activeKey);}
     else if(!selected||!logs.some(item=>`${item.repositoryId}:${item.runId}`===selected)){setSelected(logs[0]?`${logs[0].repositoryId}:${logs[0].runId}`:'');}
   },[activeKey,selected,summaries,liveEntries]);
   const liveEntry=liveEntries.find(item=>`${item.repositoryId}:${item.runId}`===selected);
   useEffect(()=>{
     let active=true;setEntry(null);
-    if(liveEntry){setEntry(liveEntry);return;}
-    if(!selected)return;
+    if(liveEntry){setEntry(liveEntry);setError('');return;}
+    if(!selected||!logs.some(item=>`${item.repositoryId}:${item.runId}`===selected))return;
     const split=selected.indexOf(':');const repositoryId=selected.slice(0,split),runId=selected.slice(split+1);
     void api.readAutomationLog(job.id,repositoryId,runId).then(value=>{if(active){setEntry(value);setError('');}}).catch(reason=>{if(active)setError(String(reason));});
     return()=>{active=false;};
-  },[job.id,selected,liveEntry]);
+  },[job.id,selected,liveEntry,summaries]);
   const repositoryName=(id:string)=>repositories.find(repo=>repo.id===id)?.displayName||job.repositoryLabels?.[id]||id;
   const logText=[
     entry?[`${repositoryName(entry.repositoryId)} · ${new Date(entry.createdAt).toLocaleString()}`,entry.stdout,entry.stderr,entry.response,entry.activity].filter(Boolean).join('\n\n'):'',
@@ -65,7 +68,7 @@ export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:S
   useLayoutEffect(()=>{const pane=logScroll.current;if(pane&&followOutput.current)pane.scrollTop=pane.scrollHeight;},[selected,entry,error,copyStatus,job.lastResult]);
   return <div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="automation-dialog automation-log-dialog" role="dialog" aria-modal="true" aria-label={`Details for ${job.title}`} onKeyDown={event=>{if(event.key==='Escape')onClose();}}><header><h2>{job.title}</h2><button type="button" aria-label="Close automation details" onClick={onClose}><X size={17}/></button></header><div className="automation-dialog-content automation-detail-content">
     <section className="automation-detail-pane" aria-label="Automation content"><strong>{job.kind==='notification'?'Notification message':job.kind==='shell'||job.kind==='git'?'Command or script':'Agent prompt'}</strong><div className="automation-detail-scroll">{job.kind==='shell'||job.kind==='git'?<ShellCode code={job.prompt}/>:<pre className="automation-log-plain">{job.prompt}</pre>}</div></section>
-    <section className="automation-detail-pane" aria-label="Automation log"><div className="automation-detail-log-header"><strong>Log</strong><CopyButton label="Copy automation log" value={logText} disabled={!logText} onError={reason=>setCopyStatus(`Could not copy log: ${String(reason)}`)}/>{logs.length>0&&<Select label="Automation log run" value={selected} onChange={setSelected} options={logs.map(item=>({value:`${item.repositoryId}:${item.runId}`,label:`${repositoryName(item.repositoryId)} · ${new Date(item.createdAt).toLocaleString()} · ${item.status}`}))}/>}</div><div ref={logScroll} className="automation-detail-scroll" aria-live="polite" onScroll={event=>{const pane=event.currentTarget;followOutput.current=pane.scrollHeight-pane.clientHeight-pane.scrollTop<=16;}}>
+    <section className="automation-detail-pane" aria-label="Automation log"><div className="automation-detail-log-header"><strong>Log</strong><CopyButton label="Copy automation log" value={logText} disabled={!logText} onError={reason=>setCopyStatus(`Could not copy log: ${String(reason)}`)}/>{logs.length>0&&<Select label="Automation log run" value={selected} onChange={value=>{selectionPinned.current=true;setSelected(value);}} options={logs.map(item=>({value:`${item.repositoryId}:${item.runId}`,label:`${repositoryName(item.repositoryId)}${item.branch?' · '+item.branch:''}${item.commitSha?' · '+item.commitSha.slice(0,8):''}${item.handoffName?' · '+item.handoffName:''} · ${new Date(item.createdAt).toLocaleString()} · ${item.status}`}))}/>}</div><div ref={logScroll} className="automation-detail-scroll" aria-live="polite" onScroll={event=>{const pane=event.currentTarget;followOutput.current=pane.scrollHeight-pane.clientHeight-pane.scrollTop<=16;}}>
       {copyStatus&&<p role="status">{copyStatus}</p>}
 
       {entry&&<div className="automation-log-lines"><small>{repositoryName(entry.repositoryId)} · {new Date(entry.createdAt).toLocaleString()}</small>{entry.stdout&&<HighlightedCode value={entry.stdout}/>}{entry.stderr&&<pre className="automation-log-error">{entry.stderr}</pre>}{entry.response&&<pre>{entry.response}</pre>}{entry.activity&&<pre className="automation-log-activity">{entry.activity}</pre>}</div>}

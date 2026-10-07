@@ -1,3 +1,4 @@
+import { retryConversationAction } from '../lib/savedPrompts';
 import { ArrowUp, SquarePen } from 'lucide-react';
 import { assignedChatgpt,useChatgptAccounts } from '../lib/chatgptAccounts';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -16,7 +17,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
   const assignedProfile=accountState.profiles.find(profile=>profile.id===assignedId);
   const chats = useAgentChats();
   const chat = chats.find(chat => chat.id === chatId);
-  const active = chats.find(chat => chat.repositoryId === repositoryId && chat.running);
+  const active = chats.find(item => item.repositoryId === repositoryId && item.running && item.automationContext?.runId===chat?.automationContext?.runId);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [profileId, setProfileId] = useState('');
   const mode=permission;
@@ -56,7 +57,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
     if(chat && chat.profile.id!==profile.id){setResumeStatus({available:false,reason:'This chat uses another account. Start a new chat with the assigned account to keep billing separate.'});return;}
     if (!target) { setResumeStatus({available:false,reason:'No resumable session was recorded for this chat.'}); return; }
     if (!inTauri()) { setResumeStatus({available:false,reason:'Session resume requires the desktop app.'}); return; }
-    invoke<ResumeStatus>('agent_resume_status', {profileId:profile.id,repositoryId,target}).then(status => { if (live) setResumeStatus(status); }).catch(e => { if (live) setResumeStatus({available:false,reason:String(e)}); });
+    invoke<ResumeStatus>('agent_resume_status', {profileId:profile.id,repositoryId,target,automationRunId:chat?.automationContext?.runId||null}).then(status => { if (live) setResumeStatus(status); }).catch(e => { if (live) setResumeStatus({available:false,reason:String(e)}); });
     return () => { live = false; };
   }, [repositoryId, profile?.id, targetKey, continuing, chat?.running]);
   const needsNew = continuing && resumeStatus?.available === false;
@@ -75,7 +76,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
     {assignedId && (!assignedProfile || assignedProfile.disconnected) && (!provider || provider==='codex') && <small role="alert">The assigned ChatGPT identity is disconnected. Reconnect it in Identities or assign another account.</small>}
     {continuing && profile && <small role="status">{!resumeStatus ? 'Checking whether this conversation can continue…' : resumeStatus.available ? 'Continuing the existing conversation.' : `New chat required: ${resumeStatus.reason}`}</small>}
     {needsNew && <small>{contextReady ? '“Start new chat” copies the loaded messages. The original conversation is kept.' : 'Stored messages could not be loaded. “Start new chat” sends only the new prompt and keeps the original conversation.'}</small>}
-    {chat?.retryable && !needsNew && !active && profile && <button type="button" disabled={sending} onClick={async () => { setSending(true); setError(''); try { await sendAgentMessage(repositoryId,profile,chat.messages.at(-2)?.text || '',mode,chat.id,[],chat.session,false,true); } catch(e) { setError(String(e)); } finally { setSending(false); } }}>Retry last message</button>}
+    {chat?.retryable && !needsNew && !active && profile && <button type="button" disabled={sending} onClick={async () => { setSending(true); setError(''); try { await retryConversationAction(chat.id); } catch(e) { setError(String(e)); } finally { setSending(false); } }}>Retry last message</button>}
     {chat && !active && resumeStatus?.available && chat.status !== 'Completed' && <button type="button" disabled={!draft.trim() || sending} onClick={() => { void send(true); }}>Start new chat instead</button>}
     {chat?.status.includes('no credits remaining') && <button type="button" onClick={() => api.openExternalUrl('https://platform.openai.com/settings/organization/billing/').catch(e => setError(String(e)))}>Open API billing</button>}
     {storageError && <p role="alert">{storageError}</p>}
@@ -83,7 +84,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
     {error && <p role="alert">{error}</p>}
     <div className="chat-composer-actions">
       {showAccountPicker && <Select label="Chat account" disabled={!!originalProfile || sending} value={profile?.id || ''} triggerContent={profile ? undefined : 'Select account'} onChange={setProfileId} options={matchingProfiles.map(profile => ({value:profile.id,label:`${profile.label} · ${profile.subscription ? 'ChatGPT subscription' : profile.provider+' API'}`}))} />}
-      {active ? <button type="button" onClick={() => stopAgentChat(repositoryId).catch(e => setError(String(e)))}>Stop</button> : <button className="chat-send" type={needsNew ? 'button' : 'submit'} onClick={needsNew ? () => { void send(true); } : undefined} disabled={!inTauri() || !profile || !draft.trim() || sending || (continuing && !resumeStatus)} aria-label={needsNew ? "Start new chat" : "Send message"} title={needsNew ? contextReady ? 'Start a separate conversation using loaded messages' : 'Start a separate conversation without unavailable history' : 'Send message · Ctrl+Enter'}>{needsNew ? <SquarePen size={18}/> : <ArrowUp size={18}/>}</button>}
+      {active ? <button type="button" onClick={() => stopAgentChat(repositoryId,active.id).catch(e => setError(String(e)))}>Stop</button> : <button className="chat-send" type={needsNew ? 'button' : 'submit'} onClick={needsNew ? () => { void send(true); } : undefined} disabled={!inTauri() || !profile || !draft.trim() || sending || (continuing && !resumeStatus)} aria-label={needsNew ? "Start new chat" : "Send message"} title={needsNew ? contextReady ? 'Start a separate conversation using loaded messages' : 'Start a separate conversation without unavailable history' : 'Send message · Ctrl+Enter'}>{needsNew ? <SquarePen size={18}/> : <ArrowUp size={18}/>}</button>}
     </div>
   </form>;
 }

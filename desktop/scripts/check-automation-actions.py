@@ -1,0 +1,96 @@
+"""Exercise automation persistence, in-app delivery, prompt prefill, and zoomed layout in WebKitGTK.
+Requires the existing Vite server on 127.0.0.1:3000.
+"""
+import json
+import sys
+import urllib.request
+import gi
+
+gi.require_version('Gtk', '3.0')
+gi.require_version('WebKit2', '4.1')
+from gi.repository import Gtk, WebKit2, GLib
+
+urllib.request.urlopen('http://127.0.0.1:3000', timeout=5).close()
+script = r"""
+(async()=>{
+ const pause=(ms=80)=>new Promise(resolve=>setTimeout(resolve,ms));const assert=(ok,message)=>{if(!ok)throw Error(message)};const wait=async(get)=>{for(let i=0;i<100;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for UI');};
+ const cacheSource=await (await fetch('/src/lib/conversationCache.ts')).text();const apiPath=cacheSource.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];const {api}=await import(apiPath);
+ const panelSource=await (await fetch('/src/components/SavedPromptsPanel.tsx')).text();const promptPath=panelSource.match(/from "([^"\n]*\/savedPrompts\.ts[^"\n]*)"/)[1];const {savePrompt,savedPrompts,runSavedPrompt,removePrompt}=await import(promptPath);for(const existing of savedPrompts())removePrompt(existing.id);
+
+ const repositories=await api.repositories(),repo=repositories.find(item=>item.localPath);assert(repo,'No demo repository');
+ const job={id:'actions-a',repositoryId:repo.id,repositoryIds:[repo.id],provider:'codex',threadId:'',title:'Actions A',prompt:'fixture',trigger:'interval',minutes:60,nextAt:Date.now()+3600000,enabled:true,editor:'vscode',kind:'shell',commitBranch:'*'};
+ savePrompt(job);savePrompt({...job,id:'actions-b',title:'Actions B'});
+ api.runAutomationShell=async()=>{throw Error('Fixture failure');};await runSavedPrompt(job.id,true,repo.id);const failureResult=savedPrompts().find(item=>item.id===job.id).lastResult;assert(savedPrompts().find(item=>item.id===job.id).enabled,'Failure disabled automation');
+ (await wait(()=>document.querySelector('[aria-label="Toggle navigation"]'))).click();(await wait(()=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes('Automation')))).click();
+ const card=()=>document.querySelector('[aria-label="Open Actions A"]');await wait(card);await pause();assert(card().querySelector('.config-error'),'Unread error missing: '+JSON.stringify(savedPrompts().find(item=>item.id===job.id)));card().click();await wait(()=>document.querySelector('.automation-log-dialog'));await wait(()=>!card().querySelector('.config-error'));assert(savedPrompts().find(item=>item.id===job.id).lastResult===failureResult,'Acknowledgement erased error');document.querySelector('[aria-label="Close automation details"]').click();await pause();
+ for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);card().dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:innerWidth-2,clientY:innerHeight-2}));const menu=await wait(()=>document.querySelector('[role="menu"]'));await pause();const bounds=menu.getBoundingClientRect();assert(bounds.right<=innerWidth+1&&bounds.bottom<=innerHeight+1,'Menu overflows '+zoom);menu.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));assert(menu.contains(document.activeElement),'Menu keyboard focus lost');menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(()=>!document.querySelector('[role="menu"]'));}
+ document.documentElement.style.setProperty('--ui-zoom',1);document.querySelector('[aria-label="Edit Actions A"]').click();await wait(()=>document.querySelector('[aria-label="Next automation"]'));const name=document.querySelector('[aria-label="Automation name"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(name,'Actions A edited');name.dispatchEvent(new Event('input',{bubbles:true}));await pause();document.querySelector('[aria-label="Next automation"]').click();await wait(()=>document.querySelector('[aria-label="Automation name"]').value==='Actions B');assert(savedPrompts().find(item=>item.id===job.id).title==='Actions A edited','Navigation discarded edits: '+JSON.stringify(savedPrompts().filter(item=>item.id.startsWith('actions-'))));document.querySelector('[aria-label="Edit automation"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',altKey:true,bubbles:true,cancelable:true}));await wait(()=>document.querySelector('[aria-label="Automation name"]').value==='Actions A edited');document.querySelector('[aria-label="Close edit automation"]').click();
+ let received;api.branches=async()=>['main','correction/test'];api.history=async()=>[{hash:'older-commit',summary:'Older commit',author:'Fixture',email:'fixture@example.test',committedAt:'2026-10-01T08:00:00Z'},{hash:'selected-commit',summary:'Selected commit',author:'Fixture',email:'fixture@example.test',committedAt:'2026-10-07T08:00:00Z'}];api.runAutomationShell=async(repository,command,onOutput,input,outputs,context)=>{received={repository,input,context};return {result:'OK',stdout:'OK',stderr:''};};
+ savePrompt({...job,id:'actions-commit',title:'Commit inputs',trigger:'commit',commitBranch:'correction/*'});await wait(()=>document.querySelector('[aria-label="Run Commit inputs now"]'));document.querySelector('[aria-label="Run Commit inputs now"]').click();await wait(()=>document.querySelector('[aria-label="Trigger commit"]'));await wait(()=>!document.querySelector('.automation-runtime-dialog footer button').disabled);assert(document.querySelector('[aria-label="Trigger branch"]').textContent.includes('correction/test'),'Wrong branch selected');assert(document.querySelector('[aria-label="Trigger commit"]').textContent.includes('Selected commit'),'Commits not sorted newest first');assert(document.querySelector('[aria-label="Trigger commit"]').textContent.includes(new Date('2026-10-07T08:00:00Z').toLocaleString()),'Commit timestamp missing');for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);document.querySelector('[aria-label="Trigger commit"]').click();const list=await wait(()=>document.querySelector('[role="listbox"]'));await pause();const bounds=list.getBoundingClientRect();assert(bounds.right<=innerWidth+1&&bounds.bottom<=innerHeight+1,'Input selector overflows '+zoom);assert(list.textContent.includes('Selected commit'),'Commit timestamp label lost summary');list.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await wait(()=>!document.querySelector('[role="listbox"]'));}document.documentElement.style.setProperty('--ui-zoom',1);document.querySelector('[aria-label="Trigger branch"]').click();await wait(()=>document.querySelector('[role="option"]'));document.querySelector('[role="option"]').click();await pause();assert(!document.querySelector('.automation-runtime-dialog').textContent.includes('Loading commits'),'Reselecting a branch leaves a stuck loader');document.querySelector('.automation-runtime-dialog footer button').click();await wait(()=>received);assert(received.context.CERBERUS_COMMIT_SHA==='selected-commit'&&received.context.CERBERUS_BRANCH==='correction/test','Manual commit context lost');await wait(()=>document.querySelector('[aria-label="Close automation details"]'));document.querySelector('[aria-label="Close automation details"]').click();await pause();
+ let selected;api.listMatchingHandoffs=async(repository,name,flags)=>{assert(flags[0]==='ready','Handoff flags lost');return [{id:'original-id',preview:'Original payload',retained:true}];};api.claimSelectedHandoff=async(repository,name,id)=>{selected=id;return {id,path:'/tmp/original-payload'};};received=null;savePrompt({...job,id:'actions-handoff',title:'Handoff inputs',trigger:'handoff',handoffName:'review',handoffVariables:['ready']});await wait(()=>document.querySelector('[aria-label="Run Handoff inputs now"]'));document.querySelector('[aria-label="Run Handoff inputs now"]').click();await wait(()=>document.querySelector('[aria-label="Trigger handoff"]'));assert(document.querySelector('.automation-runtime-dialog pre').textContent==='Original payload','Handoff preview missing');await wait(()=>!document.querySelector('.automation-runtime-dialog footer button').disabled);document.querySelector('.automation-runtime-dialog footer button').click();await wait(()=>received);assert(selected==='original-id'&&received.input==='/tmp/original-payload','Wrong handoff claimed');
+ document.querySelector('[aria-label="Close automation details"]').click();await pause();
+ const runtimeSource=await (await fetch(promptPath)).text();const logsPath=runtimeSource.match(/from "([^"\n]*\/automationLogs\.ts[^"\n]*)"/)[1];const {currentAutomationLogs}=await import(logsPath);const {currentAutomationRuns}=await import(promptPath);
+ const concurrent={...job,id:'actions-concurrent',title:'Concurrent contexts',trigger:'commit',commitBranch:'*'};savePrompt(concurrent);
+ const pending=new Map();api.runAutomationShell=async(repository,command,onOutput,input,outputs,context)=>new Promise((resolve,reject)=>pending.set(context.CERBERUS_COMMIT_SHA,{resolve,reject,onOutput}));
+ const runA=runSavedPrompt(concurrent.id,true,repo.id,undefined,undefined,'main','commit-a');await wait(()=>pending.has('commit-a'));
+ const runB=runSavedPrompt(concurrent.id,true,repo.id,undefined,undefined,'correction/b','commit-b');await wait(()=>pending.has('commit-b'));
+ await runSavedPrompt(concurrent.id,true,repo.id,undefined,undefined,'main','commit-a');assert(pending.size===2&&currentAutomationRuns().filter(run=>run.automationId===concurrent.id).length===2,'Duplicate context or global execution lock');
+ const concurrentCard=()=>document.querySelector('[aria-label="Open Concurrent contexts"]');await wait(()=>concurrentCard()?.querySelectorAll('.automation-context-run.active').length===2);assert(!document.querySelector('[aria-label="Run Concurrent contexts now"]').disabled,'Running automation cannot start another context');
+ pending.get('commit-a').onOutput({stream:'stdout',text:'output-A'});pending.get('commit-b').onOutput({stream:'stdout',text:'output-B'});
+ assert(currentAutomationLogs(concurrent.id).find(run=>run.commitSha==='commit-a').stdout==='output-A','Context A output mixed');assert(currentAutomationLogs(concurrent.id).find(run=>run.commitSha==='commit-b').stdout==='output-B','Context B output mixed');
+ concurrentCard().querySelector('[aria-label^="Open run"]').click();await wait(()=>document.querySelector('.automation-log-lines')?.textContent.includes('output-A'));pending.get('commit-a').resolve({result:'done A',stdout:'output-A',stderr:''});await runA;assert(savedPrompts().find(item=>item.id===concurrent.id).state==='running','First completion erased another active run');assert(document.querySelector('.automation-log-lines').textContent.includes('output-A'),'Log switched away from pinned context');
+ pending.get('commit-b').reject(Error('context B failure'));await runB;assert(savedPrompts().find(item=>item.id===concurrent.id).enabled,'Concurrent failure disabled definition');assert(!currentAutomationRuns().some(run=>run.automationId===concurrent.id),'Execution reservation leaked');
+ document.querySelector('[aria-label="Close automation details"]').click();await pause();
+ const realSetTimeout=window.setTimeout;window.setTimeout=(callback,delay,...args)=>realSetTimeout(callback,delay===30000?30:delay,...args);
+ let lateHistory;api.history=()=>new Promise(resolve=>{lateHistory=resolve;});document.querySelector('[aria-label="Run Commit inputs now"]').click();await wait(()=>document.querySelector('.automation-runtime-dialog [role="alert"]')?.textContent.includes('timed out'));
+ api.history=async()=>[{hash:'after-retry',summary:'Recovered request',author:'Fixture',email:'fixture@example.test',committedAt:'2026-10-07T09:00:00Z'}];[...document.querySelectorAll('.automation-runtime-dialog button')].find(button=>button.textContent==='Refresh commits').click();await wait(()=>document.querySelector('[aria-label="Trigger commit"]')?.textContent.includes('Recovered request'));lateHistory([{hash:'stale',summary:'Stale response',committedAt:'2026-10-07T10:00:00Z'}]);await pause();assert(!document.querySelector('[aria-label="Trigger commit"]').textContent.includes('Stale response'),'Late timed-out response replaced current commits');window.setTimeout=realSetTimeout;
+ window.__savedPromptCheck={passed:true,checks:'error preservation, acknowledgement, menus at 100/140/150%, edit navigation, branch re-selection, timestamped inputs, concurrent contexts and pinned logs'};
+})().catch(error=>window.__savedPromptCheck={passed:false,error:String(error)});
+
+"""
+window=Gtk.OffscreenWindow()
+# Clipboard behavior is mocked before React mounts; never touch the host clipboard.
+manager=WebKit2.UserContentManager()
+manager.add_script(WebKit2.UserScript.new("let fixtureClipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>fixtureClipboard,writeText:async value=>{fixtureClipboard=value;}}});",WebKit2.UserContentInjectedFrames.TOP_FRAME,WebKit2.UserScriptInjectionTime.START,None,None))
+view=WebKit2.WebView.new_with_user_content_manager(manager)
+view.set_size_request(900,620)
+window.add(view)
+window.show_all()
+exit_code=1
+started=False
+finished=False
+
+def checked(webview,result):
+    global exit_code, finished
+    try:
+        raw=webview.evaluate_javascript_finish(result).to_string()
+        if raw in ('undefined','null'):return
+        value=json.loads(raw)
+        if value is None:return
+        print(json.dumps(value))
+        exit_code=0 if value['passed'] else 1
+        finished=True
+        # Unload React and its timers before tearing down WebKit's JS context.
+        view.load_html('<!doctype html><html></html>',None)
+        GLib.timeout_add(400,lambda:(Gtk.main_quit(),False)[1])
+    except Exception as error:
+        print(str(error),file=sys.stderr)
+        Gtk.main_quit()
+
+def poll():
+    if finished:return False
+    view.evaluate_javascript('JSON.stringify(window.__savedPromptCheck || null)',-1,None,None,None,checked)
+    return True
+
+def loaded(webview,event):
+    global started
+    if event==WebKit2.LoadEvent.FINISHED and not started:
+        started=True
+        view.evaluate_javascript(script+'\nvoid 0;',-1,None,None,None,None)
+        GLib.timeout_add(300,poll)
+
+view.connect('load-changed',loaded)
+view.load_uri('http://127.0.0.1:3000')
+GLib.timeout_add_seconds(35,lambda:(Gtk.main_quit(),False)[1])
+Gtk.main()
+sys.exit(exit_code)

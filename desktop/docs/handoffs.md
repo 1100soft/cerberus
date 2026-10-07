@@ -4,7 +4,7 @@
 
 An automation can listen for one named handoff in each selected repository and can emit one or more named handoffs. Names use 1–64 ASCII letters, numbers, hyphens, or underscores; the first character must be a letter or number. The UI normalizes names to lowercase. Users enter names in the Automation dialog and never need to manage paths. Both incoming and outgoing name fields suggest the union of trigger and emission names currently used by saved automations; typing filters the suggestions, and new names remain valid. The Automation page warns when an emission has no matching trigger, or a trigger has no matching emission, within the same repository. A warning can be resolved by creating the other half of the pair. The Emit field sits below the action prompt or script. In an Agent prompt with one outgoing name, the user can call the payload simply "the handoff"—for example, "Write the details of the issues in the handoff." When several outgoing names are configured, refer to the intended name. The app adds the file instructions when it dispatches the action. When an Agent automation runs, the app places an instruction before the action prompt requiring the agent to read the exact incoming payload path before taking action, and supplies each outgoing payload path. The saved action prompt stays unchanged. Shell automations receive `CERBERUS_HANDOFF_INPUT` and `CERBERUS_HANDOFF_<NAME>` environment variables instead. Shell variable names are uppercase with hyphens converted to underscores; names that would collide after conversion cannot be saved. A shell script emits a handoff by writing its UTF-8 payload to the corresponding output path.
 
-The backend stores handoffs under the repository's Git metadata directory in `cerberus-handoffs`, outside the working tree. Each run has a unique output file for each configured name. After the action, an existing output file is atomically moved to a pending queue; absent files emit nothing. Handoff automations check that queue every two seconds while the app is running. Claiming moves one file atomically to a claimed path so concurrent checks cannot take the same emission. The claimed payload remains available while the triggered action runs, then is removed. If execution could not start, the claim is released back to the queue for a later explicit retry after the job is fixed. Claims left by a crashed run are discarded after 30 minutes, longer than the agent and shell run limit. They are never requeued after execution began, so an interruption cannot replay the same emission. Repeated runs can emit the same name because each file has a unique run ID. Handoffs are scoped to the repository that emitted them; an automation with multiple repositories consumes each repository's queue independently. A cycle such as `review → correction → review` works when each step writes its outgoing payload conditionally.
+The backend stores handoffs under the repository's Git metadata directory in `cerberus-handoffs`, outside the working tree. Each run has a unique output file for each configured name. After the action, an existing output file is atomically moved to a pending queue; absent files emit nothing. Handoff automations check that queue every two seconds while the app is running. Claiming moves one file atomically to a claimed path so concurrent checks cannot take the same emission. The claimed payload remains available while the triggered action runs, then moves to an archive outside the pending queue. Failed actions retain their original prompt, repository, model/account selection, trigger context, and incoming emission in the run log. Use **Retry blocked action** in the conversation list (also its context menu), or the retry icon on the automation card. Retry explicitly reclaims the same archived emission and resumes the original conversation when possible; it does not select a different pending handoff or use a newly edited automation prompt. Review partial work before retrying an action that already made changes. A fresh manual Run once is a separate action and does not replay a previous handoff. Claims left by a crashed run are archived after 30 minutes and never automatically requeued. Archives remain in Git metadata for recovery until their retention period expires. Repeated runs can emit the same name because each file has a unique run ID. Handoffs are scoped to the repository that emitted them; an automation with multiple repositories consumes each repository's queue independently. A cycle such as `review → correction → review` works when each step writes its outgoing payload conditionally.
 
 Implementation: `src-tauri/src/handoffs.rs` validates names and owns queue transitions; Tauri commands in `src-tauri/src/lib.rs` expose paths and claims; `src/lib/savedPrompts.ts` augments agent prompts and schedules consumers. `scripts/check-handoffs.py` covers saved configuration, prompt augmentation, payload delivery, one-time consumption, and repeated emissions. Rust tests cover native path safety and concurrent claims.
 
@@ -43,3 +43,26 @@ fi
 ```
 
 The app publishes only files actually written by the action; it never creates a payload for an omitted conditional emission. Empty files still emit, so leave the file absent to skip. A conditional payload can also include boolean flags using the JSON format above.
+
+## Manual runs
+
+Run once opens an input dialog. Choose a repository and, for OR triggers, a condition set. Commit triggers offer matching branches and recent commits; handoff triggers offer pending and retained payloads whose required flags are true. CI and GitHub event triggers offer matching completed runs or events. The selected commit, branch, CI run, and incoming payload are passed to the action without changing the checkout. Manual runs bypass timing conditions.
+
+Automation failures preserve the enabled setting. Opening the log acknowledges the error indicator while preserving the error details. Right-click a card (or press Shift+F10) for its actions. In the edit dialog, Previous/Next or Alt+Left/Alt+Right save the current edits before switching; invalid edits must be corrected first.
+
+## Retention
+
+Open **Handoff retention settings** using the **Handoff retention** button on the Automation
+page. The default is **24 hours**, configurable in whole hours from 1 to 8760.
+The setting applies to all repositories on this computer and is saved natively
+in `handoff-retention-hours`. Retention starts when the latest consuming run
+finishes, so an explicit retry renews the period.
+
+Only archived handoffs expire; queued payloads and active claims are preserved.
+Interrupted claims move to the archive after their existing 30-minute lease.
+Cleanup runs when the app is active, at startup and periodically; saving a
+shorter period also cleans expired archives immediately. Native retry checks
+expiry independently of cleanup, and expired handoffs no longer offer retry
+actions when the list refreshes. Request a new handoff from the upstream agent
+if the old payload has expired. Increasing retention cannot recover payloads
+that have already been deleted.

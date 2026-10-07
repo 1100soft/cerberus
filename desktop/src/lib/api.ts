@@ -1,11 +1,12 @@
+import type { AutomationRetry } from './savedPrompts';
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { CodexAccount, CodexThreadPage, CodexMessagePage, Commit, GithubCatalog, GithubAuthStatus, GithubDeviceFlow, Identity, ImportResult, Repository, RepositoryUpdate } from "../types";
 import { identitiesWithRepositoryAccess } from "./repositories";
 
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
-export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string};
-export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'>;
+export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;retry?:AutomationRetry};
+export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'>;
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
 const demoAutomationLogs=new Map<string,AutomationLog>();
@@ -63,10 +64,10 @@ export const api = {
     if (!inTauri()) throw new Error('Automatic delivery requires the desktop app.');
     return invoke('submit_saved_prompt',{repositoryId,provider,threadId,prompt});
   },
-  async runNewAgentConversation(repositoryId:string,provider:string,identityId:string,mode:string,prompt:string,sessionId?:string,requestId?:string,onOutput?:(event:Record<string,unknown>)=>void):Promise<{text:string;sessionId?:string}>{
+  async runNewAgentConversation(repositoryId:string,provider:string,identityId:string,mode:string,prompt:string,sessionId?:string,requestId?:string,onOutput?:(event:Record<string,unknown>)=>void,automationContext?:{runId:string;commit?:string}):Promise<{text:string;sessionId?:string}>{
     if (!inTauri()) throw new Error('Agent execution requires the desktop app.');
     const output=new Channel<Record<string,unknown>>();output.onmessage=onOutput||(()=>{});
-    return invoke('run_new_agent_conversation',{repositoryId,provider,identityId,mode,prompt,sessionId:sessionId||null,requestId:requestId||null,output});
+    return invoke('run_new_agent_conversation',{repositoryId,provider,identityId,mode,prompt,sessionId:sessionId||null,requestId:requestId||null,automationRunId:automationContext?.runId||null,automationCommit:automationContext?.commit||null,output});
   },
   async cancelDraft(requestId:string):Promise<void>{
     if (!inTauri()) return;
@@ -117,6 +118,24 @@ export const api = {
   async claimHandoff(repositoryId:string,name:string,variables:string[]=[]):Promise<{id:string;path:string}|null>{
     if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed&&!variables.length);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
     return invoke('claim_handoff',{repositoryId,name,variables});
+  },
+  async handoffSettings():Promise<{retentionHours:number}>{if(!inTauri())return {retentionHours:Number(localStorage.getItem('gitcerberus.handoffRetentionHours'))||24};return invoke('handoff_settings');},
+  async saveHandoffSettings(retentionHours:number):Promise<void>{if(!Number.isInteger(retentionHours)||retentionHours<1||retentionHours>8760)throw new Error('Retention must be 1–8760 hours.');if(!inTauri()){localStorage.setItem('gitcerberus.handoffRetentionHours',String(retentionHours));return;}return invoke('save_handoff_settings',{retentionHours});},
+  async listMatchingHandoffs(repositoryId:string,name:string,variables:string[]=[]):Promise<{id:string;preview:string;retained:boolean}[]>{
+    if(!inTauri())return (demoHandoffs.get(`${repositoryId}:${name}`)||[]).filter(item=>!item.claimed&&!variables.length).map(item=>({id:item.id,preview:item.path,retained:false}));
+    return invoke('list_matching_handoffs',{repositoryId,name,variables});
+  },
+  async claimSelectedHandoff(repositoryId:string,name:string,id:string,variables:string[]=[]):Promise<{id:string;path:string}>{
+    if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>item.id===id&&!item.claimed&&!variables.length);if(!item)throw new Error('Selected handoff is unavailable.');item.claimed=true;return {id:item.id,path:item.path};}
+    return invoke('claim_selected_handoff',{repositoryId,name,id,variables});
+  },
+  async handoffRetained(repositoryId:string,name:string,id:string):Promise<boolean>{
+    if(!inTauri())return !!demoHandoffs.get(`${repositoryId}:${name}`)?.some(item=>item.id===id&&!item.claimed);
+    return invoke('handoff_retained',{repositoryId,name,id});
+  },
+  async retryHandoff(repositoryId:string,name:string,id:string):Promise<{id:string;path:string}>{
+    if(!inTauri())return api.claimSelectedHandoff(repositoryId,name,id);
+    return invoke('retry_handoff',{repositoryId,name,id});
   },
   async finishHandoff(repositoryId:string,name:string,id:string):Promise<void>{
     if(!inTauri()){const key=`${repositoryId}:${name}`;demoHandoffs.set(key,(demoHandoffs.get(key)||[]).filter(item=>item.id!==id));return;}

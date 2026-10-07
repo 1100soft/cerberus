@@ -99,12 +99,9 @@ impl Agents {
         write_profiles(root, &profiles).map_err(|e| e.to_string())
     }
     pub fn profile_running(&self,id:&str)->Result<bool,String>{Ok(self.active.lock().map_err(|e|e.to_string())?.values().any(|run|run.profile_id==id))}
-    pub fn cancel(&self, repository_id: &str) -> Result<(), String> {
-        for run in self.active.lock().map_err(|e| e.to_string())?.values() {
-            if run.repository_id == repository_id {
-                run.cancel.store(true, Ordering::SeqCst);
-            }
-        }
+    pub fn cancel_checkout(&self,repository_id:&str,path:&Path)->Result<(),String>{
+        let path=path.canonicalize().map_err(|error|error.to_string())?;
+        if let Some(run)=self.active.lock().map_err(|error|error.to_string())?.get(&path){if run.repository_id==repository_id{run.cancel.store(true,Ordering::SeqCst);}}
         Ok(())
     }
     pub fn cancel_all(&self) {
@@ -401,6 +398,13 @@ fn execute(
 }
 #[cfg(test)]
 mod tests {
+    #[test] fn cancelling_one_checkout_does_not_stop_another_context(){
+        let agents=super::Agents::default();let left=tempfile::tempdir().unwrap();let right=tempfile::tempdir().unwrap();
+        let first=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));let second=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        for (path,cancel) in [(left.path(),first.clone()),(right.path(),second.clone())]{agents.active.lock().unwrap().insert(path.canonicalize().unwrap(),super::ActiveRun{repository_id:"repo".into(),profile_id:"profile".into(),cancel});}
+        agents.cancel_checkout("repo",left.path()).unwrap();assert!(first.load(std::sync::atomic::Ordering::SeqCst));assert!(!second.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
     use super::*;
     #[test]
     fn only_provider_diagnostics_stop_credit_retries() {

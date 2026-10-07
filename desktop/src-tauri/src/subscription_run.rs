@@ -148,7 +148,7 @@ fn verify_account(value: &Value, profile: &Profile) -> Result<(), String> {
     let account = &value["account"];
     if account["type"] != "chatgpt" {
         return Err(
-            "ChatGPT credentials are unavailable. Reconnect this identity before sending.".into(),
+            crate::codex::missing_account_error(),
         );
     }
     if profile
