@@ -80,6 +80,6 @@ jobs:
         run: |
           gh api --method POST repos/1100soft/1100/dispatches \
             -f event_type=apt-package \
-            -F client_payload[source_repository]="${SOURCE_REPOSITORY}" \
-            -F client_payload[run_id]="${SOURCE_RUN_ID}" \
-            -F client_payload[artifact]=apt-packages
+            -F 'client_payload[source_repository]'="${SOURCE_REPOSITORY}" \
+            -F 'client_payload[run_id]'="${SOURCE_RUN_ID}" \
+            -F 'client_payload[artifact]'=apt-packages

@@ -337,3 +337,33 @@ mod variable_tests {
         cleanup_with_retention(repo.path(),1).unwrap();assert!(selections(repo.path(),"review",&[]).unwrap().is_empty());
     }
 }
+
+pub fn retained(repository:&Path,name:&str,id:&str,hours:u64)->Result<bool,String>{
+    cleanup_with_retention(repository,hours)?;
+    for area in ["pending","consumed","archived"]{let path=file(repository,area,name,id)?;if path.symlink_metadata().is_ok_and(|meta|meta.file_type().is_file()&&meta.len()<=2_000_000){return Ok(true);}}
+    Ok(false)
+}
+pub fn retry_with_retention(repository:&Path,name:&str,id:&str,hours:u64)->Result<Claim,String>{
+    if !retained(repository,name,id,hours)?{return Err("The original handoff has expired or is unavailable.".into());}
+    claim_selected(repository,name,id,&[])
+}
+
+#[cfg(test)] mod retry_retention_tests {
+    use super::*;
+    #[test] fn exact_retry_preserves_payload_and_refuses_active_claim_or_expiry(){
+        let temp=tempfile::tempdir().unwrap();let repo=temp.path();
+        assert!(Command::new("git").args(["init","-q"]).arg(repo).status().unwrap().success());
+        write_payload(repo,"revise","original","original payload").unwrap();publish(repo,"revise","original").unwrap();
+        let original=claim(repo,"revise").unwrap().unwrap();finish(repo,"revise","original").unwrap();
+        assert!(retained(repo,"revise","original",24).unwrap());
+        let retried=retry_with_retention(repo,"revise","original",24).unwrap();
+        assert_eq!(original.id,retried.id);assert_eq!(original.path,retried.path);
+        assert_eq!(fs::read_to_string(&retried.path).unwrap(),"original payload");
+        assert!(retry_with_retention(repo,"revise","original",24).is_err());
+        finish(repo,"revise","original").unwrap();
+        let archive=file(repo,"consumed","revise","original").unwrap();
+        fs::File::open(archive).unwrap().set_modified(SystemTime::now()-Duration::from_secs(7200)).unwrap();
+        assert!(!retained(repo,"revise","original",1).unwrap());
+        assert!(retry_with_retention(repo,"revise","original",1).is_err());
+    }
+}

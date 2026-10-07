@@ -8,6 +8,45 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn credential_storage_issue() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let inspect = || -> Result<Option<String>, String> {
+            let bus = dbus::blocking::Connection::new_session().map_err(|e| e.to_string())?;
+            let service = bus.with_proxy("org.freedesktop.secrets", "/org/freedesktop/secrets", Duration::from_secs(3));
+            let (path,): (dbus::Path<'static>,) = service.method_call("org.freedesktop.Secret.Service", "ReadAlias", ("default",)).map_err(|e| e.to_string())?;
+            if path == "/" {
+                return Ok(Some("The active Secret Service provider has no default collection. Set a persistent collection as its default; an unlocked wallet in another provider does not fix this.".into()));
+            }
+            use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
+            let collection = bus.with_proxy("org.freedesktop.secrets", path, Duration::from_secs(3));
+            let locked: bool = collection.get("org.freedesktop.Secret.Collection", "Locked").map_err(|e| e.to_string())?;
+            Ok(locked.then(|| "The active Secret Service default collection is locked. Unlock it in your password manager.".into()))
+        };
+        match inspect() { Ok(issue) => issue, Err(error) => Some(format!("Could not inspect the active Secret Service provider: {error}")) }
+    }
+    #[cfg(not(target_os = "linux"))]
+    { None }
+}
+
+pub(crate) fn missing_account_error() -> String {
+    match credential_storage_issue() {
+        Some(issue) => format!("ChatGPT credential storage is unavailable. {issue} Repair storage before reconnecting."),
+        None => "Reconnect the assigned ChatGPT account to restore usage information and agent execution.".into(),
+    }
+}
+
+fn credential_error(message: &str) -> String {
+    if is_credential_storage_error(message) {
+        let detail = credential_storage_issue().unwrap_or_else(|| "Check that the same OS credential service and collection are accessible during sign-in and execution.".into());
+        format!("ChatGPT credential storage failed. {detail} Reconnecting alone cannot repair storage access. Codex reported: {message}")
+    } else { message.to_owned() }
+}
+fn is_credential_storage_error(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    ["platform secure storage", "auth from keyring", "secret service", "ss api"].iter().any(|term| lower.contains(term))
+}
+
 #[derive(Default)]
 pub struct CodexService {
     connection: Mutex<Option<Client>>,
@@ -96,7 +135,7 @@ impl Client {
                     "Codex did not respond. Check the installed CLI and retry.".to_owned()
                 })?;
             if value["method"] == "account/login/completed" {
-                if let Some(login_id)=value["params"]["loginId"].as_str() {self.logins.insert(login_id.into(),if value["params"]["success"]==true {Ok(())}else{Err(value["params"]["error"].as_str().unwrap_or("ChatGPT sign-in failed").into())});}
+                if let Some(login_id)=value["params"]["loginId"].as_str() {self.logins.insert(login_id.into(),if value["params"]["success"]==true {Ok(())}else{Err(credential_error(value["params"]["error"].as_str().unwrap_or("ChatGPT sign-in failed")))});}
             }
             // This viewer never approves agent actions or supplies credentials to tools.
             if value.get("method").is_some() && value.get("id").is_some() {
@@ -111,7 +150,7 @@ impl Client {
                 let message = error["message"].as_str().unwrap_or("Codex request failed");
                 return Err(if message.contains("list_turns is not supported yet") {
                     "This conversation uses paginated Codex history that the installed app-server cannot read or continue. Start a separate chat to proceed; the original conversation is preserved.".into()
-                } else { message.to_owned() });
+                } else { credential_error(message) });
             }
             return value
                 .get("result")
@@ -505,6 +544,14 @@ fn messages(thread: &Value) -> Vec<Message> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn storage_errors_are_distinct_from_authentication_errors() {
+        for error in ["logout failed: failed to delete auth from keyring", "Couldn't access platform secure storage: SS error: result not returned from SS API", "Secret Service unavailable"] {
+            assert!(super::is_credential_storage_error(error));
+        }
+        assert!(!super::is_credential_storage_error("Token expired"));
+        assert_eq!(super::credential_error("Token expired"), "Token expired");
+    }
     use super::*;
     #[test]
     fn paginated_rollout_reads_recent_messages_and_checks_repository() {

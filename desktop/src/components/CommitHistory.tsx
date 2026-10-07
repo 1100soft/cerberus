@@ -1,3 +1,4 @@
+import { requestTimeout } from '../lib/requestTimeout';
 import { matchesShortcut } from '../lib/shortcuts';
 import { useEffect, useId, useRef, useState } from "react";
 import { GitBranch, GitCommitHorizontal, RefreshCw, Trash2, X } from "lucide-react";
@@ -39,14 +40,14 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     setSelectedCommit(-1);
     setCommits([]); setError(""); setHasMore(false); setLoading(!!repository);
     if (repository) {
-      api.history(repository.id, branch || undefined).then((items) => {
+      requestTimeout(api.history(repository.id, branch || undefined),'Commit loading').then((items) => {
         if (request !== generation.current) return;
         setCommits(items); setHasMore(items.length === 50);
       }).catch((error) => { if (request === generation.current) setError(String(error)); })
         .finally(() => { if (request === generation.current) setLoading(false); });
     }
     return () => { generation.current++; };
-  }, [repository, branch, revision]);
+  }, [repository?.id, branch, revision]);
 
   useEffect(() => {
     if (!repository) return;
@@ -139,7 +140,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     const request = generation.current;
     setLoading(true); setError("");
     try {
-      const items = await api.history(repository.id, branch || undefined, commits.length);
+      const items = await requestTimeout(api.history(repository.id, branch || undefined, commits.length),'Commit loading');
       if (request !== generation.current) return;
       setCommits((current) => [...current, ...items]); setHasMore(items.length === 50);
     } catch (error) { if (request === generation.current) setError(String(error)); }
@@ -147,7 +148,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   }
 
   return <section ref={panel} className="history-panel" aria-label="Commit history" aria-busy={loading}>
-    <header><div><p>Commit history</p><h2>{repository?.displayName || unlinkedName || "Select a repository"}</h2></div><button type="button" disabled={!repository || !branch || removalBusy || branch===repository.branch} aria-label="Remove selected branch" title={branch===repository?.branch?"Switch the checkout to another branch before removing its current branch":"Remove the selected branch and its linked worktree"} onClick={()=>void prepareRemoval()}><Trash2 size={16}/></button><button type="button" disabled={!repository || loading} aria-label="Refresh history" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} className={loading ? "spin" : ""} /></button></header>
+    <header><div><p>Commit history</p><h2>{repository?.displayName || unlinkedName || "Select a repository"}</h2></div><button type="button" disabled={!repository || !branch || removalBusy || branch===repository.branch} aria-label="Remove selected branch" title={branch===repository?.branch?"Switch the checkout to another branch before removing its current branch":"Remove the selected branch and its linked worktree"} onClick={()=>void prepareRemoval()}><Trash2 size={16}/></button><button type="button" disabled={!repository} aria-label="Refresh history" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} className={loading ? "spin" : ""} /></button></header>
     {repository && <>
       <div className="history-tabs" role="tablist" aria-label="Branches">
         {tabs.map((name, index) => <button key={name} id={`${panelId}-tab-${index}`} role="tab" type="button" aria-selected={branch === name} aria-controls={`${panelId}-commits`} tabIndex={branch === name ? 0 : -1} onClick={() => setBranch(name)} onKeyDown={(event) => {
@@ -157,7 +158,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
           setBranch(tabs[next]);
         }}><GitBranch size={13} />{name || "Detached HEAD"}</button>)}
       </div>
-      <p className="history-shortcuts">Shift + ← / → branches · Shift + ↑ / ↓ commits</p>
+      <p className="history-shortcuts">Commit time order · Shift + ← / → branches · Shift + ↑ / ↓ commits</p>
     </>}
     {branchError && <p className="config-error" role="alert">{branchError}</p>}
     <div id={`${panelId}-commits`} role="tabpanel" aria-labelledby={repository ? `${panelId}-tab-${tabs.indexOf(branch)}` : undefined}>
@@ -165,7 +166,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     {error && <p className="config-error" role="alert">{error}</p>}
     {loading && <p className="panel-copy" role="status">Loading commits…</p>}
     {repository && !loading && !error && !commits.length && <p className="panel-copy">No commits on this branch yet.</p>}
-    <ol className="commit-history">{commits.map((commit, index) => <li key={`${commit.hash}-${index}`} className={selectedCommit === index ? "selected-commit" : ""}><GitCommitHorizontal size={17} /><button type="button" className="commit-entry" data-commit-index={index} aria-current={selectedCommit === index ? "true" : undefined} onFocus={() => setSelectedCommit(index)} onClick={() => setSelectedCommit(index)}><h3>{commit.summary}</h3><p title={commit.email}>{commit.author}</p><div className="commit-meta"><code title={commit.hash}>{commit.hash.slice(0, 7)}</code><time dateTime={commit.committedAt} title={new Date(commit.committedAt).toLocaleString()}>{new Date(commit.committedAt).toLocaleDateString()}</time></div></button></li>)}</ol>
+    <ol className="commit-history">{commits.map((commit, index) => <li key={`${commit.hash}-${index}`} className={selectedCommit === index ? "selected-commit" : ""}><GitCommitHorizontal size={17} /><button type="button" className="commit-entry" data-commit-index={index} aria-current={selectedCommit === index ? "true" : undefined} onFocus={() => setSelectedCommit(index)} onClick={() => setSelectedCommit(index)}><h3>{commit.summary}</h3><p title={commit.email}>{commit.author}</p><div className="commit-meta"><code title={commit.hash}>{commit.hash.slice(0, 7)}</code><time dateTime={commit.committedAt} title={new Date(commit.committedAt).toLocaleString()}>{new Date(commit.committedAt).toLocaleString()}</time></div></button></li>)}</ol>
     {hasMore && <button className="history-more" type="button" disabled={loading} onClick={loadMore}>Load older commits</button>}
     </div>
     {removalOpen&&<div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)closeRemoval();}}><section className="automation-dialog branch-removal-dialog" role="dialog" aria-modal="true" aria-label="Remove branch" onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();closeRemoval();}}}><header><h2>Remove branch</h2><button type="button" aria-label="Close branch removal" disabled={removalExecuting} onClick={closeRemoval}><X size={17}/></button></header><div className="automation-dialog-content">

@@ -222,6 +222,14 @@ impl ChatgptAccounts {
             plan,
             ..Profile::default()
         };
+        // The login process can still hold credentials in memory after a failed
+        // persistence operation. Verify through a fresh process before reporting
+        // the identity as connected.
+        let saved = service(root, id)?.request("account/read", json!({"refreshToken":false}))?;
+        if saved["account"]["type"] != "chatgpt" || saved["account"]["email"] != account["email"] {
+            *pending = None;
+            return Err(format!("ChatGPT sign-in did not persist a readable credential. {}", crate::codex::missing_account_error()));
+        }
         agents.store_subscription(root, profile.clone())?;
         {
             let _lock = self.settings_lock.lock().map_err(|e| e.to_string())?;
@@ -265,6 +273,42 @@ impl ChatgptAccounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(unix)]
+    fn login_rejects_credentials_visible_only_to_the_login_process() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let script = root.join("mock-codex");
+        std::fs::write(&script, r#"#!/usr/bin/env python3
+import json,os,sys
+from pathlib import Path
+marker=Path(os.environ['CODEX_HOME'])/'mock-started'
+fresh=marker.exists()
+marker.touch()
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ result={}
+ if r['method']=='account/read':
+  print(json.dumps({'method':'account/login/completed','params':{'loginId':'login','success':True}}),flush=True)
+  result={'account':None if fresh else {'type':'chatgpt','email':'fixture@example.test'}}
+ print(json.dumps({'id':r['id'],'result':result}),flush=True)
+"#).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(root.join("codex-executable.txt"), script.to_str().unwrap()).unwrap();
+        let accounts = ChatgptAccounts::default();
+        let agents = Agents::default();
+        let id = uuid::Uuid::new_v4().to_string();
+        *accounts.pending.lock().unwrap() = Some(Login {
+            account_id: id.clone(), login_id: "login".into(),
+            service: service(root, &id).unwrap(),
+            expires: Instant::now() + Duration::from_secs(20),
+        });
+        assert!(accounts.poll(root, &agents, &id).err().unwrap().contains("did not persist"));
+        assert!(agents.profiles(root).unwrap().is_empty());
+        assert!(accounts.pending.lock().unwrap().is_none());
+    }
     #[test]
     fn defaults_and_overrides_persist_without_credentials() {
         let dir = tempfile::tempdir().unwrap();

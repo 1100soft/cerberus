@@ -100,6 +100,15 @@ script = r"""
  assert(module.automationConditionSets(module.savedPrompts().find(job=>job.id==='sets-fixture')).length===2,'Condition sets lost in persistence');
  module.savePrompt({...module.savedPrompts().find(job=>job.id==='sets-fixture'),trigger:'ciPass',conditions:['ciPass'],conditionSets:[['ciPass'],['ciFail']],ciSince:0,state:undefined});
  for(const [id,conclusion] of [[901,'success'],[902,'failure']]){module.recordAutomationCiRuns('1',[{id,status:'completed',conclusion,headBranch:'main',headSha:'sha-'+id,updatedAt:new Date().toISOString(),htmlUrl:'https://example.test/'+id,name:'Fixture CI'}]);await wait(()=>setRuns===id-898);}
+ // Successful consuming actions must never put the input back on the trigger queue.
+ let completedInputs=0,releasedInputs=0;
+ api.finishHandoff=async()=>{completedInputs++;};api.releaseHandoff=async()=>{releasedInputs++;};api.git=async()=>{};
+ for(const kind of ['notification','git']){
+  const id='success-input-'+kind;module.savePrompt({...base,id,title:id,kind,gitAction:'fetch',prompt:'Success fixture',trigger:'handoff',handoffName:'review',enabled:false});
+  await module.runSavedPrompt(id,true,'1',{repositoryId:'1',name:'review',id:'input-'+kind,path:'/fixture/input'});
+  assert(module.savedPrompts().find(job=>job.id===id).state==='completed','Consuming action failed: '+kind);
+ }
+ assert(completedInputs===2&&releasedInputs===0,'Successful action requeued its incoming handoff');
  window.__handoffCheck={passed:true,claims,finishes,calls:calls.length};
 })().catch(error=>window.__handoffCheck={passed:false,error:String(error)});
 """

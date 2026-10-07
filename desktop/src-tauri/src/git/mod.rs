@@ -80,7 +80,7 @@ impl GitService {
                 return Err(error);
             }
         };
-        let output = self.output(repo, &["log", "--max-count=50", &format!("--skip={skip}"), "--format=%H%x00%an%x00%ae%x00%cI%x00%s", "-z", &hash, "--"])?;
+        let output = self.output(repo, &["log", "--date-order", "--max-count=50", &format!("--skip={skip}"), "--format=%H%x00%an%x00%ae%x00%cI%x00%s", "-z", &hash, "--"])?;
         let text = String::from_utf8_lossy(&output.stdout);
         let fields: Vec<_> = text.split_terminator('\0').collect();
         Ok(fields.chunks_exact(5).map(|fields| crate::models::Commit {

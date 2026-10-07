@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { refreshBlockedAutomations } from '../lib/savedPrompts';
 import { api } from '../lib/api';
 
 export function HandoffRetentionDialog({repositoryIds,onClose}:{repositoryIds:string[];onClose:()=>void}){
@@ -16,6 +17,7 @@ export function HandoffRetentionDialog({repositoryIds,onClose}:{repositoryIds:st
     try{
       await api.saveHandoffSettings(Number(hours));
       await api.cleanupStaleHandoffs(repositoryIds);
+      await refreshBlockedAutomations();
 
       onClose();
     }catch(error){setError(String(error));setSaving(false);}

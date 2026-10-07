@@ -550,6 +550,102 @@ handoff wrappers (test-only now) and resolved a new Clippy formatting warning.
 No live user branch deletion, paid agent run, credential change, or push was
 performed. This checkpoint is intended to include all reviewed pending changes.
 
-### Automation interaction update (2026-10-07)
+## ChatGPT Secret Service recovery (2026-10-07)
 
-Errors must never automatically disable automations (also recorded in desktop/AGENTS.md). Removed disabling from legacy-target migration and Clear pending; explicit user toggles remain. Opening a log acknowledges its card indicator. Cards have zoom-aware keyboard context menus; edit navigation saves before switching via buttons or Alt+Left/Right. Run once selects trigger inputs including matching branch/recent commit, exact handoff with flags, CI run or GitHub event, and OR condition set. Handoffs retain their original IDs for manual recovery, default 24 hours with configurable retention. Restored integration of the surviving retention dialog after the working tree reset to 59b7866. Added WebKit automation action coverage and native exact-claim/retention tests.
+The active GNOME Secret Service still returned `/` for ReadAlias(default), even
+though its persistent GitCerberus collection was unlocked. KDE's separate
+compatibility endpoint had a kdewallet default. At the user's request to solve
+the problem, set the active provider's default alias to the existing GitCerberus
+collection. GNOME persisted the alias under ~/.local/share/keyrings/default.
+A temporary noncredential item passed write/read/delete and was deleted. The
+configured Codex runtime now reports Not logged in rather than a storage error
+for the Cerberus ChatGPT identity. No real credential was read, deleted, migrated,
+or created; browser sign-in is still required once. No provider was stopped or
+replaced, and no plaintext fallback was enabled.
+
+Codex RPC storage errors now explain storage repair, with read-only Linux
+default-alias/lock diagnostics. Missing-account handling checks storage before
+recommending reconnect. Browser login now verifies persistence through a fresh
+Codex process before marking the identity connected. Regression coverage includes
+a login process holding credentials that a new process cannot read.
+
+Validation: full native serial suite passed (110 tests, 4 live-provider tests
+ignored), ChatGPT account and capability frontend checks passed, Clippy all
+targets completed with existing warnings, and git diff --check passed.
+The temporary OS verification item was removed. No commit or push was made.
+
+## Preserve and retry blocked actions (2026-10-07)
+
+Handoff finish/stale cleanup retain payloads in archived/<name>/<emission>.txt
+rather than deleting them. Explicit retry_handoff reclaims the exact ID and
+original claimed path; archives are never polled as pending triggers. Failed
+automation logs retain frozen job/account/prompt/model, incoming handoff, event
+context, and conversation linkage. Retry is exposed on automation cards and in
+the conversation list toolbar/context menu; composer retry delegates to the same
+automation retry when applicable. Existing external-provider chats are reused.
+Responses beginning Blocked retain retry context as well as provider errors.
+
+Restored the exact reviewer-written revise payload from the earlier recovery
+copy into Cerberus Git metadata's archived/revise/7e68d8c5-51a5-45cb-8c88-718092522651.txt.
+Updated only the original login-failed revision log
+abd2ef63-4211-4a11-9c11-0c65f2901144 with retry metadata linking that emission.
+Its legacy definition is reconstructed from the saved automation with the
+original logged command when the new frontend loads. Legacy conversations link
+by original emission ID in their injected prompt. No queue event, paid agent
+run, commit, or push was initiated. Previous keyring fixes remain uncommitted.
+
+Validation: production build/TypeScript/dropdown lint; all frontend checks;
+saved-prompt WebKit checks (blocked handoff + frozen-command retry, original
+conversation retry), handoff checks; native serial suite 111 passed, 4 ignored.
+Clippy all targets completed with existing warnings; viewport checks passed at
+all fixture sizes/zooms. A native log round-trip check verifies retry metadata
+survives persistence and is removed after a successful retry.
+
+## Configurable handoff retention (2026-10-07)
+
+Automation header settings opens a focused retention dialog. Native per-device
+handoff-settings.json defaults to 24 hours, validates whole hours 1–8760, and
+uses atomic persistence. The browser demo keeps the same setting in localStorage.
+Archive timestamps start at the latest finished consuming run; retries renew
+retention. Pending payloads and live claims are untouched. Stale claims archive
+after their existing 30-minute lease, then receive the retention period.
+Periodic/startup cleanup expires archives; saving settings also invokes cleanup.
+Native retry checks age independently so expiry is enforced before deletion.
+Blocked-run refresh checks retained payload availability and hides expired retry
+actions in both automation and conversation lists. No real user's retention
+setting was changed, and the recovered revise archive remains retained.
+
+Validation: production build/TypeScript/dropdown lint; ten frontend checks;
+saved-prompt WebKit fixture including settings persistence, 100/140/150% modal
+zoom, frozen-context retry, and expired retry visibility; viewport matrix;
+native serial suite 113 passed, 4 ignored; Clippy with existing warnings;
+git diff --check. Native tests cover default/config persistence and expiry while
+preserving old pending payloads and live claims. No commit or push.
+
+## Automation conversation names (2026-10-07)
+
+Both profile-based sendAgentMessage and external-provider runExternalAutomation
+receive the saved automation title when creating an in-app conversation. This
+prevents injected handoff instructions from becoming list titles. Existing chat
+names (including user renames) are preserved on retries and continuations.
+Naming is app metadata; external provider-owned titles are not modified. The
+legacy AgentComposer is not mounted, so no unrelated manual composer UI was
+introduced. Tests cover explicit profile-chat naming and continuation, plus
+external automation naming and blocked-action retry naming in WebKit.
+
+Naming validation: production build/TypeScript/dropdown lint, chat logic checks,
+and saved-prompt WebKit checks passed. The fixture now waits for log completion
+and checks the newly created named conversations rather than older fixture
+records retained by WebKit storage. Whitespace review passes. No commit or push.
+
+## Commit loading, concurrent contexts, and integration recovery (2026-10-07)
+
+Commit requests now ignore redundant selections, survive repository metadata refreshes, and provide a bounded wait with retry. History timestamps are visible; the manual commit picker is newest first. Automation cards show separate active and recent contexts with their own logs. Identical active contexts are deduplicated; selected-revision agents use retained isolated worktrees.
+
+Reconciled divergent wip histories and incorporated the approved bare-repository fixture correction. Both reviewed correction branches and their clean worktrees were removed after merging; no matching remote correction branches existed. Main and autosave were preserved. Older stashed account-storage and blocked-action retry fixes were recovered and combined with independent execution contexts. Safety stashes remain until the pending work is checkpointed. No push.
+
+Recovery note: the combined implementation stores retention in `handoff-retention-hours` and retains completed payloads in `consumed` while accepting legacy `archived` payloads. Earlier sections describe the original stashed implementation.
+
+Final verification: production build (dropdown lint, TypeScript, Vite), chat/agent logic, workflow actionlint, WebKit automation-actions/CI/handoff/viewport checks, and native serial suite (114 passed, 4 live-provider tests ignored). Clippy completed with existing warnings. Parallel native testing exposed the known Cursor child-cleanup race; serial verification passed. Saved-prompt browser coverage also checks frozen-prompt retries and expired handoff visibility.
+
+Checkpoint review restored the consumed-input marker for successful Agent, Git, and Notification actions after the stash reconciliation. Successful actions retain their handoffs outside the pending queue rather than requeueing them.

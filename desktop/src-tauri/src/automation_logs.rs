@@ -1,9 +1,18 @@
 use serde::{Deserialize,Serialize};
 use std::{fs,path::{Path,PathBuf}};
 
+#[derive(Clone,Default,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct Context {
+    #[serde(default,skip_serializing_if="Option::is_none")] pub branch:Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")] pub commit_sha:Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")] pub handoff_name:Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")] pub handoff_id:Option<String>,
+}
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct Entry {
+    #[serde(flatten)] pub context:Context,
     pub automation_id:String,
     pub repository_id:String,
     pub run_id:String,
@@ -15,10 +24,12 @@ pub struct Entry {
     pub stderr:String,
     pub response:String,
     pub activity:String,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub retry:Option<serde_json::Value>,
 }
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct Summary { pub repository_id:String,pub run_id:String,pub created_at:i64,pub kind:String,pub status:String }
+pub struct Summary { #[serde(flatten)] pub context:Context,pub repository_id:String,pub run_id:String,pub created_at:i64,pub kind:String,pub status:String }
 fn valid(value:&str)->bool{!value.is_empty()&&value.len()<=128&&value.bytes().all(|byte|byte.is_ascii_alphanumeric()||matches!(byte,b'-'|b'_'))}
 fn folder(root:&Path,automation_id:&str,repository_id:&str)->Result<PathBuf,String>{
     if !valid(automation_id)||!valid(repository_id){return Err("Invalid automation log identifier".into());}
@@ -58,7 +69,7 @@ pub fn list(root:&Path,automation_id:&str)->Result<Vec<Summary>,String>{
             let Ok(bytes)=fs::read(item.path())else{continue};
             let Ok(entry)=serde_json::from_slice::<Entry>(&bytes)else{continue};
             if entry.automation_id==automation_id&&entry.repository_id==repository_id&&entry.run_id==run_id{
-                summaries.push(Summary{repository_id:repository_id.clone(),run_id,created_at:entry.created_at,kind:entry.kind,status:entry.status});
+                summaries.push(Summary{context:entry.context,repository_id:repository_id.clone(),run_id,created_at:entry.created_at,kind:entry.kind,status:entry.status});
             }
         }
     }
@@ -75,17 +86,22 @@ pub fn read(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Resul
     use super::*;
     #[test]fn running_entry_updates_in_place(){
         let root=tempfile::tempdir().unwrap();
-        let mut entry=Entry{automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
+        let mut entry=Entry{context:Context::default(),retry:None,automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();assert_eq!(list(root.path(),"live").unwrap()[0].status,"running");
-        entry.activity="working".into();write(root.path(),&entry).unwrap();
-        assert_eq!(read(root.path(),"live","repo","run").unwrap().activity,"working");
+        entry.context.branch=Some("correction/test".into());entry.context.commit_sha=Some("selected-commit".into());entry.activity="working".into();write(root.path(),&entry).unwrap();
+        assert_eq!(read(root.path(),"live","repo","run").unwrap().activity,"working");assert_eq!(list(root.path(),"live").unwrap()[0].context.branch.as_deref(),Some("correction/test"));
+        entry.status="error".into();entry.retry=Some(serde_json::json!({"job":{"prompt":"original"},"incoming":{"name":"revise","id":"original"}}));
+        write(root.path(),&entry).unwrap();
+        assert_eq!(read(root.path(),"live","repo","run").unwrap().retry,entry.retry);
+        entry.retry=None;
         entry.status="completed".into();entry.response="done".into();write(root.path(),&entry).unwrap();
         assert_eq!(list(root.path(),"live").unwrap().len(),1);
         assert_eq!(read(root.path(),"live","repo","run").unwrap().response,"done");
+        assert!(read(root.path(),"live","repo","run").unwrap().retry.is_none());
     }
     #[test]fn entries_are_scoped_to_automation_and_repository(){
         let root=tempfile::tempdir().unwrap();
-        let entry=Entry{automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};
+        let entry=Entry{context:Context::default(),retry:None,automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();
         assert_eq!(list(root.path(),"job-1").unwrap().len(),1);
         assert!(list(root.path(),"job-2").unwrap().is_empty());

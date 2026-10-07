@@ -28,6 +28,7 @@ mod git;
 mod github;
 mod github_credentials;
 mod branch_removal;
+mod automation_worktrees;
 mod models;
 mod oauth;
 
@@ -192,7 +193,7 @@ async fn chatgpt_capabilities(profile_id:String,state:State<'_,AppState>)->Resul
 }
 fn codex_capabilities(mut request:impl FnMut(&str,serde_json::Value)->Result<serde_json::Value,String>,email:Option<&str>)->Result<serde_json::Value,String>{
   let account=request("account/read",serde_json::json!({"refreshToken":false}));
-  let account_error=match account{Ok(account) if account["account"]["type"]=="chatgpt" && !email.is_some_and(|email|account["account"]["email"].as_str()!=Some(email))=>None,Ok(_)=>Some("Reconnect the assigned ChatGPT account to restore usage information and agent execution.".to_owned()),Err(error)=>Some(error)};
+  let account_error=match account{Ok(account) if account["account"]["type"]=="chatgpt" && !email.is_some_and(|email|account["account"]["email"].as_str()!=Some(email))=>None,Ok(_)=>Some(codex::missing_account_error()),Err(error)=>Some(error)};
   let mut models=Vec::new();let mut cursor:Option<String>=None;let mut seen=std::collections::HashSet::new();
   loop {let page=request("model/list",serde_json::json!({"limit":100,"cursor":cursor,"includeHidden":false}))?;if let Some(data)=page["data"].as_array(){models.extend(data.clone());}cursor=page["nextCursor"].as_str().map(String::from);match &cursor{Some(value) if seen.insert(value.clone())=>{},_=>break}}
   let usage=match account_error{Some(error)=>Err(error),None=>request("account/rateLimits/read",serde_json::json!({}))};
@@ -209,21 +210,26 @@ async fn remove_agent_profile(id: String, state: State<'_, AppState>) -> Result<
     tauri::async_runtime::spawn_blocking(move || agents.remove(&root, &id)).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-async fn run_agent(profile_id: String, repository_id: String, prompt: String, mode: String, model: Option<String>, reasoning_effort: Option<String>, resume: Option<agent_sessions::ResumeTarget>, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
-    let repo = state.db.list()?.into_iter().find(|r| r.id == repository_id).ok_or("Repository not found")?;
+async fn run_agent(profile_id: String, repository_id: String, prompt: String, mode: String, model: Option<String>, reasoning_effort: Option<String>, resume: Option<agent_sessions::ResumeTarget>, automation_run_id:Option<String>, automation_commit:Option<String>, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut repo = state.db.list()?.into_iter().find(|r| r.id == repository_id).ok_or("Repository not found")?;
     let agents = state.agents.clone(); let root = state.data_dir.clone();
     let codex = state.codex.clone();
-    tauri::async_runtime::spawn_blocking(move || agents.run(&root, &profile_id, &repo, &prompt, &mode, model.as_deref(), reasoning_effort.as_deref(), resume.as_ref(), &codex, output)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(run_id)=automation_run_id{repo.local_path=automation_worktrees::prepare(&root,Path::new(&repo.local_path),&repository_id,&run_id,automation_commit.as_deref())?.to_string_lossy().into_owned();}
+        agents.run(&root, &profile_id, &repo, &prompt, &mode, model.as_deref(), reasoning_effort.as_deref(), resume.as_ref(), &codex, output)
+    }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
-async fn agent_resume_status(profile_id: String, repository_id: String, target: agent_sessions::ResumeTarget, state: State<'_, AppState>) -> Result<agent_sessions::ResumeStatus, String> {
+async fn agent_resume_status(profile_id: String, repository_id: String, target: agent_sessions::ResumeTarget, automation_run_id:Option<String>, state: State<'_, AppState>) -> Result<agent_sessions::ResumeStatus, String> {
     let repo = state.db.list()?.into_iter().find(|r| r.id == repository_id).ok_or("Repository not found")?;
     let profile = state.agents.profiles(&state.data_dir)?.into_iter().find(|p| p.id == profile_id).ok_or("API account not found")?;
     let root = state.data_dir.clone(); let codex = state.codex.clone();
-    tauri::async_runtime::spawn_blocking(move || match agent_sessions::resolve(&root, &profile, Path::new(&repo.local_path), &target, &codex) {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path=if let Some(run_id)=automation_run_id{match automation_worktrees::existing(&root,Path::new(&repo.local_path),&repository_id,&run_id){Ok(path)=>path,Err(reason)=>return agent_sessions::ResumeStatus{available:false,reason}}}else{PathBuf::from(&repo.local_path)};
+        match agent_sessions::resolve(&root, &profile, &path, &target, &codex) {
         Ok(_) => agent_sessions::ResumeStatus {available:true, reason:"Continue this conversation".into()},
         Err(reason) => agent_sessions::ResumeStatus {available:false, reason},
-    }).await.map_err(|e| e.to_string())
+    }}).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -240,11 +246,12 @@ async fn submit_saved_prompt(repository_id:String,provider:String,thread_id:Stri
     tauri::async_runtime::spawn_blocking(move||prompt_delivery::submit(&root,&repo,&key,&provider,&thread_id,&prompt,&codex,&cursor)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
-async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,output:tauri::ipc::Channel<serde_json::Value>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,automation_run_id:Option<String>,automation_commit:Option<String>,output:tauri::ipc::Channel<serde_json::Value>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
     let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
-    let repo=state.db.repository_path(&repository_id)?;
+    let mut repo=state.db.repository_path(&repository_id)?;
     let key=prompt_repository_key(&record);
     let root=state.data_dir.clone();
+    if let Some(run_id)=automation_run_id{let worktree_root=root.clone();let path=repo.clone();let id=repository_id.clone();repo=tauri::async_runtime::spawn_blocking(move||automation_worktrees::prepare(&worktree_root,&path,&id,&run_id,automation_commit.as_deref())).await.map_err(|error|error.to_string())??;}
     let registration=request_id.map(|id|state.drafts.register(id)).transpose()?;
     let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
     if provider=="copilot" {
@@ -317,6 +324,10 @@ fn list_matching_handoffs(repository_id:String,name:String,variables:Vec<String>
 #[tauri::command]
 fn claim_selected_handoff(repository_id:String,name:String,id:String,variables:Vec<String>,state:State<AppState>)->Result<handoffs::Claim,String>{handoffs::cleanup_with_retention(&state.db.repository_path(&repository_id)?,retention_hours(&state))?;handoffs::claim_selected(&state.db.repository_path(&repository_id)?,&name,&id,&variables)}
 #[tauri::command]
+fn retry_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<handoffs::Claim,String>{handoffs::retry_with_retention(&state.db.repository_path(&repository_id)?,&name,&id,retention_hours(&state))}
+#[tauri::command]
+fn handoff_retained(repository_id:String,name:String,id:String,state:State<AppState>)->Result<bool,String>{handoffs::retained(&state.db.repository_path(&repository_id)?,&name,&id,retention_hours(&state))}
+#[tauri::command]
 fn finish_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::finish(&state.db.repository_path(&repository_id)?,&name,&id)}
 #[tauri::command]
 fn release_handoff(repository_id:String,name:String,id:String,state:State<AppState>)->Result<(),String>{handoffs::release(&state.db.repository_path(&repository_id)?,&name,&id)}
@@ -324,20 +335,26 @@ fn release_handoff(repository_id:String,name:String,id:String,state:State<AppSta
 async fn cleanup_stale_handoffs(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<usize,String>{
     let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok()).collect::<Vec<_>>();
     let hours=retention_hours(&state);
-    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|path|handoffs::cleanup_with_retention(&path,hours).ok()).sum()).await.map_err(|error|error.to_string())
+    tauri::async_runtime::spawn_blocking(move||{
+        let mut removed=0;let mut errors=Vec::new();
+        for path in paths{match handoffs::cleanup_with_retention(&path,hours){Ok(count)=>removed+=count,Err(error)=>errors.push(format!("{}: {error}",path.display()))}}
+        if errors.is_empty(){Ok(removed)}else{Err(errors.join("; "))}
+    }).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
 fn write_automation_log(entry:automation_logs::Entry,state:State<AppState>)->Result<(),String>{automation_logs::write(&state.data_dir,&entry)}
 #[tauri::command]
-fn list_automation_logs(automation_id:String,state:State<AppState>)->Result<Vec<automation_logs::Summary>,String>{automation_logs::list(&state.data_dir,&automation_id)}
+async fn list_automation_logs(automation_id:String,state:State<'_,AppState>)->Result<Vec<automation_logs::Summary>,String>{let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||automation_logs::list(&root,&automation_id)).await.map_err(|error|error.to_string())?}
 #[tauri::command]
-fn read_automation_log(automation_id:String,repository_id:String,run_id:String,state:State<AppState>)->Result<automation_logs::Entry,String>{automation_logs::read(&state.data_dir,&automation_id,&repository_id,&run_id)}
+async fn read_automation_log(automation_id:String,repository_id:String,run_id:String,state:State<'_,AppState>)->Result<automation_logs::Entry,String>{let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||automation_logs::read(&root,&automation_id,&repository_id,&run_id)).await.map_err(|error|error.to_string())?}
 fn prompt_repository_key(repository:&Repository)->String{
     repository.canonical_remote.as_deref().and_then(|remote|url::Url::parse(remote).ok()).map(|url|format!("{}{}",url.host_str().unwrap_or_default(),url.path().trim_end_matches('/').trim_end_matches(".git")).to_lowercase()).filter(|value|!value.is_empty()).unwrap_or_else(||repository.id.clone())
 }
 #[tauri::command]
-fn cancel_agent(repository_id: String, state: State<AppState>) -> Result<(), String> {
-    state.agents.cancel(&repository_id)
+fn cancel_agent(repository_id: String, automation_run_id:Option<String>, state: State<AppState>) -> Result<(), String> {
+    let primary=state.db.repository_path(&repository_id)?;
+    let path=if let Some(run_id)=automation_run_id{automation_worktrees::existing(&state.data_dir,&primary,&repository_id,&run_id)?}else{primary};
+    state.agents.cancel_checkout(&repository_id,&path)
 }
 
 #[tauri::command]
@@ -644,9 +661,10 @@ async fn remove_branch(repository_id:String,plan:branch_removal::Plan,confirmed_
 }
 
 #[tauri::command]
-fn commit_history(repository_id: String, branch: Option<String>, skip: u32, state: State<AppState>) -> Result<Vec<models::Commit>, String> {
+async fn commit_history(repository_id: String, branch: Option<String>, skip: u32, state: State<'_,AppState>) -> Result<Vec<models::Commit>, String> {
     let path = state.db.repository_path(&repository_id)?;
-    state.git.history(&path, branch.as_deref(), skip).map_err(|e| e.to_string())
+    let git=state.git.clone();
+    tauri::async_runtime::spawn_blocking(move||git.history(&path, branch.as_deref(), skip).map_err(|e| e.to_string())).await.map_err(|error|error.to_string())?
 }
 
 #[tauri::command]
@@ -915,7 +933,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,
@@ -971,7 +989,7 @@ pub fn run() {
  #[test] fn signed_out_account_keeps_catalog_without_reading_usage(){
   let mut calls=Vec::new();
   let result=codex_capabilities(|method,_|{calls.push(method.to_owned());match method{"account/read"=>Ok(serde_json::json!({"account":null})),"model/list"=>Ok(serde_json::json!({"data":[{"model":"available-model"}],"nextCursor":null})),_=>panic!("Usage must not be read for an unverified account")}},None).unwrap();
-  assert_eq!(result["models"][0]["model"],"available-model");assert!(result["usage"].is_null());assert!(result["usageError"].as_str().unwrap().contains("Reconnect"));assert_eq!(calls,vec!["account/read","model/list"]);
+  assert_eq!(result["models"][0]["model"],"available-model");assert!(result["usage"].is_null());assert!(!result["usageError"].as_str().unwrap().is_empty());assert_eq!(calls,vec!["account/read","model/list"]);
  }
  #[test] fn verified_account_retains_paginated_catalog_and_usage(){
   let result=codex_capabilities(|method,params|Ok(match method{"account/read"=>serde_json::json!({"account":{"type":"chatgpt","email":"test@example.test"}}),"model/list" if params["cursor"].is_null()=>serde_json::json!({"data":[{"model":"first"}],"nextCursor":"page-two"}),"model/list"=>serde_json::json!({"data":[{"model":"second"}],"nextCursor":null}),"account/rateLimits/read"=>serde_json::json!({"rateLimits":{}}),_=>panic!("Unexpected request")}),Some("test@example.test")).unwrap();
