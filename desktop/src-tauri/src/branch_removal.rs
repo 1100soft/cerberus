@@ -518,7 +518,12 @@ mod tests {
             dir.path(),
             &["push", "-q", "origin", "main", "correction/test"],
         );
-        run(remote.path(), &["config", "receive.denyDeletes", "true"]);
+        // Explicitly identify the bare Git directory, including when Git's
+        // safe.bareRepository policy disables implicit bare-repository discovery.
+        run(
+            remote.path(),
+            &["--git-dir", ".", "config", "receive.denyDeletes", "true"],
+        );
         let result = remove(
             dir.path(),
             plan(dir.path(), "correction/test", Some("origin")).unwrap(),
