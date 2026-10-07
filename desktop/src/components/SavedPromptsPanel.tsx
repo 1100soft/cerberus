@@ -1,5 +1,5 @@
 import { CopyButton } from './CopyButton';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ClipboardPaste, Play, Plus, Trash2, X, WandSparkles, Square, Pencil, RefreshCw } from 'lucide-react';
 import { InfoPopover } from './InfoPopover';
 import { Select } from './Select';
@@ -80,8 +80,18 @@ export function SavedPromptsPanel({repositories,profiles,chatgptSettings,externa
   const [generating,setGenerating]=useState(false);
   useEffect(()=>subscribeSavedPrompts(()=>setRevision(value=>value+1)),[]);
   useEffect(()=>{if(!draft)return;setEditingJob(null);setKind('prompt');setSelectedIds(repositories.filter(item=>item.localPresent!==false&&!!item.localPath).map(item=>item.id));setMinutes(60);setDebounceSeconds(300);setChangeThreshold(10);setHandoffName('');setHandoffVariablesText('');setEmitsText('');setTrigger('manual');setMoreConditions([]);setConditionEmpty(true);setOtherSets([]);setShowDraft(false);setEditingCondition(null);setCommitBranch('*');setCommitAllExcept(false);setModel('');setReasoningEffort('');setProvider(draft.provider||'codex');setDraftProvider(draft.provider||'codex');setDraftRepositoryId(draft.repositoryId);resetActionTexts(draft.prompt);setName(draft.title||'');setIncludeFuture(true);instructionText.reset();setDraftSession(null);setDraftMessages([]);setNotice('');setDialogOpen(true);},[draft]);
-  useEffect(()=>{if(dialogOpen)requestAnimationFrame(()=>document.querySelector<HTMLElement>('.automation-type button')?.focus());},[dialogOpen]);
-  useEffect(()=>{if(editingCondition){previousCondition.current=editingCondition;requestAnimationFrame(()=>document.querySelector<HTMLElement>('.automation-condition-dialog input, .automation-condition-dialog footer button')?.focus());}else if(dialogOpen&&previousCondition.current){const condition=previousCondition.current;previousCondition.current=null;requestAnimationFrame(()=>document.querySelector<HTMLElement>(`[data-condition="${condition}"] .automation-condition-edit`)?.focus());}},[editingCondition,dialogOpen]);
+  useLayoutEffect(()=>{if(dialogOpen)document.querySelector<HTMLElement>('.automation-type button')?.focus();},[dialogOpen]);
+  // Focus after the DOM commit, even when WebKit is not rendering animation frames.
+  useLayoutEffect(()=>{
+    if(editingCondition){
+      previousCondition.current=editingCondition;
+      document.querySelector<HTMLElement>('.automation-condition-dialog input, .automation-condition-dialog footer button')?.focus();
+    }else if(dialogOpen&&previousCondition.current){
+      const condition=previousCondition.current;
+      previousCondition.current=null;
+      document.querySelector<HTMLElement>(`[data-condition="${condition}"] .automation-condition-edit`)?.focus();
+    }
+  },[editingCondition,dialogOpen]);
   const localRepositories=repositories.filter(item=>item.localPresent!==false&&!!item.localPath);
   const runtimeRepositories=runtimeJob?localRepositories.filter(item=>runtimeJob.trigger==='manual'||runtimeJob.includeFutureRepositories||(runtimeJob.repositoryIds||[runtimeJob.repositoryId]).includes(item.id)):[];
   const selectedRuntimeRepository=runtimeRepositories.some(item=>item.id===runtimeRepository)?runtimeRepository:runtimeRepositories[0]?.id||'';
