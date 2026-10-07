@@ -501,3 +501,23 @@ existing workflows); card fixture passes with 30 extra long-title cards at
 100/140/150% zoom, confirming no card shrink/clipping and independent list scroll.
 Existing Vite chunk and WebKit child allocator diagnostics remain. Changes are
 uncommitted; no live automation execution or push.
+
+## Codex catalog disappearance regression (2026-10-07)
+
+Read-only probe of the configured VS Code Codex app-server in the app's assigned
+account home returned account:null from account/read, but model/list returned
+eight models including gpt-6.1-sol, gpt-6-astra, and gpt-6-sol. Existing native
+chatgpt_capabilities rejected the missing account before requesting models; the
+hook then dropped data and the selector silently showed only Provider default.
+No auth secrets were read/output, no login change or paid turn was executed.
+
+Native catalog discovery is now independent of account verification, with quota
+requests skipped for an unverified/mismatched account and a usageError explaining
+reconnection. Agent execution verification remains unchanged. The frontend keeps
+the last successful per-account catalog after failed refreshes and displays model
+availability/account warnings in an info popover beside model controls. Saved
+model selections survive. No hardcoded model list was added.
+
+Validation: two native catalog tests (signed-out catalog/no quota read, verified
+account pagination/usage), hook refresh-cache/account isolation checks, production
+build, and automation WebKit UI fixture pass. Changes remain uncommitted.

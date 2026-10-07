@@ -11,7 +11,7 @@ const requests=new Map<string,Promise<Capabilities>>();
 function fetchCapabilities(id:string){let request=requests.get(id);if(!request){request=invoke<Capabilities>('chatgpt_capabilities',{profileId:id}).then(value=>{cache.set(id,{time:Date.now(),value});return value;}).finally(()=>requests.delete(id));requests.set(id,request);}return request;}
 export function useChatgptCapabilities(id?:string){
  const [state,setState]=useState<{id?:string;data?:Capabilities;error?:string}>({});
- useEffect(()=>{let live=true;const refresh=(force=false)=>{if(!id || !inTauri())return;const saved=cache.get(id);if(!force && saved && Date.now()-saved.time<60000){setState({id,data:saved.value});return;}void fetchCapabilities(id).then(data=>{if(live)setState({id,data});}).catch(error=>{if(live)setState({id,error:String(error)});});};const force=()=>refresh(true);refresh();const interval=setInterval(force,60000);window.addEventListener('chatgpt-usage-refresh',force);return()=>{live=false;clearInterval(interval);window.removeEventListener('chatgpt-usage-refresh',force);};},[id]);
+ useEffect(()=>{let live=true;const refresh=(force=false)=>{if(!id || !inTauri())return;const saved=cache.get(id);if(!force && saved && Date.now()-saved.time<60000){setState({id,data:saved.value});return;}void fetchCapabilities(id).then(data=>{if(live)setState({id,data});}).catch(error=>{if(live)setState({id,data:cache.get(id)?.value,error:String(error)});});};const force=()=>refresh(true);refresh();const interval=setInterval(force,60000);window.addEventListener('chatgpt-usage-refresh',force);return()=>{live=false;clearInterval(interval);window.removeEventListener('chatgpt-usage-refresh',force);};},[id]);
  return state.id===id ? state : {};
 }
 function snapshots(data?:Capabilities){

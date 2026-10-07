@@ -116,3 +116,5 @@ filled or removed before saving. Saved `conditionSets` stores the ordered arrays
 of conditions; older `conditions` records remain supported.
 
 The in-app handoff popover gives a brief summary and Agent/Shell examples. The separate [handoff guide](handoffs.md) provides detailed instructions and commands. Automation cards grow to display their full names and scope/condition summaries. They do not shrink as more cards are added; the containing automation list scrolls within its pane.
+
+Codex model discovery is independent of the account/usage check. A missing or expired ChatGPT session shows an account warning while preserving the runtime's model catalog; it still needs reconnection before agent execution. A failed catalog refresh retains the last successful catalog for that account and exposes its error through the model-availability info button. No static model list is substituted.
