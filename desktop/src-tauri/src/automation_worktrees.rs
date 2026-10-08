@@ -4,6 +4,31 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+fn active_runs() -> &'static std::sync::Mutex<std::collections::HashMap<String, usize>> {
+    static RUNS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, usize>>> =
+        std::sync::OnceLock::new();
+    RUNS.get_or_init(Default::default)
+}
+pub struct Activity(String);
+pub fn activate(run_id: &str) -> Activity {
+    *active_runs()
+        .lock()
+        .unwrap()
+        .entry(run_id.into())
+        .or_default() += 1;
+    Activity(run_id.into())
+}
+impl Drop for Activity {
+    fn drop(&mut self) {
+        let mut runs = active_runs().lock().unwrap();
+        if let Some(count) = runs.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                runs.remove(&self.0);
+            }
+        }
+    }
+}
 fn valid(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -70,7 +95,23 @@ pub fn prepare(
     if path.exists() {
         return existing(root, repository, repository_id, run_id);
     }
-    let revision = revision.filter(|value| !value.is_empty()).unwrap_or("HEAD");
+    // The agent may have committed after its triggering revision. Restore the
+    // final checkout state on continuation, even after safe cleanup.
+    let restored = match fs::read_to_string(path.with_extension("revision")) {
+        Ok(value) => {
+            let value = value.trim();
+            if !matches!(value.len(), 40 | 64) || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err("Invalid saved automation checkout revision.".into());
+            }
+            Some(value.to_owned())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    let revision = restored
+        .as_deref()
+        .or(revision.filter(|value| !value.is_empty()))
+        .unwrap_or("HEAD");
     let commit = git(
         repository,
         &[
@@ -95,8 +136,8 @@ pub fn prepare(
     {
         return Err("Automation checkout storage cannot be a symbolic link.".into());
     }
-    // Keep the branch/worktree after completion, including uncommitted agent edits.
-    // Normal worktree-aware branch removal can clean it after review.
+    // Keep this checkout for execution and resume. Successful runs may clean it
+    // only after their transcript is saved and their commits are referenced elsewhere.
     git(
         repository,
         &[
@@ -146,4 +187,184 @@ mod tests {
         assert!(path(root.path(), "repo", "../escape").is_err());
         assert!(prepare(root.path(), repo.path(), "repo", "bad", Some("--help")).is_err());
     }
+}
+
+/// Remove only clean app-owned checkouts, preserving every uniquely referenced commit.
+pub fn cleanup(
+    root: &Path,
+    repository: &Path,
+    repository_id: &str,
+    run_id: &str,
+) -> Result<bool, String> {
+    let active = active_runs().lock().map_err(|e| e.to_string())?;
+    if active.contains_key(run_id) {
+        return Ok(false);
+    }
+    let checkout = path(root, repository_id, run_id)?;
+    if !checkout.exists() {
+        return Ok(false);
+    }
+    let checkout = existing(root, repository, repository_id, run_id)?;
+    if !git(
+        &checkout,
+        &["status", "--porcelain", "--untracked-files=all"],
+    )?
+    .is_empty()
+    {
+        return Ok(false);
+    }
+    let branch = format!("private/automation-{run_id}");
+    let current = git(&checkout, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if current != "HEAD" && current != branch {
+        return Ok(false);
+    }
+    let head = git(&checkout, &["rev-parse", "HEAD"])?;
+    let refs = git(
+        repository,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            &format!("--contains={head}"),
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )?;
+    if !refs
+        .lines()
+        .any(|name| !name.starts_with("refs/heads/private/automation-"))
+    {
+        return Ok(false);
+    }
+    let reference = format!("refs/heads/{branch}");
+    let tip = git(repository, &["rev-parse", "--verify", &reference]).ok();
+    // An agent can detach or switch branches. Never discard a different branch tip.
+    if tip.as_ref().is_some_and(|tip| tip != &head) {
+        return Ok(false);
+    }
+    // Persist before deletion so a crash cannot lose the state needed to resume.
+    let mut marker =
+        tempfile::NamedTempFile::new_in(checkout.parent().ok_or("Invalid checkout path")?)
+            .map_err(|e| e.to_string())?;
+    use std::io::Write;
+    marker
+        .write_all(head.as_bytes())
+        .map_err(|e| e.to_string())?;
+    marker.as_file().sync_all().map_err(|e| e.to_string())?;
+    marker
+        .persist(checkout.with_extension("revision"))
+        .map_err(|e| e.to_string())?;
+    git(
+        repository,
+        &[
+            "worktree",
+            "remove",
+            checkout.to_str().ok_or("Invalid checkout path")?,
+        ],
+    )?;
+    if let Some(tip) = tip {
+        git(repository, &["update-ref", "-d", &reference, &tip])?;
+    }
+    Ok(true)
+}
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    #[test]
+    fn clean_referenced_checkouts_are_removed_but_dirty_and_unique_work_are_kept() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q"]).unwrap();
+        git(
+            repo.path(),
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "base",
+            ],
+        )
+        .unwrap();
+        let clean = prepare(root.path(), repo.path(), "repo", "clean", None).unwrap();
+        let lease = activate("clean");
+        assert!(!cleanup(root.path(), repo.path(), "repo", "clean").unwrap());
+        drop(lease);
+        assert_eq!(
+            sweep(root.path(), repo.path(), "repo", &["clean".into()]).unwrap(),
+            0
+        );
+        assert!(cleanup(root.path(), repo.path(), "repo", "clean").unwrap());
+        assert!(!clean.exists());
+        let dirty = prepare(root.path(), repo.path(), "repo", "dirty", None).unwrap();
+        fs::write(dirty.join("kept.txt"), "keep").unwrap();
+        assert!(!cleanup(root.path(), repo.path(), "repo", "dirty").unwrap());
+        let unique = prepare(root.path(), repo.path(), "repo", "unique", None).unwrap();
+        git(
+            &unique,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "unique",
+            ],
+        )
+        .unwrap();
+        assert!(!cleanup(root.path(), repo.path(), "repo", "unique").unwrap());
+        git(
+            repo.path(),
+            &[
+                "branch",
+                "correction/retained",
+                &git(&unique, &["rev-parse", "HEAD"]).unwrap(),
+            ],
+        )
+        .unwrap();
+        let final_revision = git(&unique, &["rev-parse", "HEAD"]).unwrap();
+        assert!(cleanup(root.path(), repo.path(), "repo", "unique").unwrap());
+        let resumed = prepare(root.path(), repo.path(), "repo", "unique", Some("HEAD")).unwrap();
+        assert_eq!(
+            git(&resumed, &["rev-parse", "HEAD"]).unwrap(),
+            final_revision
+        );
+    }
+}
+
+/// Revisit retained checkouts after their active/blocked lease ends. Never force removal.
+pub fn sweep(
+    root: &Path,
+    repository: &Path,
+    repository_id: &str,
+    protected: &[String],
+) -> Result<usize, String> {
+    let parent = path(root, repository_id, "scan")?
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    if !parent.exists() {
+        return Ok(0);
+    }
+    let mut removed = 0;
+    for entry in fs::read_dir(parent).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let id = entry.file_name().to_string_lossy().to_string();
+        if !valid(&id)
+            || protected.contains(&id)
+            || !entry.file_type().map_err(|e| e.to_string())?.is_dir()
+        {
+            continue;
+        }
+        match cleanup(root, repository, repository_id, &id) {
+            Ok(true) => removed += 1,
+            Ok(false) => {}
+            Err(error) => eprintln!("Retained automation checkout {id}: {error}"),
+        }
+    }
+    Ok(removed)
 }

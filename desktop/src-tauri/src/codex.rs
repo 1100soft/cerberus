@@ -126,14 +126,14 @@ impl Client {
         self.sequence += 1;
         let id = self.sequence;
         self.send(json!({"id":id, "method":method, "params":params}))?;
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut deadline=crate::awake::ActiveDeadline::new(Duration::from_secs(30));
         loop {
-            let value = self
-                .output
-                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .map_err(|_| {
-                    "Codex did not respond. Check the installed CLI and retry.".to_owned()
-                })?;
+            if deadline.expired(){return Err("Codex did not respond. Check the installed CLI and retry.".into());}
+            let value=match self.output.recv_timeout(Duration::from_millis(100)){
+                Ok(value)=>value,
+                Err(mpsc::RecvTimeoutError::Timeout)=>{if deadline.expired(){return Err("Codex did not respond. Check the installed CLI and retry.".into());}continue;},
+                Err(_)=>return Err("Codex disconnected before completing the request.".into())
+            };
             if value["method"] == "account/login/completed" {
                 if let Some(login_id)=value["params"]["loginId"].as_str() {self.logins.insert(login_id.into(),if value["params"]["success"]==true {Ok(())}else{Err(credential_error(value["params"]["error"].as_str().unwrap_or("ChatGPT sign-in failed")))});}
             }

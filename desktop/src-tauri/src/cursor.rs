@@ -426,10 +426,17 @@ mod tests {
         let proc = PathBuf::from(format!("/proc/{grandchild}"));
         assert!(proc.exists());
         stop_child(&mut child);
-        let alive = std::fs::read_to_string(proc.join("stat")).ok().is_some_and(|stat| {
-            matches!(stat.rsplit(')').next().and_then(|rest| rest.split_whitespace().next()), Some("R" | "S" | "D"))
-        });
-        assert!(!alive, "wrapper child still running");
+        // SIGKILL delivery to the wrapper's child is asynchronous; waiting for
+        // the wrapper alone does not prove the child has been scheduled yet.
+        let deadline=std::time::Instant::now()+Duration::from_secs(1);
+        loop {
+            let alive = std::fs::read_to_string(proc.join("stat")).ok().is_some_and(|stat| {
+                matches!(stat.rsplit(')').next().and_then(|rest| rest.split_whitespace().next()), Some("R" | "S" | "D"))
+            });
+            if !alive { break; }
+            assert!(std::time::Instant::now()<deadline, "wrapper child still running");
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
     #[test]
     fn runtime_notifications_are_not_user_prompts() {

@@ -13,7 +13,46 @@ function readChats(): AgentChat[] {
   try { const saved = JSON.parse(localStorage.getItem('gitcerberus.agentChats') || '[]'); return Array.isArray(saved) ? saved.filter(chat => chat && typeof chat.id === 'string' && typeof chat.repositoryId === 'string' && chat.profile && Array.isArray(chat.messages)).map(chat => ({...chat, running:false, retryable:chat.retryable || (!chat.running && String(chat.activity).includes('already has an active writer')), status:chat.running ? 'Interrupted when the app closed. Resume to continue.' : agentFailure(chat.status,chat.activity)})) : []; } catch { return []; }
 }
 let chats: AgentChat[] = readChats();
-function persist() { try { if (typeof localStorage !== 'undefined') localStorage.setItem('gitcerberus.agentChats', JSON.stringify(chats)); } catch { window.dispatchEvent(new CustomEvent('chat-storage-error', {detail:'Chat history could not be saved on this computer. Keep this window open to retain it.'})); } }
+const dirtyChats=new Map<string,AgentChat>();
+let saving=false,flushTimer:number|undefined;
+const storageError=(error:unknown)=>window.dispatchEvent(new CustomEvent('chat-storage-error',{detail:`Conversation could not be saved: ${String(error)}`}));
+let restorePromise:Promise<void>|undefined;
+export function initializeAgentChats():Promise<void>{
+  if(!restorePromise)restorePromise=(async()=>{
+    if(!('__TAURI_INTERNALS__' in window)||!api.agentConversations)return;
+    try{
+      const saved=await api.agentConversations();
+      const merged=new Map(chats.map(chat=>[chat.id,chat]));
+      for(const chat of saved){const current=merged.get(chat.id);if(!dirtyChats.has(chat.id)&&(!current||chat.updatedAt>=current.updatedAt))merged.set(chat.id,{...chat,running:false,status:chat.running?'Interrupted when the app closed. Resume to continue.':chat.status});}
+      chats=[...merged.values()].sort((a,b)=>b.updatedAt-a.updatedAt);emit();
+      for(const chat of chats)if(!saved.some(item=>item.id===chat.id))dirtyChats.set(chat.id,chat);
+      scheduleFlush();
+    }catch(error){storageError(error);}
+  })();
+  return restorePromise;
+}
+async function flushChats(){
+  if(saving||!api.saveAgentConversation||!('__TAURI_INTERNALS__' in window))return;
+  saving=true;
+  try{await initializeAgentChats();while(dirtyChats.size){const [id,chat]=dirtyChats.entries().next().value!;await api.saveAgentConversation(chat);if(dirtyChats.get(id)===chat)dirtyChats.delete(id);}}
+  catch(error){storageError(error);}finally{saving=false;}
+}
+function scheduleFlush(){
+  if(flushTimer===undefined)flushTimer=window.setTimeout(()=>{flushTimer=undefined;void flushChats();},500);
+}
+function persist(id?:string){
+  for(const chat of id?chats.filter(chat=>chat.id===id):chats)dirtyChats.set(chat.id,chat);
+  // Browser storage is a small index/fallback. Full transcripts live in SQLite.
+  try{localStorage.setItem('gitcerberus.agentChats',JSON.stringify(chats.map(chat=>({...chat,activity:'',messages:chat.messages.map(({steps,edits,...message})=>({...message,text:message.text.slice(-12000)}))}))));}
+  catch(error){storageError(error);}
+  scheduleFlush();
+  if(id&&!getAgentChat(id)?.running)void flushChats();
+}
+export function restoreAgentConversation(chat:AgentChat){
+  const current=getAgentChat(chat.id);
+  if(current?.running||current&&current.updatedAt>chat.updatedAt&&current.messages.at(-1)?.text)return;
+  chats=current?chats.map(item=>item.id===chat.id?chat:item):[chat,...chats];persist(chat.id);emit();
+}
 export function historyResumeTarget(key?:string): ResumeTarget | undefined {
   if (!key || key === 'new' || key.startsWith('app:')) return;
   const colon = key.indexOf(':'); const provider = key.slice(0,colon);
@@ -24,12 +63,13 @@ const listeners = new Set<() => void>();
 const emit = () => listeners.forEach(listener => listener());
 export function subscribeAgentChats(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function getAgentChat(id:string) { return chats.find(chat=>chat.id===id); }
+export function currentAgentChats(){return chats;}
 export function latestAgentChat(repositoryId:string) { return chats.find(chat=>chat.repositoryId===repositoryId); }
 export function useAgentChats() { return useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => chats); }
 export function useRepositoryAgentWorking(repositoryId:string){return useSyncExternalStore(listener=>{listeners.add(listener);return()=>{listeners.delete(listener);};},()=>chats.some(chat=>chat.repositoryId===repositoryId&&chat.running));}
 export function renameAgentChat(id:string, name:string) { const next=name.trim(); if(!next)return; chats=chats.map(chat=>chat.id===id?{...chat,name:next}:chat);persist();emit(); }
 export function archiveAgentChat(id:string, archived:boolean) { chats=chats.map(chat=>chat.id===id?{...chat,archived}:chat);persist();emit(); }
-export function updateAgentChat(id: string, patch: Partial<AgentChat>) { chats = chats.map(chat => chat.id === id ? {...chat, ...patch, updatedAt:Date.now()} : chat); if (patch.session || chats.find(chat => chat.id === id)?.running === false) persist(); emit(); }
+export function updateAgentChat(id: string, patch: Partial<AgentChat>) { chats = chats.map(chat => chat.id === id ? {...chat, ...patch, updatedAt:Date.now()} : chat); persist(id); emit(); }
 export function chatPrompt(messages: CodexMessage[], prompt: string) {
   if (new TextEncoder().encode(prompt).length > 99_000) throw new Error('Message is too long. Shorten it before sending.');
   if (!messages.length) return prompt;
@@ -52,7 +92,7 @@ export async function sendAgentMessage(repositoryId: string, profile: AgentProfi
   const id = existing?.id || crypto.randomUUID();
   const messages = [...previous, {id:crypto.randomUUID(), role:'user', text:prompt}, {id:crypto.randomUUID(), role:'assistant', text:''}];
   const record: AgentChat = {automationContext,automationRetry:existing?.automationRetry,mode,model,reasoningEffort,id, repositoryId, profile, name: existing?.name || originName || prompt.slice(0,100), archived:existing?.archived, originKey:startNew ? undefined : existing?.originKey || originKey, session:target, messages, running:true, status:'Working…', activity:'', updatedAt:Date.now()};
-  chats = existing ? chats.map(chat => chat.id === id ? record : chat) : [record, ...chats]; persist(); emit();
+  chats = existing ? chats.map(chat => chat.id === id ? record : chat) : [record, ...chats]; persist(id); emit();
   let started = false;
   let edits:FileEdit[] = [];
   let response = '', activity = '', failure = '';
@@ -92,8 +132,9 @@ export const stopAgentChat = (repositoryId:string,chatId?:string) => {
 
 export function waitForAgentChat(id:string,timeoutMs=960_000):Promise<string>{
   return new Promise((resolve,reject)=>{
-    const timer=window.setTimeout(()=>{listeners.delete(check);reject(new Error('Agent completion was not observed. Check its conversation before retrying.'));},timeoutMs);
-    const check=()=>{const chat=chats.find(item=>item.id===id);if(!chat||chat.running)return;window.clearTimeout(timer);listeners.delete(check);if(chat.status==='Completed')resolve(chat.messages.at(-1)?.text||'Completed');else reject(new Error(chat.status));};
+    let remaining=timeoutMs,last=Date.now();
+    const timer=window.setInterval(()=>{const now=Date.now(),gap=now-last;last=now;if(gap<5000)remaining-=Math.max(0,gap);check();if(remaining<=0){window.clearInterval(timer);listeners.delete(check);reject(new Error('Agent completion was not observed. Check its conversation before retrying.'));}},1000);
+    const check=()=>{const chat=chats.find(item=>item.id===id);if(!chat||chat.running)return;window.clearInterval(timer);listeners.delete(check);if(chat.status==='Completed')resolve(chat.messages.at(-1)?.text||'Completed');else reject(new Error(chat.status));};
     listeners.add(check);check();
   });
 }
@@ -105,11 +146,19 @@ export async function runExternalAutomation(repositoryId:string,profile:AgentPro
   if(chats.some(chat=>chat.repositoryId===repositoryId&&chat.running&&chat.automationContext?.runId===automationContext?.runId))throw new Error('A task is already running in this checkout.');
   const id=existing?.id||crypto.randomUUID();
   const messages:CodexMessage[]=[{id:crypto.randomUUID(),role:'user',text:prompt},{id:crypto.randomUUID(),role:'assistant',text:''}];
-  const record:AgentChat={externalAutomation:true,automationContext,id,repositoryId,profile,mode,archived:existing?.archived,session:existing?.session,name:existing?.name||conversationName||prompt.slice(0,100),messages:existing?.session?[...existing.messages,...messages]:messages,status:'Working…',activity:'',running:true,updatedAt:Date.now()};chats=existing?chats.map(chat=>chat.id===id?record:chat):[record,...chats];persist();emit();onStarted?.(id);
+  const record:AgentChat={externalAutomation:true,automationContext,id,repositoryId,profile,mode,archived:existing?.archived,session:existing?.session,name:existing?.name||conversationName||prompt.slice(0,100),messages:existing?.session?[...existing.messages,...messages]:messages,status:'Working…',activity:'',running:true,updatedAt:Date.now()};chats=existing?chats.map(chat=>chat.id===id?record:chat):[record,...chats];persist(id);emit();onStarted?.(id);
   try{
-    const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt,existing?.session?.sessionId,automationContext?.runId,event=>{const chat=getAgentChat(id);if(chat)updateAgentChat(id,{activity:(chat.activity+'\n'+JSON.stringify(event)).slice(-2_000_000)});},automationContext);
+    const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt,existing?.session?.sessionId,automationContext?.runId,event=>{const chat=getAgentChat(id);if(chat)updateAgentChat(id,{activity:(chat.activity+'\n'+JSON.stringify(event)).slice(-2_000_000),...externalEventPatch(event,chat)});},automationContext);
     updateAgentChat(id,{running:false,status:'Completed',automationRetry:false,session:result.sessionId?{sessionId:result.sessionId,provider:profile.provider,source:'app'}:undefined,messages:[...record.messages.slice(0,-1),{...messages[1],text:result.text||'Completed without a text response.'}]});
     window.dispatchEvent(new CustomEvent('saved-prompt-finished',{detail:{repositoryId,provider:profile.provider}}));
     return {text:result.text||'Completed',chatId:id};
-  }catch(error){updateAgentChat(id,{running:false,status:String(error),activity:String(error)});throw error;}
+  }catch(error){updateAgentChat(id,{running:false,status:String(error),activity:(getAgentChat(id)?.activity||'')+'\n'+String(error)});throw error;}
+}
+
+export function externalEventPatch(event:Record<string,unknown>,chat:AgentChat):Partial<AgentChat>{
+  const data=event.data as Record<string,unknown>|undefined;
+  const sessionId=event.type==='session.start'?data?.sessionId:event.type==='thread.started'?event.thread_id:undefined;
+  const patch:Partial<AgentChat>=typeof sessionId==='string'?{session:{sessionId,provider:chat.profile.provider,source:'app'}}:{};
+  if(event.type==='assistant.message'&&typeof data?.content==='string')patch.messages=[...chat.messages.slice(0,-1),{...chat.messages.at(-1)!,text:data.content}];
+  return patch;
 }

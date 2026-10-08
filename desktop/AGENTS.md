@@ -38,3 +38,8 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 - A displayed selection must match the value used by actions and validation. Initialize required selections to the first available option, preserving valid user choices when options change. Never display a first-option fallback while leaving the actual value empty or invalid.
 
 - Automation errors must never disable an automation. Preserve its enabled setting after failures, migration, and clearing pending state. Only an explicit user disable action may turn it off. Opening its log acknowledges the list error indicator without deleting error details.
+
+- Error acknowledgement is independent of execution state: another context may
+  still be running when a run fails. An open automation log must acknowledge new
+  unread errors; after closing, new failures become unread again. Retained blocked
+  rows must use neutral styling once acknowledged, keeping their log/retry details.

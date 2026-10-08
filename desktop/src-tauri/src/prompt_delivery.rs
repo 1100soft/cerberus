@@ -3,7 +3,7 @@
 use crate::{codex::CodexService, cursor::CursorService, provider_paths};
 use serde::Serialize;
 use serde_json::{json,Value};
-use std::{collections::HashSet, io::Read, path::Path, process::{Command, Stdio}, sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
+use std::{collections::HashSet, io::Read, path::Path, process::{Command, Stdio}, sync::{Arc, Mutex, OnceLock, atomic::{AtomicBool, Ordering}}, time::Duration};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,11 +77,11 @@ pub fn new_cli_conversation(root:&Path,repo:&Path,repository_key:&str,provider:&
     let mut child=command.spawn().map_err(|e|format!("Could not start {tool}: {e}"))?;
     let stdout=drain(child.stdout.take().ok_or("Agent output unavailable")?,200_000,output.clone(),"stdout");
     let stderr=drain(child.stderr.take().ok_or("Agent diagnostic stream unavailable")?,2_000,output,"stderr");
-    let deadline=Instant::now()+Duration::from_secs(900);
+    let mut deadline=crate::awake::ActiveDeadline::new(Duration::from_secs(900));
     let status=loop{
         if cancelled.as_ref().is_some_and(|flag|flag.load(Ordering::SeqCst)){let _=child.kill();let _=child.wait();let _=stdout.join();let _=stderr.join();return Err("Draft stopped".into());}
         if let Some(status)=child.try_wait().map_err(|e|e.to_string())?{break status;}
-        if Instant::now()>=deadline{let _=child.kill();let _=child.wait();let _=stdout.join();let _=stderr.join();return Err(format!("{tool} timed out after 15 minutes. Check the app conversation before retrying."));}
+        if deadline.expired(){let _=child.kill();let _=child.wait();let _=stdout.join();let _=stderr.join();return Err(format!("{tool} timed out after 15 minutes. Check the app conversation before retrying."));}
         std::thread::sleep(Duration::from_millis(250));
     };
     let output=stdout.join().unwrap_or_default();let diagnostic=stderr.join().unwrap_or_default();
@@ -146,14 +146,14 @@ pub fn submit(root:&Path,repo:&Path,repository_key:&str,provider:&str,id:&str,pr
                 while let Ok(size)=stderr.read(&mut buffer){if size==0{break;}let remaining=1024usize.saturating_sub(retained.len());retained.extend_from_slice(&buffer[..size.min(remaining)]);}
                 String::from_utf8_lossy(&retained).trim().to_owned()
             });
-            let deadline=Instant::now()+Duration::from_secs(900);
+            let mut deadline=crate::awake::ActiveDeadline::new(Duration::from_secs(900));
             loop {
                 if let Some(status)=child.try_wait().map_err(|e|e.to_string())? {
                     let detail=diagnostic.join().unwrap_or_default();
                     if status.success() {return Ok(format!("{tool} completed the selected session turn."));}
                     return Err(format!("{tool} exited with {status}. {}",if detail.is_empty(){"Inspect the selected conversation before retrying.".into()}else{detail}));
                 }
-                if Instant::now()>=deadline {let _=child.kill();let _=child.wait();let _=diagnostic.join();return Err(format!("{tool} timed out after 15 minutes; inspect the conversation before retrying."));}
+                if deadline.expired() {let _=child.kill();let _=child.wait();let _=diagnostic.join();return Err(format!("{tool} timed out after 15 minutes; inspect the conversation before retrying."));}
                 std::thread::sleep(Duration::from_millis(250));
             }
         }

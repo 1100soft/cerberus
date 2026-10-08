@@ -649,3 +649,109 @@ Recovery note: the combined implementation stores retention in `handoff-retentio
 Final verification: production build (dropdown lint, TypeScript, Vite), chat/agent logic, workflow actionlint, WebKit automation-actions/CI/handoff/viewport checks, and native serial suite (114 passed, 4 live-provider tests ignored). Clippy completed with existing warnings. Parallel native testing exposed the known Cursor child-cleanup race; serial verification passed. Saved-prompt browser coverage also checks frozen-prompt retries and expired handoff visibility.
 
 Checkpoint review restored the consumed-input marker for successful Agent, Git, and Notification actions after the stash reconciliation. Successful actions retain their handoffs outside the pending queue rather than requeueing them.
+
+
+## Durable conversations, sleep protection, and contextual retries (2026-10-08)
+
+The browser conversation record stopped at approximately the WebView's 5 MB quota;
+newer completed activities still existed in native automation logs. Added per-chat
+atomic SQLite upserts (agent-conversations.db), compact browser fallback records,
+stream/session checkpointing, log metadata, and startup display recovery. Legacy
+history was recovered into the durable store with backups under app data's
+handoff-recovery/conversations-20261008. Recovered the original first review's final
+reply from its assistant.message + assistant.idle events and repaired its running
+log to completed. Large Unicode activity cannot exceed native byte limits on log
+checkpointing anymore.
+
+The later review rerun (190d2a60) reviewed 718984a, not CI correction 993893e. The
+correction review (37d469fd) completed and emitted integrate. Its downstream
+integration (40d043d1) stopped before completion; its exact integrate emission
+37d469fd remains consumed/retained. Recovery links that failed run to the original
+Copilot session and handoff; it does not launch a turn. Cards show active and blocked
+contexts only; the retry button is inside its specific failed row. Completed runs
+remain in the log dialog.
+
+Removed five clean completed app worktrees and their private/automation-* refs,
+after proving their commits remained referenced elsewhere. Kept correction/
+desktop-ci-37687266495-20261007 at 993893e and the interrupted integration checkout.
+Native success cleanup applies the same policy. Dirty work and unique commits stay;
+a continuation can recreate a cleaned checkout at its recorded revision. Included
+the already-approved missing-login diagnostic assertion from the correction.
+
+Native jobs acquire RAII sleep inhibitors. Detected local activity adds an expiring
+heartbeat lease. Linux uses a logind fd, macOS caffeinate -i, Windows execution
+state on a dedicated worker thread. Runner and UI completion timers exclude long
+suspend gaps; live connections continue on wake. Provider disconnects and process
+termination still require explicit retry/resume, with saved session/input intact.
+The real Linux inhibitor lifecycle test registered and released its lock successfully;
+macOS and Windows behavior is implemented but not exercised on this Linux machine.
+No paid provider turn, push, or new commit was initiated for these changes.
+
+Validation: production build/type checking/dropdown checks passed; native serial
+tests passed (117, with five environment/provider tests ignored); the real Linux
+logind lock lifecycle test was run separately and passed. Conversation quota,
+streaming checkpoints, suspend waits, exact-context recovery, existing chat checks,
+WebKit automation action/persistence fixtures, and viewport/zoom checks passed.
+Clippy completed with existing warnings; formatting of new modules and diff
+whitespace checks passed. Native changes require a desktop rebuild/restart.
+
+## Run management and eventual checkout cleanup (2026-10-08)
+
+Added native active-checkout leases to serialize cleanup against starts, plus
+startup/30-minute safe cleanup sweeps after blocked retention. Agent instructions
+explicitly assign checkout cleanup to Cerberus and require reporting verification
+as pending. Dirty/unique work is retained without force. Compact run rows include
+exact context with inline retry, dismiss, and delete actions. Dismissal is a durable
+log flag; conversation retries remain available. Confirmed run/log deletion waits
+for pending checkpoints, removes cache/disk/retry, and protects active runs.
+Conversation and handoff history stay independent. The settings gear opens general
+Automation settings, currently containing handoff retention.
+
+Validation for run management: production build passed; native serial suite passed
+117 tests (five ignored). WebKit actions verified persistent dismissals and confirmed
+log deletion, alongside exact retries; settings/persistence and multi-size viewport
+checks passed. Diff whitespace and new checkout module formatting passed.
+
+## Bulk logs and acknowledgement regression (2026-10-08)
+
+Added confirmed Delete all for one automation across all repositories/dismissed runs,
+using full native history, serialized existing deletion, and active-run protection.
+Batch cleanup runs once; partial failures include deletion counts and error details.
+Fixed acknowledgement incorrectly requiring overall error state (concurrent jobs
+can stay running with errorUnread true). The open log subscribes to state updates
+and clears unread flags while open. Blocked row red borders now reflect unread
+state, retaining neutral retry rows after inspection. Regression fixtures cover
+concurrent errors, persisted acknowledgement, new errors after closure, cancelled
+bulk deletion, cross-repository deletion, and retained active runs.
+
+Validation: production build/dropdown/type checks, chat and conversation-recovery
+checks, expanded WebKit action regressions, and multi-size/zoom viewport checks
+passed. Bulk deletion refreshes log/cache observers once per batch. A WebKit child
+teardown diagnostic appeared after one successful action run; a clean rerun passed
+all assertions without that diagnostic. No new native changes in this follow-up.
+
+Checkpoint review: safe checkout cleanup now atomically records final HEAD in a
+sibling .revision file before removal, so later continuation preserves commits
+made since its trigger. A regression assertion restores that final revision.
+Copilot timeout ticks no longer reset under continuous events; macOS caffeinate
+also watches the app PID to release on termination. CI now runs the new conversation
+recovery check and expanded automation action fixture.
+
+Native checkpoint validation exposed an existing race in Cursor's process-group
+shutdown assertion: SIGKILL delivery to the wrapper child is asynchronous. The test
+now polls termination for at most one second instead of checking immediately.
+Production shutdown behavior is unchanged.
+
+Review also protects resume preflight with the checkout lease. Startup recovery
+now processes interrupted running logs even when a newer durable transcript exists,
+preserving that full transcript while reconstructing its exact blocked retry.
+
+Final checkpoint validation: production build/TypeScript/dropdown checks, release
+version checks, four frontend logic suites, actionlint, Python/shell syntax,
+formatted native module checks and whitespace checks passed. All six WebKit
+fixtures passed against the existing Vite server, including four window sizes
+and zoom variants (the isolated port-3000 wrapper was not used). Native unit/bin/
+doc tests passed: 117 unit tests, five ignored; the real logind lifecycle test
+passed separately. Clippy completed with remaining pre-existing warnings. The
+Cursor termination assertion race was corrected after its initial failures.
+Ignored private data, dependencies and build outputs remain excluded.
