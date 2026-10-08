@@ -330,7 +330,7 @@ for line in sys.stdin:
             Channel::new(|_| Ok(())),
         )
         .unwrap_err();
-        // Headless Linux may require storage repair before reconnecting.
+        // Headless Linux may require credential storage repair before reconnecting.
         assert_eq!(error, crate::codex::missing_account_error());
     }
 }
