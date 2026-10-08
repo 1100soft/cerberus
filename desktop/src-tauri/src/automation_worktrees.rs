@@ -4,6 +4,31 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+fn active_runs() -> &'static std::sync::Mutex<std::collections::HashMap<String, usize>> {
+    static RUNS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, usize>>> =
+        std::sync::OnceLock::new();
+    RUNS.get_or_init(Default::default)
+}
+pub struct Activity(String);
+pub fn activate(run_id: &str) -> Activity {
+    *active_runs()
+        .lock()
+        .unwrap()
+        .entry(run_id.into())
+        .or_default() += 1;
+    Activity(run_id.into())
+}
+impl Drop for Activity {
+    fn drop(&mut self) {
+        let mut runs = active_runs().lock().unwrap();
+        if let Some(count) = runs.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                runs.remove(&self.0);
+            }
+        }
+    }
+}
 fn valid(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -155,6 +180,10 @@ pub fn cleanup(
     repository_id: &str,
     run_id: &str,
 ) -> Result<bool, String> {
+    let active = active_runs().lock().map_err(|e| e.to_string())?;
+    if active.contains_key(run_id) {
+        return Ok(false);
+    }
     let checkout = path(root, repository_id, run_id)?;
     if !checkout.exists() {
         return Ok(false);
@@ -232,6 +261,13 @@ mod cleanup_tests {
         )
         .unwrap();
         let clean = prepare(root.path(), repo.path(), "repo", "clean", None).unwrap();
+        let lease = activate("clean");
+        assert!(!cleanup(root.path(), repo.path(), "repo", "clean").unwrap());
+        drop(lease);
+        assert_eq!(
+            sweep(root.path(), repo.path(), "repo", &["clean".into()]).unwrap(),
+            0
+        );
         assert!(cleanup(root.path(), repo.path(), "repo", "clean").unwrap());
         assert!(!clean.exists());
         let dirty = prepare(root.path(), repo.path(), "repo", "dirty", None).unwrap();
@@ -264,4 +300,37 @@ mod cleanup_tests {
         .unwrap();
         assert!(cleanup(root.path(), repo.path(), "repo", "unique").unwrap());
     }
+}
+
+/// Revisit retained checkouts after their active/blocked lease ends. Never force removal.
+pub fn sweep(
+    root: &Path,
+    repository: &Path,
+    repository_id: &str,
+    protected: &[String],
+) -> Result<usize, String> {
+    let parent = path(root, repository_id, "scan")?
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    if !parent.exists() {
+        return Ok(0);
+    }
+    let mut removed = 0;
+    for entry in fs::read_dir(parent).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let id = entry.file_name().to_string_lossy().to_string();
+        if !valid(&id)
+            || protected.contains(&id)
+            || !entry.file_type().map_err(|e| e.to_string())?.is_dir()
+        {
+            continue;
+        }
+        match cleanup(root, repository, repository_id, &id) {
+            Ok(true) => removed += 1,
+            Ok(false) => {}
+            Err(error) => eprintln!("Retained automation checkout {id}: {error}"),
+        }
+    }
+    Ok(removed)
 }

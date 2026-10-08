@@ -25,3 +25,11 @@ export function updateAutomationLog(entry:AutomationLog,patch:Partial<Automation
 export async function finishAutomationLog(entry:AutomationLog){
   const id=key(entry);window.clearTimeout(timers.get(id));timers.delete(id);publish(entry);await persist(entry);
 }
+
+export async function deleteSavedAutomationLog(entry:AutomationLog){
+  const id=key(entry);window.clearTimeout(timers.get(id));timers.delete(id);
+  await writes.get(id)?.catch(()=>{});
+  await api.deleteAutomationLog(entry.automationId,entry.repositoryId,entry.runId);
+  entries.delete(id);for(const listener of listeners)listener(entry.automationId);
+}
+export async function saveDismissedAutomationLog(entry:AutomationLog){await persist(entry);publish(entry);}

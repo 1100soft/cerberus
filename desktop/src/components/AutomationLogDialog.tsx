@@ -1,6 +1,7 @@
+import { DeleteAutomationRunDialog } from './DeleteAutomationRunDialog';
 import { CopyButton } from './CopyButton';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Trash2 } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import json from 'highlight.js/lib/languages/json';
@@ -26,6 +27,7 @@ export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:S
   const preferredSelection=useRef(initialSelection);
   const [entry,setEntry]=useState<AutomationLog|null>(null);
   const [error,setError]=useState('');
+  const [deleting,setDeleting]=useState<AutomationLog|null>(null);
   const [copyStatus,setCopyStatus]=useState('');
   const [liveEntries,setLiveEntries]=useState(()=>currentAutomationLogs(job.id));
   const lastActive=useRef('');
@@ -61,20 +63,20 @@ export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:S
   const logText=[
     entry?[`${repositoryName(entry.repositoryId)} · ${new Date(entry.createdAt).toLocaleString()}`,entry.stdout,entry.stderr,entry.response,entry.activity].filter(Boolean).join('\n\n'):'',
     error,
-    !entry&&!error&&job.state!=='running'?job.lastResult:'',
+    !entry&&!error&&logs.length>0&&job.state!=='running'?job.lastResult:'',
   ].filter(Boolean).join('\n\n');
   useEffect(()=>setCopyStatus(''),[selected,entry]);
   useLayoutEffect(()=>{followOutput.current=true;},[selected]);
   useLayoutEffect(()=>{const pane=logScroll.current;if(pane&&followOutput.current)pane.scrollTop=pane.scrollHeight;},[selected,entry,error,copyStatus,job.lastResult]);
   return <div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><section className="automation-dialog automation-log-dialog" role="dialog" aria-modal="true" aria-label={`Details for ${job.title}`} onKeyDown={event=>{if(event.key==='Escape')onClose();}}><header><h2>{job.title}</h2><button type="button" aria-label="Close automation details" onClick={onClose}><X size={17}/></button></header><div className="automation-dialog-content automation-detail-content">
     <section className="automation-detail-pane" aria-label="Automation content"><strong>{job.kind==='notification'?'Notification message':job.kind==='shell'||job.kind==='git'?'Command or script':'Agent prompt'}</strong><div className="automation-detail-scroll">{job.kind==='shell'||job.kind==='git'?<ShellCode code={job.prompt}/>:<pre className="automation-log-plain">{job.prompt}</pre>}</div></section>
-    <section className="automation-detail-pane" aria-label="Automation log"><div className="automation-detail-log-header"><strong>Log</strong><CopyButton label="Copy automation log" value={logText} disabled={!logText} onError={reason=>setCopyStatus(`Could not copy log: ${String(reason)}`)}/>{logs.length>0&&<Select label="Automation log run" value={selected} onChange={value=>{selectionPinned.current=true;setSelected(value);}} options={logs.map(item=>({value:`${item.repositoryId}:${item.runId}`,label:`${repositoryName(item.repositoryId)}${item.branch?' · '+item.branch:''}${item.commitSha?' · '+item.commitSha.slice(0,8):''}${item.handoffName?' · '+item.handoffName:''} · ${new Date(item.createdAt).toLocaleString()} · ${item.status}`}))}/>}</div><div ref={logScroll} className="automation-detail-scroll" aria-live="polite" onScroll={event=>{const pane=event.currentTarget;followOutput.current=pane.scrollHeight-pane.clientHeight-pane.scrollTop<=16;}}>
+    <section className="automation-detail-pane" aria-label="Automation log"><div className="automation-detail-log-header"><strong>Log</strong><CopyButton label="Copy automation log" value={logText} disabled={!logText} onError={reason=>setCopyStatus(`Could not copy log: ${String(reason)}`)}/>{entry&&entry.status!=='running'&&<button type="button" aria-label="Delete selected automation run" title="Delete this saved run and log" onClick={()=>setDeleting(entry)}><Trash2 size={15}/></button>}{logs.length>0&&<Select label="Automation log run" value={selected} onChange={value=>{selectionPinned.current=true;setSelected(value);}} options={logs.map(item=>({value:`${item.repositoryId}:${item.runId}`,label:`${repositoryName(item.repositoryId)}${item.branch?' · '+item.branch:''}${item.commitSha?' · '+item.commitSha.slice(0,8):''}${item.handoffName?' · '+item.handoffName:''} · ${new Date(item.createdAt).toLocaleString()} · ${item.status}`}))}/>}</div><div ref={logScroll} className="automation-detail-scroll" aria-live="polite" onScroll={event=>{const pane=event.currentTarget;followOutput.current=pane.scrollHeight-pane.clientHeight-pane.scrollTop<=16;}}>
       {copyStatus&&<p role="status">{copyStatus}</p>}
 
       {entry&&<div className="automation-log-lines"><small>{repositoryName(entry.repositoryId)} · {new Date(entry.createdAt).toLocaleString()}</small>{entry.stdout&&<HighlightedCode value={entry.stdout}/>}{entry.stderr&&<pre className="automation-log-error">{entry.stderr}</pre>}{entry.response&&<pre>{entry.response}</pre>}{entry.activity&&<pre className="automation-log-activity">{entry.activity}</pre>}</div>}
       {error&&<pre className="automation-log-error" role="status">{error}</pre>}
       {entry?.status==='running'&&!entry.stdout&&!entry.stderr&&!entry.response&&!entry.activity&&<p className="panel-copy">Waiting for output…</p>}
-      {!entry&&!error&&(job.state==='running'?<p className="panel-copy">Preparing run log…</p>:job.lastResult?<pre>{job.lastResult}</pre>:<p className="panel-copy">No output yet.</p>)}
+      {!entry&&!error&&(job.state==='running'?<p className="panel-copy">Preparing run log…</p>:logs.length>0&&job.lastResult?<pre>{job.lastResult}</pre>:<p className="panel-copy">No saved runs.</p>)}
     </div></section>
-  </div></section></div>;
+  </div></section>{deleting&&<DeleteAutomationRunDialog entry={deleting} onClose={()=>setDeleting(null)} onDeleted={()=>{setEntry(null);setSelected('');preferredSelection.current='';selectionPinned.current=false;}}/>}</div>;
 }

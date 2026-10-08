@@ -6,7 +6,7 @@ import type { CodexAccount, CodexThreadPage, CodexMessagePage, Commit, GithubCat
 import { identitiesWithRepositoryAccess } from "./repositories";
 
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
-export type AutomationLog={automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;conversation?:Partial<AgentChat>&{id:string;prompt:string};retry?:AutomationRetry};
+export type AutomationLog={dismissed?:boolean;automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;conversation?:Partial<AgentChat>&{id:string;prompt:string};retry?:AutomationRetry};
 export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'>;
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
@@ -154,6 +154,8 @@ export const api = {
     if(!inTauri())return 0;
     return invoke('cleanup_stale_handoffs',{repositoryIds});
   },
+  async sweepAutomationCheckouts(repositoryIds:string[],protectedRunIds:string[]):Promise<number>{if(!inTauri())return 0;return invoke('sweep_automation_checkouts',{repositoryIds,protectedRunIds});},
+  async deleteAutomationLog(automationId:string,repositoryId:string,runId:string):Promise<void>{if(!inTauri()){demoAutomationLogs.delete(`${automationId}:${repositoryId}:${runId}`);return;}return invoke('delete_automation_log',{automationId,repositoryId,runId});},
   async writeAutomationLog(entry:AutomationLog):Promise<void>{
     if(!inTauri()){demoAutomationLogs.set(`${entry.automationId}:${entry.repositoryId}:${entry.runId}`,entry);return;}
     return invoke('write_automation_log',{entry});

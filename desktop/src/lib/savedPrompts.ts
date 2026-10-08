@@ -1,5 +1,5 @@
 import { conversationFromLog } from './conversationRecovery';
-import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAutomationLogs } from './automationLogs';
+import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAutomationLogs, deleteSavedAutomationLog, saveDismissedAutomationLog } from './automationLogs';
 import { api, inTauri, type GithubCiRun, type GithubRepositoryEvent, type AutomationLog } from './api';
 import { listen } from '@tauri-apps/api/event';
 import { useSyncExternalStore } from 'react';
@@ -23,7 +23,28 @@ const retryingRuns=new Set<string>();
 const expiredRuns=new Set<string>();
 let blockedGeneration=0;
 const retryKey=(log:Pick<AutomationLog,'automationId'|'repositoryId'|'runId'>)=>`${log.automationId}:${log.repositoryId}:${log.runId}`;
-export function blockedAutomationRuns(id:string){return [...blockedRuns.values()].filter(log=>log.automationId===id&&log.retry&&!expiredRuns.has(retryKey(log))).sort((a,b)=>b.createdAt-a.createdAt);}
+export function blockedAutomationRuns(id:string){return [...blockedRuns.values()].filter(log=>log.automationId===id&&log.retry&&!log.dismissed&&!expiredRuns.has(retryKey(log))).sort((a,b)=>b.createdAt-a.createdAt);}
+export async function dismissBlockedAutomation(log:AutomationLog){
+  if(currentAutomationRuns().some(run=>run.id===log.runId)||retryingRuns.has(retryKey(log)))throw new Error('Wait for this run to finish.');
+  const dismissed={...log,dismissed:true};blockedGeneration++;
+  await saveDismissedAutomationLog(dismissed);blockedRuns.set(retryKey(log),dismissed);for(const listener of listeners)listener();
+}
+export async function deleteAutomationRun(log:AutomationLog){
+  if(log.status==='running'||currentAutomationRuns().some(run=>run.id===log.runId)||retryingRuns.has(retryKey(log))||currentAgentChats().some(chat=>chat.running&&(chat.id===log.retry?.chatId||chat.automationContext?.runId===log.runId)))throw new Error('Wait for this run to finish.');
+  blockedGeneration++;await deleteSavedAutomationLog(log);blockedRuns.delete(retryKey(log));expiredRuns.delete(retryKey(log));
+  const chatId=log.retry?.chatId||log.conversation?.id;if(chatId&&getAgentChat(chatId))updateAgentChat(chatId,{automationRetry:false,retryable:false});
+  for(const listener of listeners)listener();
+  await cleanupRetainedAutomationCheckouts().catch(error=>console.warn('Retained checkout cleanup:',error));
+}
+export async function cleanupRetainedAutomationCheckouts(){
+  if(!inTauri())return;
+  const settings=await api.handoffSettings();
+  const protectedIds=new Set(currentAutomationRuns().map(run=>run.id));
+  for(const chat of currentAgentChats())if(chat.running&&chat.automationContext)protectedIds.add(chat.automationContext.runId);
+  for(const log of blockedRuns.values())if(!expiredRuns.has(retryKey(log))&&Date.now()-log.createdAt<settings.retentionHours*3600000){protectedIds.add(log.runId);const id=log.retry?.chatId&&getAgentChat(log.retry.chatId)?.automationContext?.runId;if(id)protectedIds.add(id);}
+  const repos=(await api.repositories()).filter(repo=>repo.localPath).map(repo=>repo.id);
+  await api.sweepAutomationCheckouts(repos,[...protectedIds]);
+}
 function originalConversationRun(chatId:string){
   const chat=getAgentChat(chatId);if(!chat||chat.running)return;
   const log=[...blockedRuns.values()].find(log=>log.retry?.chatId===chatId||(!log.retry?.chatId&&log.retry?.incoming&&chat.repositoryId===log.repositoryId&&chat.messages.some(message=>message.role==='user'&&message.text.includes(log.retry!.incoming!.id))));
@@ -248,7 +269,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
         for(const {name} of (job.emitsHandoffs||[]).map(emittedHandoff))outgoing[name]=await api.handoffOutputPath(repositoryId,name,runId);
         let agentContext=(retry?.chatId?getAgentChat(retry.chatId)?.automationContext:undefined)||((eventSha||eventBranch||ciRun||incoming)?{runId,commit:eventSha||ciRun?.headSha||(eventBranch?`refs/heads/${eventBranch}`:undefined)}:undefined);
         if(job.kind==='prompt'&&agentContext&&!agentContext.commit)agentContext={...agentContext,commit:(await api.repositoryCommitState(repositoryId)).head};
-        const actionPrompt=automationPromptWithHandoffs((job.kind==='prompt'&&agentContext?'This automation runs in an isolated worktree at the selected revision. The triggering branch is context, not the checkout branch. Preserve any changes for review; do not modify the original working tree.\n\n':'')+ciContext+(eventSha?`Trigger commit: ${eventSha}. Branch: ${eventBranch||'unknown'}.\n\n`:'')+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing,(job.emitsHandoffs||[]).map(emittedHandoff).filter(item=>item.conditional).map(item=>item.name));
+        const actionPrompt=automationPromptWithHandoffs((job.kind==='prompt'&&agentContext?'This automation runs in an isolated worktree at the selected revision. The triggering branch is context, not the checkout branch. Do not remove this app-owned worktree yourself or modify the original working tree. Preserve uncommitted changes and unique commits for review. After your turn completes, Cerberus removes clean app-owned worktrees whose commits are referenced elsewhere; retained worktrees are checked again on startup and periodically after the blocked-run retention period. Dirty worktrees and unique commits are never force-deleted. Report the worktree as retained at the end of your turn and cleanup as pending app verification, not as completed by you.\n\n':'')+ciContext+(eventSha?`Trigger commit: ${eventSha}. Branch: ${eventBranch||'unknown'}.\n\n`:'')+job.prompt,incoming?.repositoryId===repositoryId?incoming:undefined,outgoing,(job.emitsHandoffs||[]).map(emittedHandoff).filter(item=>item.conditional).map(item=>item.name));
         if(job.kind==='shell'){incomingStarted=true;const shell=await api.runAutomationShell(repositoryId,job.prompt,chunk=>{
           if(chunk.stream==='stderr')stderr=(stderr+chunk.text).slice(-2_000_000);else stdout=(stdout+chunk.text).slice(-2_000_000);
           updateAutomationLog(log,{stdout,stderr});
@@ -563,7 +584,7 @@ async function syncFileWatchers(){
   const errors=await api.watchAutomationRepositories(ids);
   await Promise.allSettled(ids.filter(id=>!fresh.includes(id)).map(id=>recordAutomationCommit(id)));
   if(errors.length)console.warn('Automation file watchers:',errors.join('; '));
-  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()).catch(error=>console.warn('Handoff cleanup:',error));}
+  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Handoff cleanup:',error));}
 }
 export async function recoverAutomationConversations(){
   await initializeAgentChats();
@@ -592,7 +613,7 @@ export async function recoverAutomationConversations(){
   }catch(error){console.warn('Could not recover automation conversation history:',error);}
 }
 export function startSavedPromptScheduler(){
-  void recoverAutomationConversations().then(refreshBlockedAutomations);
+  void recoverAutomationConversations().then(refreshBlockedAutomations).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Automation recovery/cleanup:',error));
   // The dashboard remains mounted when the Tauri window is hidden. A crash or
   // restart leaves a running job paused for inspection instead of retrying it.
   let stopped=false;let unlisten:(()=>void)|undefined;let unlistenGit:(()=>void)|undefined;

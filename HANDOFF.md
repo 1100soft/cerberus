@@ -694,3 +694,20 @@ streaming checkpoints, suspend waits, exact-context recovery, existing chat chec
 WebKit automation action/persistence fixtures, and viewport/zoom checks passed.
 Clippy completed with existing warnings; formatting of new modules and diff
 whitespace checks passed. Native changes require a desktop rebuild/restart.
+
+## Run management and eventual checkout cleanup (2026-10-08)
+
+Added native active-checkout leases to serialize cleanup against starts, plus
+startup/30-minute safe cleanup sweeps after blocked retention. Agent instructions
+explicitly assign checkout cleanup to Cerberus and require reporting verification
+as pending. Dirty/unique work is retained without force. Compact run rows include
+exact context with inline retry, dismiss, and delete actions. Dismissal is a durable
+log flag; conversation retries remain available. Confirmed run/log deletion waits
+for pending checkpoints, removes cache/disk/retry, and protects active runs.
+Conversation and handoff history stay independent. The settings gear opens general
+Automation settings, currently containing handoff retention.
+
+Validation for run management: production build passed; native serial suite passed
+117 tests (five ignored). WebKit actions verified persistent dismissals and confirmed
+log deletion, alongside exact retries; settings/persistence and multi-size viewport
+checks passed. Diff whitespace and new checkout module formatting passed.

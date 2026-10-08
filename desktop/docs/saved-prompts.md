@@ -182,3 +182,20 @@ resending the prompt. Forced sleep, logout, app termination, and provider/networ
 failures can still disconnect a session. Its transcript, session ID, worktree, and
 handoff remain available for explicit retry/resume. Sleep protection cannot promise
 that a remote provider will keep a disconnected request alive.
+
+## Automation settings and saved-run cleanup
+
+The top-right gear opens Automation settings; handoff retention is one setting.
+Active and blocked rows summarize repository, branch/commit or handoff, status,
+and time, using one line when space allows. Dismiss hides a blocked row persistently
+while retaining its log and conversation retry. Delete on a blocked row or in the
+log dialog confirms permanent removal of that saved run and its log/retry action.
+Conversation history and retained handoffs have independent lifetimes and stay.
+Running contexts cannot be deleted.
+
+Agents must leave their app-owned execution worktree in place and report cleanup
+as pending app verification. Clean checkouts whose commits remain referenced are
+removed after successful completion. Startup and periodic checks revisit retained
+checkouts, protecting active native jobs and blocked runs for the handoff retention
+period. Dirty worktrees and unique commits always remain for manual review; the app
+never forces their deletion. Dismissing a row does not discard work or its lease.
