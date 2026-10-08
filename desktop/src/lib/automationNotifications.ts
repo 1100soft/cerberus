@@ -7,6 +7,7 @@ function read():AutomationNotice[]{try{const saved=JSON.parse(localStorage.getIt
 let notices=read();
 function publish(next:AutomationNotice[]){notices=next.slice(0,100);try{localStorage.setItem(key,JSON.stringify(notices));}catch{/* Keep notifications for this session. */}for(const listener of listeners)listener();}
 export function addAutomationNotice(input:Omit<AutomationNotice,'id'|'createdAt'|'read'>){publish([{...input,id:crypto.randomUUID(),createdAt:Date.now(),read:false},...notices]);}
+export function currentAutomationNotices(){return notices;}
 export function markAutomationNoticesRead(){if(notices.some(item=>!item.read))publish(notices.map(item=>({...item,read:true})));}
 export function clearAutomationNotices(){publish([]);}
 export function useAutomationNotices(){return useSyncExternalStore(listener=>{listeners.add(listener);return()=>{listeners.delete(listener);};},()=>notices);}

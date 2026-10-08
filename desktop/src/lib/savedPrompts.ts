@@ -3,7 +3,7 @@ import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAu
 import { api, inTauri, type GithubCiRun, type GithubRepositoryEvent, type AutomationLog } from './api';
 import { listen } from '@tauri-apps/api/event';
 import { useSyncExternalStore } from 'react';
-import { addAutomationNotice } from './automationNotifications';
+import { addAutomationNotice, currentAutomationNotices } from './automationNotifications';
 import type { Provider } from './conversationCache';
 import { getAgentChat, currentAgentChats, initializeAgentChats, restoreAgentConversation, updateAgentChat, latestAgentChat, subscribeAgentChats, runExternalAutomation, sendAgentMessage, waitForAgentChat, type AgentProfile } from './agentChats';
 import { automationAccount } from './automationAccounts';
@@ -259,11 +259,12 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       const runId=execution.id,createdAt=execution.startedAt;
       executions.set(executionKey,{...execution,status:'running'});publishExecutions();
       const log={automationId:id,repositoryId,runId,createdAt,branch:execution.branch,commitSha:execution.commitSha,handoffName:execution.handoffName,handoffId:execution.handoffId,kind:job.kind==='shell'?'shell' as const:job.kind==='git'?'git' as const:job.kind==='notification'?'notification' as const:'agent' as const,status:'running' as const,command:job.prompt,stdout:'',stderr:'',response:'',activity:''};
+      if(job.kind==='notification'&&(job.emitsHandoffs||[]).some(value=>!emittedHandoff(value).conditional))log.activity='Notification handoff emission pending.';
       currentLog=log;
       await beginAutomationLog(log);
       if(job.kind==='notification'){
         incomingStarted=true;
-        addAutomationNotice({automationId:id,repositoryId,title:`${job.title} · ${repositoryLabel}`,message:job.prompt,status:'message'});
+        addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} · ${repositoryLabel}`,message:job.prompt,status:'message'});
         const emissionId=runId;let emissionError='';
         for(const {name,conditional} of (job.emitsHandoffs||[]).map(emittedHandoff)){if(conditional)continue;try{if(await api.publishHandoff(repositoryId,name,emissionId,job.prompt))void tick();}catch(error){failures++;emissionError+=` Could not emit ${name}: ${String(error)}`;}}
         await finishAutomationLog({...log,status:emissionError?'error':'completed',response:job.prompt,stderr:emissionError});
@@ -602,6 +603,24 @@ async function syncFileWatchers(){
   if(errors.length)console.warn('Automation file watchers:',errors.join('; '));
   if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Handoff cleanup:',error));}
 }
+export async function recoverNotificationAutomations(){
+  for(const job of jobs.filter(item=>item.kind==='notification'))try{
+    const summaries=await api.listAutomationLogs(job.id);
+    let interruptedRun=false;
+    for(const summary of summaries.filter(item=>item.kind==='notification'&&item.status==='running')){
+      if(currentAutomationRuns().some(run=>run.id===summary.runId))continue;
+      const log=await api.readAutomationLog(job.id,summary.repositoryId,summary.runId);
+      // Recheck after the read: recovery must never finalize an active execution.
+      if(currentAutomationRuns().some(run=>run.id===log.runId)||log.status!=='running')continue;
+      const delivered=currentAutomationNotices().some(notice=>notice.automationId===job.id&&notice.repositoryId===log.repositoryId&&notice.runId===log.runId&&notice.status==='message');
+      const confirmed=delivered&&!log.activity;
+      const recovered:AutomationLog={...log,status:confirmed?'completed':'error',response:delivered?log.command:log.response,stderr:confirmed?log.stderr:'The app restarted before notification completion was recorded. Delivery or handoff emission could not be confirmed. Future triggers remain enabled; this run was not replayed.',retry:undefined};
+      await finishAutomationLog(recovered);
+      interruptedRun ||= !confirmed;
+    }
+    if(job.state==='running'&&!isJobRunning(job.id))change(job.id,{state:interruptedRun?'error':'completed',...(interruptedRun?{lastResult:'Notification interrupted by app restart. Future triggers remain enabled.'}:{} )});
+  }catch(error){console.warn('Could not recover notification automation:',error);}
+}
 export async function recoverAutomationConversations(){
   await initializeAgentChats();
   for(const job of jobs.filter(job=>job.kind==='prompt'||!job.kind))try{
@@ -629,7 +648,7 @@ export async function recoverAutomationConversations(){
   }catch(error){console.warn('Could not recover automation conversation history:',error);}
 }
 export function startSavedPromptScheduler(){
-  void recoverAutomationConversations().then(refreshBlockedAutomations).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Automation recovery/cleanup:',error));
+  void recoverNotificationAutomations().then(recoverAutomationConversations).then(refreshBlockedAutomations).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Automation recovery/cleanup:',error));
   // The dashboard remains mounted when the Tauri window is hidden. A crash or
   // restart leaves a running job paused for inspection instead of retrying it.
   let stopped=false;let unlisten:(()=>void)|undefined;let unlistenGit:(()=>void)|undefined;

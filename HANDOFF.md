@@ -786,3 +786,21 @@ worktree. Main, wip, autosave, and existing recovery stashes are retained.
 Cleanup validation: production build, TypeScript and dropdown checks passed
 (existing bundle warnings remain); native tests passed 117 with five ignored,
 and binary/doc tests passed. Diff whitespace checks passed.
+
+## Notification interruption recovery (2026-10-08)
+
+Commit reminder had a stranded running log. Startup recovery only considered
+agent automations, while the scheduler refuses orphaned running jobs. A restart
+between the initial log write and final completion could therefore pause even a
+notification indefinitely. Startup now finalizes orphan notification logs and
+clears the stale job state without disabling or replaying them. Notification
+notices carry run IDs as persisted delivery evidence. Confirmed delivery with no
+pending handoff emission is recovered as completed; uncertain delivery/emission
+is preserved as an error and future triggers proceed. Active runs are protected.
+The initial log records pending handoff emission independently of later edits.
+
+Validation: production build/TypeScript/dropdown checks passed. Expanded WebKit
+action fixtures cover legacy orphan recovery, enabled-state preservation, next
+run completion, and confirmed delivery recovery. First run hit the existing
+140% menu-placement check; rerun passed all assertions, with a WebKit allocator
+diagnostic on child teardown. Whitespace checks passed.
