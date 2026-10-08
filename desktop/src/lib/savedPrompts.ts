@@ -1,5 +1,5 @@
 import { conversationFromLog } from './conversationRecovery';
-import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAutomationLogs, deleteSavedAutomationLog, saveDismissedAutomationLog } from './automationLogs';
+import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAutomationLogs, deleteSavedAutomationLog, saveDismissedAutomationLog, notifyAutomationLogViews } from './automationLogs';
 import { api, inTauri, type GithubCiRun, type GithubRepositoryEvent, type AutomationLog } from './api';
 import { listen } from '@tauri-apps/api/event';
 import { useSyncExternalStore } from 'react';
@@ -29,12 +29,28 @@ export async function dismissBlockedAutomation(log:AutomationLog){
   const dismissed={...log,dismissed:true};blockedGeneration++;
   await saveDismissedAutomationLog(dismissed);blockedRuns.set(retryKey(log),dismissed);for(const listener of listeners)listener();
 }
-export async function deleteAutomationRun(log:AutomationLog){
-  if(log.status==='running'||currentAutomationRuns().some(run=>run.id===log.runId)||retryingRuns.has(retryKey(log))||currentAgentChats().some(chat=>chat.running&&(chat.id===log.retry?.chatId||chat.automationContext?.runId===log.runId)))throw new Error('Wait for this run to finish.');
-  blockedGeneration++;await deleteSavedAutomationLog(log);blockedRuns.delete(retryKey(log));expiredRuns.delete(retryKey(log));
+function runDeletionProtected(log:AutomationLog){return log.status==='running'||currentAutomationRuns().some(run=>run.id===log.runId)||retryingRuns.has(retryKey(log))||currentAgentChats().some(chat=>chat.running&&(chat.id===log.retry?.chatId||chat.automationContext?.runId===log.runId));}
+export async function deleteAutomationRun(log:AutomationLog,cleanup=true,notify=true){
+  if(runDeletionProtected(log))throw new Error('Wait for this run to finish.');
+  blockedGeneration++;await deleteSavedAutomationLog(log,notify);blockedRuns.delete(retryKey(log));expiredRuns.delete(retryKey(log));
   const chatId=log.retry?.chatId||log.conversation?.id;if(chatId&&getAgentChat(chatId))updateAgentChat(chatId,{automationRetry:false,retryable:false});
-  for(const listener of listeners)listener();
+  if(notify)for(const listener of listeners)listener();
+  if(cleanup)await cleanupRetainedAutomationCheckouts().catch(error=>console.warn('Retained checkout cleanup:',error));
+}
+export async function deleteAllAutomationRuns(automationId:string){
+  // Read the full native history, including dismissed runs and other repositories.
+  const logs=await api.listAutomationLogs(automationId);let deleted=0,kept=0;const errors:string[]=[];
+  for(const summary of logs){
+    if(summary.status==='running'){kept++;continue;}
+    try{const log=await api.readAutomationLog(automationId,summary.repositoryId,summary.runId);
+      if(runDeletionProtected(log)){kept++;continue;}
+      await deleteAutomationRun(log,false,false);deleted++;
+    }catch(error){errors.push(`${summary.runId}: ${String(error)}`);}
+  }
+  notifyAutomationLogViews(automationId);for(const listener of listeners)listener();
   await cleanupRetainedAutomationCheckouts().catch(error=>console.warn('Retained checkout cleanup:',error));
+  if(errors.length)throw new Error(`Deleted ${deleted} saved runs; kept ${kept} active runs. Some logs could not be deleted: ${errors.join('; ')}`);
+  return {deleted,kept};
 }
 export async function cleanupRetainedAutomationCheckouts(){
   if(!inTauri())return;
@@ -188,7 +204,7 @@ export function reorderSavedPrompts(ids:string[]){
   if(ids.length!==jobs.length||new Set(ids).size!==jobs.length||ids.some(id=>!jobs.some(job=>job.id===id)))throw new Error('Automation order is out of date.');
   const byId=new Map(jobs.map(job=>[job.id,job]));publish(ids.map(id=>byId.get(id)!));
 }
-export function acknowledgeAutomationError(id:string){const job=jobs.find(item=>item.id===id);if(job?.state==='error'&&job.errorUnread!==false)change(id,{errorUnread:false});}
+export function acknowledgeAutomationError(id:string){const job=jobs.find(item=>item.id===id);if(job&&(job.errorUnread===true||job.state==='error'&&job.errorUnread!==false))change(id,{errorUnread:false});}
 function change(id:string,update:Partial<SavedPrompt>){if(update.state==='error'){executionFailures.add(id);update={...update,errorUnread:true};}if(update.state&&update.state!=='running'&&isJobRunning(id))update={...update,state:'running'};publish(jobs.map(job=>job.id===id?{...job,...update}:job));}
 async function repositoryAgentBusy(repositoryId:string){
   if(latestAgentChat(repositoryId)?.running)return true;

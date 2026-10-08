@@ -26,10 +26,11 @@ export async function finishAutomationLog(entry:AutomationLog){
   const id=key(entry);window.clearTimeout(timers.get(id));timers.delete(id);publish(entry);await persist(entry);
 }
 
-export async function deleteSavedAutomationLog(entry:AutomationLog){
+export function notifyAutomationLogViews(automationId:string){for(const listener of listeners)listener(automationId);}
+export async function deleteSavedAutomationLog(entry:AutomationLog,notify=true){
   const id=key(entry);window.clearTimeout(timers.get(id));timers.delete(id);
   await writes.get(id)?.catch(()=>{});
   await api.deleteAutomationLog(entry.automationId,entry.repositoryId,entry.runId);
-  entries.delete(id);for(const listener of listeners)listener(entry.automationId);
+  entries.delete(id);if(notify)notifyAutomationLogViews(entry.automationId);
 }
 export async function saveDismissedAutomationLog(entry:AutomationLog){await persist(entry);publish(entry);}

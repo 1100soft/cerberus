@@ -711,3 +711,21 @@ Validation for run management: production build passed; native serial suite pass
 117 tests (five ignored). WebKit actions verified persistent dismissals and confirmed
 log deletion, alongside exact retries; settings/persistence and multi-size viewport
 checks passed. Diff whitespace and new checkout module formatting passed.
+
+## Bulk logs and acknowledgement regression (2026-10-08)
+
+Added confirmed Delete all for one automation across all repositories/dismissed runs,
+using full native history, serialized existing deletion, and active-run protection.
+Batch cleanup runs once; partial failures include deletion counts and error details.
+Fixed acknowledgement incorrectly requiring overall error state (concurrent jobs
+can stay running with errorUnread true). The open log subscribes to state updates
+and clears unread flags while open. Blocked row red borders now reflect unread
+state, retaining neutral retry rows after inspection. Regression fixtures cover
+concurrent errors, persisted acknowledgement, new errors after closure, cancelled
+bulk deletion, cross-repository deletion, and retained active runs.
+
+Validation: production build/dropdown/type checks, chat and conversation-recovery
+checks, expanded WebKit action regressions, and multi-size/zoom viewport checks
+passed. Bulk deletion refreshes log/cache observers once per batch. A WebKit child
+teardown diagnostic appeared after one successful action run; a clean rerun passed
+all assertions without that diagnostic. No new native changes in this follow-up.

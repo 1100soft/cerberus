@@ -1089,7 +1089,7 @@ input[type="number"] { text-align: right; }
 .automation-list-header-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 .automation-context-open { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; flex: 1 1 220px; min-width: 0; text-align: left; border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; }
-.automation-context-run.failed { border-color: var(--danger); }
+.automation-context-run.failed.unread { border-color: var(--danger); }
 
 .automation-list-header { position: relative; padding-right: 38px; }
 .automation-list-header .automation-settings-button { position: absolute; right: 0; top: 0; padding: 6px; }
@@ -1098,3 +1098,6 @@ input[type="number"] { text-align: right; }
 .automation-context-label { flex: 1 1 auto; }
 .automation-context-status, .automation-context-run time { flex: none; white-space: nowrap; }
 .automation-context-run > button:not(.automation-context-open) { flex: none; display: inline-flex; align-items: center; padding: 4px; }
+
+.automation-detail-log-header { flex-wrap: wrap; }
+.automation-detail-log-header .app-select { flex: 1 1 160px; }

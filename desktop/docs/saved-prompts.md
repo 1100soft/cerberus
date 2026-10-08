@@ -199,3 +199,12 @@ removed after successful completion. Startup and periodic checks revisit retaine
 checkouts, protecting active native jobs and blocked runs for the handoff retention
 period. Dirty worktrees and unique commits always remain for manual review; the app
 never forces their deletion. Dismissing a row does not discard work or its lease.
+
+The log dialog's **Delete all** removes every completed or blocked log for that
+automation across its repositories, including dismissed entries, after confirmation.
+Active contexts and their logs are kept. Cancelling changes nothing; deletion reports
+its count and any errors, and leaves conversations/handoff payloads independent.
+Opening the log acknowledges the automation's unread error even if another context
+is still running. Errors arriving while the log stays open are acknowledged too;
+new failures after closing it show a fresh indicator. Blocked runs remain available
+for retry with neutral styling after acknowledgement.
