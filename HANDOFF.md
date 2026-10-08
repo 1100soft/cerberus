@@ -755,3 +755,34 @@ doc tests passed: 117 unit tests, five ignored; the real logind lifecycle test
 passed separately. Clippy completed with remaining pre-existing warnings. The
 Cursor termination assertion race was corrected after its initial failures.
 Ignored private data, dependencies and build outputs remain excluded.
+
+## Automation loop reconciliation and cleanup (2026-10-08)
+
+The extra revise/integrate runs consumed newly emitted handoffs, not automatic
+replays of retained consumed handoffs. An explicitly retried older CI integration
+published 993893e while the local checkpoint ed7a55a still contained that fix with
+a different comment. Publish requested revision over that comment conflict;
+4454460 aligned it. A subsequent integration requested another revision even
+though that small correction was already in the target. Several agent reports
+also supplied incorrect full upstream SHAs. Prompts need verified Git evidence,
+the complete original publication goal, and terminal handling of duplicate/no-op
+corrections. The user disabled Review while another AI improves the prompts.
+
+Local wip now reconciles the checkpoint, its comment correction, and upstream CI
+history without dropping checkpoint features. No remote publication was performed
+during this cleanup. Five inactive temporary worktrees were safely removed; final
+HEAD .revision markers preserve continuation context. Nine obsolete temporary
+branches are removed with normal merged-branch deletion after reconciliation.
+Seven obsolete handoff payload copies from this resolved lineage were retired
+from scheduler storage; conversation/log audit history and unrelated handoffs
+remain intact. Pending/claimed payloads were not removed.
+
+Recovery backup: ~/.local/share/dev.gitcerberus.app/handoff-recovery/
+cleanup-20261008T194404Z/. Includes the retired handoff payloads and the reviewed
+worktree's package-lock.json plus binary diff: npm had only added dev metadata
+to three packages. That incidental change was restored before removing its
+worktree. Main, wip, autosave, and existing recovery stashes are retained.
+
+Cleanup validation: production build, TypeScript and dropdown checks passed
+(existing bundle warnings remain); native tests passed 117 with five ignored,
+and binary/doc tests passed. Diff whitespace checks passed.
