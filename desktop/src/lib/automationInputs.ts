@@ -1,0 +1,15 @@
+export type AutomationInput={name:string;label?:string;type:'text'|'number'|'boolean'|'choice';options?:string[];defaultValue?:string;required?:boolean};
+export type AutomationInputValues=Record<string,string|number|boolean>;
+export function inputDefinitionsError(inputs:AutomationInput[]){
+ const names=new Set<string>();
+ for(const input of inputs){if(!['text','number','boolean','choice'].includes(input.type))return 'Choose a supported input type.';if(input.type==='boolean'&&input.defaultValue&&!['true','false'].includes(input.defaultValue))return 'Boolean defaults must be true or false.';const name=input.name.toUpperCase();if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(input.name))return 'Input names must use letters, numbers, and underscores, starting with a letter or underscore.';if(names.has(name))return 'Input names must be unique, ignoring case.';names.add(name);if(input.type==='choice'&&(!input.options?.length||input.options.some(value=>!value.trim())||new Set(input.options).size!==input.options.length))return 'Choices need distinct, nonempty options.';if(input.defaultValue&&input.type==='number'&&!Number.isFinite(Number(input.defaultValue)))return 'Number defaults must be finite numbers.';if(input.defaultValue&&input.type==='choice'&&!input.options?.includes(input.defaultValue))return 'A choice default must match an option.';}
+ return '';
+}
+export function initialInputValues(inputs:AutomationInput[]):AutomationInputValues{return Object.fromEntries(inputs.map(input=>[input.name,input.type==='boolean'?input.defaultValue==='true':input.type==='choice'?input.defaultValue||input.options?.[0]||'':input.defaultValue||'']));}
+export function resolveInputValues(inputs:AutomationInput[],supplied:AutomationInputValues):AutomationInputValues{
+ const error=inputDefinitionsError(inputs);if(error)throw Error(error);
+ const result:AutomationInputValues=Object.create(null),defaults=initialInputValues(inputs);
+ for(const input of inputs){const value=Object.hasOwn(supplied,input.name)?supplied[input.name]:defaults[input.name];if(input.type==='boolean'){if(typeof value!=='boolean')throw Error(`${input.name}: choose true or false.`);result[input.name]=value;continue;}if(value===''||value===undefined){if(input.required!==false)throw Error(`${input.label||input.name} is required.`);result[input.name]='';continue;}if(input.type==='number'){if(!['string','number'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value)))throw Error(`${input.name}: enter a finite number.`);result[input.name]=Number(value);}else{if(typeof value!=='string'||value.includes('\0'))throw Error(`${input.name}: enter text without null characters.`);if(input.type==='choice'&&!input.options?.includes(value))throw Error(`${input.name}: choose an available option.`);result[input.name]=value;}}
+ return result;
+}
+export function inputEnvironment(values:AutomationInputValues){return Object.fromEntries(Object.entries(values).map(([name,value])=>[`CERBERUS_INPUT_${name.toUpperCase()}`,String(value)]));}

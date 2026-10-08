@@ -75,6 +75,7 @@ jobs:
           node scripts/check-conversation-display.mjs
           node scripts/check-chat.mjs
           node scripts/check-conversation-recovery.mjs
+          node scripts/check-automation-inputs.mjs
       - name: Compile native app and tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --no-run
       - name: Native regression tests

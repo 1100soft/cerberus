@@ -804,3 +804,34 @@ action fixtures cover legacy orphan recovery, enabled-state preservation, next
 run completion, and confirmed delivery recovery. First run hit the existing
 140% menu-placement check; rerun passed all assertions, with a WebKit allocator
 diagnostic on child teardown. Whitespace checks passed.
+
+## Configurable manual automation inputs (2026-10-08)
+
+Added a compact Manual inputs section beside outgoing handoffs in the automation
+editor. Users define names, labels, types, options, defaults, and required text/
+number inputs. Run once collects text/number fields, boolean checkboxes, radio
+choices (up to four), or larger choice dropdowns. Values are validated before
+claiming the trigger handoff. Agents receive typed JSON context; Shell exports
+CERBERUS_INPUT_<UPPERCASE_NAME> without interpolating command source. Automatic
+triggers omit manual inputs. Values are persisted in native logs, displayed and
+copied with log content, and saved in blocked retry snapshots. Recovered agent
+runs also retain those inputs. Input names cannot collide ignoring case.
+
+The editor stays folded by default to preserve the compact existing dialog.
+Docs and in-app help include the release major/minor/patch example and the Shell
+variable convention. CI runs the new pure input validation/default/environment
+regressions. WebKit fixtures cover editor persistence, defaults, required fields,
+runtime control types, literal Shell context, Agent JSON prompts, and retry
+values after changing defaults. Native tests verify literal environment export
+and JSON log persistence. No paid agent turn was initiated during validation.
+
+Manual-input validation completed: production build, TypeScript/dropdown checks,
+pure input regression suite, actionlint, Python syntax, and whitespace checks
+passed. Native tests passed 117 (five ignored), with binary/doc tests passing;
+Clippy completed with existing 20 library/17 test warnings. WebKit persistence/
+Agent delivery and action/retry fixtures passed; new long-choice keyboard/zoom
+checks passed at 100%, 140%, and 150%. Four-window viewport checks passed. The
+first layout run caught an extra empty-editor row; folding it beside handoffs
+resolved the regression. A WebKit teardown allocator diagnostic occurred after
+one successful fixture run; final action rerun passed without it. Desktop native
+changes require rebuild/restart. Changes remain uncommitted.

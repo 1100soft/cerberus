@@ -286,10 +286,11 @@ script = r"""
  const {savePrompt,savedPrompts,runSavedPrompt,checkSavedPromptSchedule,recordAutomationFileChange,recordAutomationCommit}=await import(savedPath);
  const calls=[];api.runNewAgentConversation=async(repo,provider,identity,mode,prompt)=>{calls.push({repo,provider,identity,mode,prompt});return {text:'Fixture reply',sessionId:'session-'+repo};};
  const targetIds=jobs[0].repositoryIds.slice(0,2);
- savePrompt({id:'new-fixture',repositoryId:targetIds[0],repositoryIds:targetIds,provider:'claude',threadId:'',title:'New Claude conversation',prompt:'Summarize this repository',trigger:'manual',minutes:60,enabled:false,nextAt:Date.now(),editor:'vscode',target:'new',route:'identity',mode:'edit',accountsByRepository:Object.fromEntries(targetIds.map((id,index)=>[id,{profile:{id:'claude-'+index,provider:'claude',label:'Fixture'},route:'identity'}]))});
- await runSavedPrompt('new-fixture',true,targetIds[0]);
+ savePrompt({id:'new-fixture',repositoryId:targetIds[0],repositoryIds:targetIds,provider:'claude',threadId:'',title:'New Claude conversation',prompt:'Summarize this repository',manualInputs:[{name:'version',type:'choice',options:['major','minor','patch'],defaultValue:'patch'}],trigger:'manual',minutes:60,enabled:false,nextAt:Date.now(),editor:'vscode',target:'new',route:'identity',mode:'edit',accountsByRepository:Object.fromEntries(targetIds.map((id,index)=>[id,{profile:{id:'claude-'+index,provider:'claude',label:'Fixture'},route:'identity'}]))});
+ await runSavedPrompt('new-fixture',true,targetIds[0],undefined,undefined,undefined,undefined,undefined,undefined,{version:'minor'});
  await runSavedPrompt('new-fixture',true,targetIds[1]);
  assert(calls.length===2&&calls[0].identity==='claude-0'&&calls[1].identity==='claude-1','Agent did not use each repository account');
+ assert(calls[0].prompt.includes('{"version":"minor"}')&&calls[1].prompt.includes('{"version":"patch"}'),'Agent prompt lost manual inputs or defaults');
  assert(calls.every(call=>call.mode==='full'),'Write automation did not receive Git/network permissions');
  assert(JSON.parse(localStorage.getItem('gitcerberus.agentChats')).some(chat=>chat.session?.sessionId==='session-'+targetIds[1]),'New chat not recorded in app history');
  assert(targetIds.every(id=>JSON.parse(localStorage.getItem('gitcerberus.agentChats')).find(chat=>chat.session?.sessionId==='session-'+id)?.name==='New Claude conversation'),'Automation title was not used as conversation name');
