@@ -26,6 +26,6 @@ if [ "$ready" != true ]; then
   exit 1
 fi
 # Each fixture owns its mocked state; run sequentially.
-for fixture in check-saved-prompts.py check-ci-automation.py check-handoffs.py check-card-reorder.py check-viewport.py; do
+for fixture in check-automation-actions.py check-saved-prompts.py check-ci-automation.py check-handoffs.py check-card-reorder.py check-viewport.py; do
   xvfb-run --auto-servernum /usr/bin/python3 "scripts/$fixture"
 done

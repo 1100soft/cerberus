@@ -32,7 +32,9 @@ pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,reposit
             }
         }else{session.send_and_wait(MessageOptions::new(prompt).with_wait_timeout(Duration::from_secs(7*24*3600))).await.map_err(|e|e.to_string())?};Ok::<_,String>(reply)};
         tokio::pin!(reply_future);
-        let reply=loop{tokio::select!{reply=&mut reply_future=>break reply?,_=tokio::time::sleep(Duration::from_millis(250))=>{if deadline.expired(){let _=session.abort().await;return Err("Copilot timed out after 15 minutes of active execution. The conversation is preserved.".into());}},event=events.recv(),if output.is_some()=>{match event{Ok(event)=>{if let Some(output)=&output{let _=output.send(serde_json::to_value(event).map_err(|error|error.to_string())?);}},Err(_)=>{tokio::time::sleep(Duration::from_millis(10)).await;}}}}};
+        let mut deadline_tick=tokio::time::interval(Duration::from_millis(250));
+        deadline_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let reply=loop{tokio::select!{reply=&mut reply_future=>break reply?,_=deadline_tick.tick()=>{if deadline.expired(){let _=session.abort().await;return Err("Copilot timed out after 15 minutes of active execution. The conversation is preserved.".into());}},event=events.recv(),if output.is_some()=>{match event{Ok(event)=>{if let Some(output)=&output{let _=output.send(serde_json::to_value(event).map_err(|error|error.to_string())?);}},Err(_)=>{tokio::time::sleep(Duration::from_millis(10)).await;}}}}};
         let direct=reply.as_ref().and_then(|event|response_text(&event.data));
         let (text,diagnostic)=if let Some(text)=direct{(text.to_owned(),String::new())}else{
             let messages=session.get_events().await.map_err(|e|e.to_string())?;

@@ -127,7 +127,7 @@ An automation card contains its definition and a Runs section. Each active conte
 
 Execution guards use automation + repository + branch + commit + handoff emission, rather than a single automation-wide lock. Scheduled contexts in separate repositories can progress concurrently, and completing one does not clear another’s running state or output. Explicit disabling affects future triggers; failures never disable the definition.
 
-Agent actions with commit, branch, CI, or handoff inputs start in independent worktrees under the application data directory’s `automation-worktrees/<repository>/<run>` folder, on `private/automation-<run>` branches. Commit/CI actions start at the selected SHA. A branch-only context starts at that branch; a handoff without a selected revision starts at the repository’s HEAD. The original checkout stays intact. Clean app-owned checkouts are removed after successful completion when their commits are still reachable from another local or remote ref. Dirty worktrees, unique commits, agent-created branches, and blocked contexts remain for review and resume. A later continuation recreates a removed clean checkout at its recorded revision. Use safeguarded branch removal after review to clean retained work. File-change and ordinary interval/manual agent jobs retain the primary checkout so they can see current uncommitted files, and its one-writer guard remains in effect. Shell actions retain their existing working directory and receive the selected context through environment variables.
+Agent actions with commit, branch, CI, or handoff inputs start in independent worktrees under the application data directory’s `automation-worktrees/<repository>/<run>` folder, on `private/automation-<run>` branches. Commit/CI actions start at the selected SHA. A branch-only context starts at that branch; a handoff without a selected revision starts at the repository’s HEAD. The original checkout stays intact. Clean app-owned checkouts are removed after successful completion when their commits are still reachable from another local or remote ref. Dirty worktrees, unique commits, agent-created branches, and blocked contexts remain for review and resume. A later continuation recreates a removed clean checkout at its final saved HEAD, including any commits the agent made after the trigger. Use safeguarded branch removal after review to clean retained work. File-change and ordinary interval/manual agent jobs retain the primary checkout so they can see current uncommitted files, and its one-writer guard remains in effect. Shell actions retain their existing working directory and receive the selected context through environment variables.
 
 Commit history shows date and time in Git date order. The manual commit picker sorts recent choices by commit time, newest first, with visible timestamps. Reselecting the current branch/repository/condition set does not start a loader. History requests survive repository metadata refreshes, have a 30-second UI timeout, and offer refresh/retry; late cancelled/timed-out responses cannot overwrite the current branch’s commits. Native history runs off the UI thread.
 
@@ -172,8 +172,8 @@ account assignment when reconstructing display/retry metadata.
 
 The app holds a system sleep inhibitor while its native agent/shell jobs run and
 while it detects active local agents or automation contexts. It releases the lock
-when work finishes. Linux uses logind; macOS uses `caffeinate -i`; Windows requests
-system execution through a dedicated thread. Detected activity has a heartbeat lease,
+when work finishes. Linux uses logind; macOS uses `caffeinate -i -w <app-pid>`;
+Windows requests system execution through a dedicated thread. Detected activity has a heartbeat lease,
 so a stopped WebView cannot keep an otherwise idle app awake indefinitely.
 
 Agent waits and runner deadlines exclude long scheduling gaps during system sleep.

@@ -113,8 +113,9 @@ App-owned automation conversations use durable SQLite storage rather than relyin
 on the WebView storage quota. Output and session identifiers are saved during a
 turn, not only at completion. Successful runs release clean app-created worktrees
 when every commit remains referenced elsewhere; dirty or uniquely committed work
-is kept. Cleanup never removes the agent's separate correction branch or a blocked
-run's checkout. Resuming a cleaned conversation recreates its original revision.
+is kept. Cleanup never removes the agent's separate correction branch. Active and
+recently blocked runs retain their checkouts through the retention period. Resuming
+a cleaned conversation recreates its final saved checkout revision.
 
 Sleep protection requests an OS inhibitor during active app jobs or detected local
 agent work. Long suspend gaps do not consume the runner's active timeout budget.

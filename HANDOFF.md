@@ -729,3 +729,29 @@ checks, expanded WebKit action regressions, and multi-size/zoom viewport checks
 passed. Bulk deletion refreshes log/cache observers once per batch. A WebKit child
 teardown diagnostic appeared after one successful action run; a clean rerun passed
 all assertions without that diagnostic. No new native changes in this follow-up.
+
+Checkpoint review: safe checkout cleanup now atomically records final HEAD in a
+sibling .revision file before removal, so later continuation preserves commits
+made since its trigger. A regression assertion restores that final revision.
+Copilot timeout ticks no longer reset under continuous events; macOS caffeinate
+also watches the app PID to release on termination. CI now runs the new conversation
+recovery check and expanded automation action fixture.
+
+Native checkpoint validation exposed an existing race in Cursor's process-group
+shutdown assertion: SIGKILL delivery to the wrapper child is asynchronous. The test
+now polls termination for at most one second instead of checking immediately.
+Production shutdown behavior is unchanged.
+
+Review also protects resume preflight with the checkout lease. Startup recovery
+now processes interrupted running logs even when a newer durable transcript exists,
+preserving that full transcript while reconstructing its exact blocked retry.
+
+Final checkpoint validation: production build/TypeScript/dropdown checks, release
+version checks, four frontend logic suites, actionlint, Python/shell syntax,
+formatted native module checks and whitespace checks passed. All six WebKit
+fixtures passed against the existing Vite server, including four window sizes
+and zoom variants (the isolated port-3000 wrapper was not used). Native unit/bin/
+doc tests passed: 117 unit tests, five ignored; the real logind lifecycle test
+passed separately. Clippy completed with remaining pre-existing warnings. The
+Cursor termination assertion race was corrected after its initial failures.
+Ignored private data, dependencies and build outputs remain excluded.

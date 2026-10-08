@@ -94,7 +94,7 @@ mod platform {
     impl Inhibitor {
         pub fn new() -> Result<Self, String> {
             std::process::Command::new("/usr/bin/caffeinate")
-                .arg("-i")
+                .args(["-i", "-w", &std::process::id().to_string()])
                 .stdin(std::process::Stdio::null())
                 .spawn()
                 .map(Self)

@@ -84,6 +84,15 @@ pub fn read(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Resul
     if entry.automation_id!=automation_id||entry.repository_id!=repository_id||entry.run_id!=run_id{return Err("Automation log identifier mismatch".into());}
     Ok(entry)
 }
+/// Delete saved output only; conversations and handoff payloads have independent lifetimes.
+pub fn delete(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Result<(),String>{
+    let path=file(root,automation_id,repository_id,run_id)?;
+    if !path.exists(){return Ok(());}
+    let entry=read(root,automation_id,repository_id,run_id)?;
+    if entry.status=="running"{return Err("An active run cannot be deleted.".into());}
+    fs::remove_file(path).map_err(|e|e.to_string())
+}
+
 #[cfg(test)]mod tests{
     use super::*;
     #[test]fn running_entry_updates_in_place(){
@@ -113,13 +122,4 @@ pub fn read(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Resul
         assert_eq!(read(root.path(),"job-1","repo-1","run-1").unwrap().stdout,"hello");
         assert!(read(root.path(),"job-1","../repo-1","run-1").is_err());
     }
-}
-
-/// Delete saved output only; conversations and handoff payloads have independent lifetimes.
-pub fn delete(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Result<(),String>{
-    let path=file(root,automation_id,repository_id,run_id)?;
-    if !path.exists(){return Ok(());}
-    let entry=read(root,automation_id,repository_id,run_id)?;
-    if entry.status=="running"{return Err("An active run cannot be deleted.".into());}
-    fs::remove_file(path).map_err(|e|e.to_string())
 }

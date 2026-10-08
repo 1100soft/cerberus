@@ -41,4 +41,8 @@ const recovered=conversationFromLog(log,record.profile,'Review');
 assert.equal(recovered.status,'Completed');assert.equal(recovered.messages.at(-1).text,'Approved');assert.equal(recovered.session.sessionId,'original-session');assert.equal(recovered.automationContext.commit,'exact-sha');
 const interrupted=conversationFromLog({...log,activity:log.activity+'\n'+JSON.stringify({type:'model.model_call_started'})},record.profile,'Review');
 assert.match(interrupted.status,/Interrupted/);assert.equal(interrupted.running,false);
+const newerInterrupted={...record,updatedAt:200,status:'Interrupted'};
+const preserved=conversationFromLog({...log,activity:'Partial output'},record.profile,'Review',newerInterrupted);
+assert.equal(preserved.activity,record.activity);assert.deepEqual(preserved.messages,record.messages);assert.match(preserved.status,/Interrupted/);
+assert.equal(conversationFromLog({...log,activity:'Partial output'},record.profile,'Review',{...newerInterrupted,status:'Completed'}).status,'Completed');
 console.log('Durable conversations survive browser quota, live sessions persist, suspend gaps preserve waits, and recovery uses exact run context');

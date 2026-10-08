@@ -95,7 +95,23 @@ pub fn prepare(
     if path.exists() {
         return existing(root, repository, repository_id, run_id);
     }
-    let revision = revision.filter(|value| !value.is_empty()).unwrap_or("HEAD");
+    // The agent may have committed after its triggering revision. Restore the
+    // final checkout state on continuation, even after safe cleanup.
+    let restored = match fs::read_to_string(path.with_extension("revision")) {
+        Ok(value) => {
+            let value = value.trim();
+            if !matches!(value.len(), 40 | 64) || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err("Invalid saved automation checkout revision.".into());
+            }
+            Some(value.to_owned())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    let revision = restored
+        .as_deref()
+        .or(revision.filter(|value| !value.is_empty()))
+        .unwrap_or("HEAD");
     let commit = git(
         repository,
         &[
@@ -225,6 +241,18 @@ pub fn cleanup(
     if tip.as_ref().is_some_and(|tip| tip != &head) {
         return Ok(false);
     }
+    // Persist before deletion so a crash cannot lose the state needed to resume.
+    let mut marker =
+        tempfile::NamedTempFile::new_in(checkout.parent().ok_or("Invalid checkout path")?)
+            .map_err(|e| e.to_string())?;
+    use std::io::Write;
+    marker
+        .write_all(head.as_bytes())
+        .map_err(|e| e.to_string())?;
+    marker.as_file().sync_all().map_err(|e| e.to_string())?;
+    marker
+        .persist(checkout.with_extension("revision"))
+        .map_err(|e| e.to_string())?;
     git(
         repository,
         &[
@@ -298,7 +326,13 @@ mod cleanup_tests {
             ],
         )
         .unwrap();
+        let final_revision = git(&unique, &["rev-parse", "HEAD"]).unwrap();
         assert!(cleanup(root.path(), repo.path(), "repo", "unique").unwrap());
+        let resumed = prepare(root.path(), repo.path(), "repo", "unique", Some("HEAD")).unwrap();
+        assert_eq!(
+            git(&resumed, &["rev-parse", "HEAD"]).unwrap(),
+            final_revision
+        );
     }
 }
 

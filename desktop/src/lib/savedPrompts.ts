@@ -611,7 +611,7 @@ export async function recoverAutomationConversations(){
       const profile=log.conversation?.profile||log.retry?.job?.accountsByRepository?.[log.repositoryId]?.profile||job.accountsByRepository?.[log.repositoryId]?.profile||job.profile;
       if(!profile)continue;
       const existing=currentAgentChats().find(chat=>chat.id===log.conversation?.id||chat.id===log.retry?.chatId||chat.automationContext?.runId===log.runId||!!log.conversation?.session&&chat.session?.sessionId===log.conversation.session.sessionId);
-      if(existing?.running||existing&&existing.activity&&existing.messages.at(-1)?.text&&existing.updatedAt>log.createdAt)continue;
+      if(existing?.running||log.status!=='running'&&existing&&existing.activity&&existing.messages.at(-1)?.text&&existing.updatedAt>log.createdAt)continue;
       const recovered=conversationFromLog(log,profile,job.title,existing);
       restoreAgentConversation(recovered);
       if(log.status==='running'&&!currentAutomationRuns().some(run=>run.id===log.runId)){

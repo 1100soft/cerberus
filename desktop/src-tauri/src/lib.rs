@@ -238,6 +238,7 @@ async fn agent_resume_status(profile_id: String, repository_id: String, target: 
     let profile = state.agents.profiles(&state.data_dir)?.into_iter().find(|p| p.id == profile_id).ok_or("API account not found")?;
     let root = state.data_dir.clone(); let codex = state.codex.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _checkout_activity=automation_run_id.as_deref().map(automation_worktrees::activate);
         let path=if let Some(run_id)=automation_run_id{match automation_worktrees::prepare(&root,Path::new(&repo.local_path),&repository_id,&run_id,automation_commit.as_deref()){Ok(path)=>path,Err(reason)=>return agent_sessions::ResumeStatus{available:false,reason}}}else{PathBuf::from(&repo.local_path)};
         match agent_sessions::resolve(&root, &profile, &path, &target, &codex) {
         Ok(_) => agent_sessions::ResumeStatus {available:true, reason:"Continue this conversation".into()},
