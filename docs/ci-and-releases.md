@@ -114,39 +114,31 @@ Python fixtures can also use an already running development server.
 
 ## Shared workflows
 
-`tauri-check.yml` and `tauri-package.yml` in `.github/workflows/` are reusable
-`workflow_call` workflows already consumed by Cerberus's small caller workflows.
-They check out the caller's source. Inputs cover app directory, app-owned check
-commands, package preparation/verification, build matrix, and artifact prefix.
-Package matrix entries can include `variant`; variant suffixes prevent artifact
-collisions. The supported installer bundle types are deb, appimage, nsis, dmg,
-and app (validated as part of a DMG build). No caller secrets are implicitly
-inherited. Preparation/verification commands are trusted app-owned CI code.
+Desktop checks and packages now call `1100soft/CI` reusable workflows pinned to
+one reviewed full commit SHA. APT publication also calls the shared repository;
+Cerberus still validates the built Debian identity/version/architecture before
+forwarding it. These calls check out Cerberus, retain its app-owned regression
+commands, and preserve the five-target package matrix and artifact names. Autosave
+exclusions remain in the caller jobs. No caller secrets are implicitly inherited;
+only the APT job explicitly forwards `APT_DISPATCH_TOKEN` and adds `actions: read`.
 
-Move just these reusable files to the dedicated repository, provision Actions
-access, and replace the two local `uses` references with, for example,
-`1100soft/app-workflows/.github/workflows/tauri-package.yml@<full-commit-SHA>`.
-Pin consumers to a reviewed commit, update them explicitly, and test workflow
-changes in the shared repository before updating consumers. A private shared
-repository must grant same-organization caller repositories access in its Actions
-settings; caller policy must also permit the shared workflow. Branch protection
-must be updated if reusable job names change. The org in both current Git remotes
-is `1100soft`; verify the desired destination before creating it.
+The shared repository's README defines the complete input, matrix, secret, hook,
+and artifact contracts. Its generic desktop/package mechanics also serve Mountlet,
+whose rclone variants, Store checks, and installed-runtime probes remain app hooks.
+Cerberus retains stable tag validation, GitHub draft release tooling, promotion
+policy, frontend/native fixtures, and its small caller workflows.
 
-Mountlet's local `package.yml` is the reference for separating reusable toolchain/
-build mechanics from app-specific release policy. Keep its standard/lean rclone
-variants, packaged runtime smoke tests, MSIX/store checks, build credentials,
-R2 upload manifest, preview/stable rules, and APT preparation in Mountlet. Its
-website checks stay independent. The generic check workflow can be adopted first;
-package migration additionally needs an explicit signing/secret contract and
-Mountlet-specific hooks. This change does not replace Mountlet's existing working
-release workflow or configure its remote secrets.
+The shared CI commit must be pushed before these caller changes can run on GitHub.
+For a private shared repository, grant same-organization callers access in its
+Actions settings and allow the reusable workflows in caller policies. Pin consumers
+to reviewed commits and update explicitly. Update branch protection if nested job
+names change, and run actual hosted checks/packages before rollout. The previous
+local `tauri-check.yml` and `tauri-package.yml` implementations have moved into
+the shared repository and their duplicate local files have been removed.
 
-The dedicated repository and cross-repository references are not provisioned yet.
-Current reusable calls stay local and therefore remain runnable without an
-unpublished dependency. Signing, organization access/rules, and an actual tagged
-multi-platform CI run must be configured/verified on GitHub before calling the
-release pipeline production-verified.
+Remote access/settings and signing are not configured by this migration. Local
+lint and offline regression tests do not verify hosted Windows/macOS builds,
+release permissions, or asynchronous APT publication.
 
 References: [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
 [private workflow access](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations),

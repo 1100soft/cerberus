@@ -1,8 +1,9 @@
 name: Stable desktop release
-on:
+'on':
   push:
-    tags: ['v*.*.*']
-  workflow_dispatch:
+    tags:
+    - v*.*.*
+  workflow_dispatch: null
 permissions:
   contents: read
 concurrency:
@@ -15,24 +16,24 @@ jobs:
     outputs:
       sha: ${{ steps.candidate.outputs.sha }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-      - name: Validate stable tag and main ancestry
-        id: candidate
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
-        run: |
-          set -euo pipefail
-          test "$REF_TYPE" = tag
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          git merge-base --is-ancestor HEAD origin/main
-          node desktop/scripts/check-release-version.mjs
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+    - name: Validate stable tag and main ancestry
+      id: candidate
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+        REF_TYPE: ${{ github.ref_type }}
+      run: |
+        set -euo pipefail
+        test "$REF_TYPE" = tag
+        [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+        git merge-base --is-ancestor HEAD origin/main
+        node desktop/scripts/check-release-version.mjs
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   checks:
     needs: candidate
     uses: ./.github/workflows/ci.yml
@@ -40,76 +41,62 @@ jobs:
     needs: checks
     uses: ./.github/workflows/desktop-packages.yml
   github-release:
-    needs: [candidate, packages]
+    needs:
+    - candidate
+    - packages
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: gitcerberus-*
-          path: release-artifacts
-      - name: Prepare release assets and checksums
-        run: python3 .github/scripts/prepare-release-assets.py release-artifacts release-assets
-      - name: Create or finish draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_SHA: ${{ needs.candidate.outputs.sha }}
-        run: bash .github/scripts/draft-release.sh
+    - uses: actions/checkout@v6
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: gitcerberus-*
+        path: release-artifacts
+    - name: Prepare release assets and checksums
+      run: python3 .github/scripts/prepare-release-assets.py release-artifacts release-assets
+    - name: Create or finish draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ github.ref_name }}
+        RELEASE_SHA: ${{ needs.candidate.outputs.sha }}
+      run: bash .github/scripts/draft-release.sh
   apt:
-    needs: [packages, github-release]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: gitcerberus-x86_64-unknown-linux-gnu
-          path: apt-input
-      - name: Validate already-built Debian package
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          mapfile -d '' packages < <(find apt-input -type f -name '*.deb' -print0)
-          test "${#packages[@]}" -eq 1
-          package="${packages[0]}"
-          test "$(dpkg-deb --field "$package" Package)" = gitcerberus
-          test "v$(dpkg-deb --field "$package" Version)" = "$RELEASE_TAG"
-          test "$(dpkg-deb --field "$package" Architecture)" = amd64
-          mkdir -p apt-packages
-          cp "$package" "apt-packages/gitcerberus_${RELEASE_TAG#v}_amd64.deb"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: apt-packages
-          path: apt-packages/*.deb
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-      - name: Request APT publication
-        env:
-          GH_TOKEN: ${{ secrets.APT_DISPATCH_TOKEN }}
-          SOURCE_REPOSITORY: ${{ github.repository }}
-          SOURCE_RUN_ID: ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN" || { echo 'Configure APT_DISPATCH_TOKEN for APT publication' >&2; exit 1; }
-          gh api --method POST repos/1100soft/1100/dispatches \
-            -f event_type=apt-package \
-            -F 'client_payload[source_repository]'="$SOURCE_REPOSITORY" \
-            -F 'client_payload[run_id]'="$SOURCE_RUN_ID" \
-            -F 'client_payload[artifact]'=apt-packages
+    needs:
+    - packages
+    - github-release
+    permissions:
+      contents: read
+      actions: read
+    uses: 1100soft/CI/.github/workflows/apt-publish.yml@859fc753347512c1e64d50f487251d41b0778925
+    with:
+      artifact-inputs: '{"gitcerberus-x86_64-unknown-linux-gnu": "apt-input"}'
+      prepare-command: |
+        RELEASE_TAG="${{ github.ref_name }}"
+        set -euo pipefail
+        mapfile -d '' packages < <(find apt-input -type f -name '*.deb' -print0)
+        test "${#packages[@]}" -eq 1
+        package="${packages[0]}"
+        test "$(dpkg-deb --field "$package" Package)" = gitcerberus
+        test "v$(dpkg-deb --field "$package" Version)" = "$RELEASE_TAG"
+        test "$(dpkg-deb --field "$package" Architecture)" = amd64
+        mkdir -p apt-packages
+        cp "$package" "apt-packages/gitcerberus_${RELEASE_TAG#v}_amd64.deb"
+    secrets:
+      APT_DISPATCH_TOKEN: ${{ secrets.APT_DISPATCH_TOKEN }}
   promote:
     if: vars.CERBERUS_PUBLISH_STABLE_RELEASE == 'true'
-    needs: [github-release, apt]
+    needs:
+    - github-release
+    - apt
     runs-on: ubuntu-24.04
     environment: stable-release
     permissions:
       contents: write
     steps:
-      - name: Publish reviewed draft
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest
+    - name: Publish reviewed draft
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RELEASE_TAG: ${{ github.ref_name }}
+      run: gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest

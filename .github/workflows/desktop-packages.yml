@@ -10,7 +10,7 @@ concurrency:
 jobs:
   package:
     if: github.ref_name != 'autosave' && !startsWith(github.ref_name, 'autosave/')
-    uses: ./.github/workflows/tauri-package.yml
+    uses: 1100soft/CI/.github/workflows/tauri-package.yml@859fc753347512c1e64d50f487251d41b0778925
     with:
       app-directory: desktop
       artifact-prefix: gitcerberus
