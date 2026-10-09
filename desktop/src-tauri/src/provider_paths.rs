@@ -14,7 +14,11 @@ pub fn specification(tool: &str) -> Result<(&'static str, &'static str, &'static
             "GITCERBERUS_CURSOR_AGENT_PATH",
             "agent",
         )),
-        "copilot" => Ok(("copilot-executable.txt", "GITCERBERUS_COPILOT_PATH", "copilot")),
+        "copilot" => Ok((
+            "copilot-executable.txt",
+            "GITCERBERUS_COPILOT_PATH",
+            "copilot",
+        )),
         "claude" => Ok(("claude-executable.txt", "GITCERBERUS_CLAUDE_PATH", "claude")),
         _ => Err("Unknown provider tool".into()),
     }
@@ -61,6 +65,96 @@ fn find(value: &Path) -> Option<PathBuf> {
     }
     None
 }
+pub fn codex_version(path: &Path) -> Option<semver::Version> {
+    use std::{
+        io::Read,
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+    let mut child = Command::new(path)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+    let mut output = String::new();
+    child
+        .stdout
+        .take()?
+        .take(4096)
+        .read_to_string(&mut output)
+        .ok()?;
+    output
+        .split_whitespace()
+        .find_map(|part| semver::Version::parse(part).ok())
+}
+fn extension_codex_candidates(home: &Path) -> Vec<PathBuf> {
+    let platform = format!(
+        "{}-{}",
+        if cfg!(target_os = "macos") {
+            "macos"
+        } else if cfg!(windows) {
+            "windows"
+        } else {
+            "linux"
+        },
+        std::env::consts::ARCH
+    );
+    let binary = if cfg!(windows) { "codex.exe" } else { "codex" };
+    [
+        ".vscode",
+        ".vscode-insiders",
+        ".vscode-server",
+        ".vscode-server-insiders",
+        ".cursor",
+    ]
+    .iter()
+    .flat_map(|editor| {
+        std::fs::read_dir(home.join(editor).join("extensions"))
+            .into_iter()
+            .flatten()
+            .flatten()
+    })
+    .filter(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("openai.chatgpt-")
+    })
+    .map(|entry| entry.path().join("bin").join(&platform).join(binary))
+    .collect()
+}
+fn newest_codex(paths: Vec<PathBuf>) -> Option<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    let paths = paths
+        .into_iter()
+        .filter_map(|path| find(&path))
+        .filter(|path| seen.insert(path.canonicalize().unwrap_or_else(|_| path.clone())))
+        .collect::<Vec<_>>();
+    let newest = paths
+        .iter()
+        .filter_map(|path| codex_version(path).map(|version| (version, path)))
+        .max_by(|a, b| a.0.cmp(&b.0));
+    newest
+        .map(|(_, path)| path.clone())
+        .or_else(|| paths.first().cloned())
+}
 pub fn resolve(root: &Path, tool: &str) -> Result<Option<PathBuf>, String> {
     let (file, _, _) = specification(tool)?;
     resolve_from_file(&root.join(file), tool)
@@ -82,6 +176,9 @@ pub fn resolve_from_file(file: &Path, tool: &str) -> Result<Option<PathBuf>, Str
     let mut candidates = vec![PathBuf::from(name)];
     if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
         let home = PathBuf::from(home);
+        if tool == "codex" {
+            candidates.extend(extension_codex_candidates(&home));
+        }
         if tool == "claude" {
             candidates.push(home.join(".claude/local/claude"));
         }
@@ -148,6 +245,9 @@ pub fn resolve_from_file(file: &Path, tool: &str) -> Result<Option<PathBuf>, Str
             .collect();
         candidates.extend(executables);
     }
+    if tool == "codex" {
+        return Ok(newest_codex(candidates));
+    }
     for candidate in candidates {
         if let Some(path) = find(&candidate) {
             return Ok(Some(path));
@@ -195,6 +295,53 @@ pub fn status(root: &Path, provider: &str) -> Result<Vec<ToolStatus>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn automatic_codex_selection_uses_versions_not_path_or_extension_order() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let make = |name: &str, version: &str| {
+            let path = root.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\necho codex-cli {version}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+            path
+        };
+        let old = make("path-codex", "0.154.0");
+        let preview = make("extension-codex", "0.162.0-alpha.17.2");
+        let stable = make("stable-codex", "0.162.0");
+        assert_eq!(
+            newest_codex(vec![old.clone(), preview.clone()]),
+            Some(preview.clone())
+        );
+        assert_eq!(
+            newest_codex(vec![preview, stable.clone(), old.clone()]),
+            Some(stable)
+        );
+        save(root.path(), "codex", &old).unwrap();
+        assert_eq!(resolve(root.path(), "codex").unwrap(), Some(old));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn codex_extension_discovery_is_platform_scoped() {
+        let root = tempfile::tempdir().unwrap();
+        let platform = format!(
+            "{}-{}",
+            if cfg!(target_os = "macos") {
+                "macos"
+            } else {
+                "linux"
+            },
+            std::env::consts::ARCH
+        );
+        let binary = root
+            .path()
+            .join(".vscode/extensions/openai.chatgpt-1/bin")
+            .join(platform)
+            .join("codex");
+        std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        std::fs::write(&binary, "").unwrap();
+        assert!(extension_codex_candidates(root.path()).contains(&binary));
+    }
     #[test]
     fn shared_override_is_authoritative_and_cursor_tools_are_separate() {
         let root = tempfile::tempdir().unwrap();

@@ -52,6 +52,7 @@ pub struct CodexService {
     connection: Mutex<Option<Client>>,
     executable_file: PathBuf,
     home: Option<PathBuf>,
+    pinned_executable: Option<PathBuf>,
 }
 
 pub(crate) struct Client {
@@ -75,7 +76,7 @@ impl Client {
     fn start(executable: &std::ffi::OsStr, home: Option<&Path>) -> Result<Self, String> {
         let mut command = Command::new(executable);
         command.arg("app-server");
-        if let Some(home) = home { command.env("CODEX_HOME",home).env_remove("CODEX_API_KEY").env_remove("OPENAI_API_KEY").env_remove("CODEX_ACCESS_TOKEN").args(["-c","forced_login_method=\"chatgpt\"","-c","cli_auth_credentials_store=\"keyring\""]); }
+        if let Some(home) = home { command.env("CODEX_HOME",home).env_remove("CODEX_API_KEY").env_remove("OPENAI_API_KEY").env_remove("CODEX_ACCESS_TOKEN").env_remove("CODEX_INTERNAL_ORIGINATOR_OVERRIDE").args(["-c","forced_login_method=\"chatgpt\"","-c","cli_auth_credentials_store=\"keyring\"","-c","model_provider=\"openai\""]); }
 
         Self::start_command(command)
     }
@@ -164,12 +165,13 @@ impl CodexService {
     pub fn new(executable_file: PathBuf) -> Self {
         Self {
             connection: Mutex::new(None),
-            executable_file, home:None,
+            executable_file, home:None, pinned_executable:None,
         }
     }
 
-    pub fn for_account(executable_file: PathBuf, home: PathBuf) -> Self { Self {connection:Mutex::new(None), executable_file, home:Some(home)} }
+    pub fn for_account(executable_file: PathBuf, home: PathBuf) -> Self { Self {connection:Mutex::new(None), executable_file, home:Some(home), pinned_executable:None} }
 
+    pub fn for_account_runtime(executable_file:PathBuf,home:PathBuf,runtime:PathBuf)->Self{Self{connection:Mutex::new(None),executable_file,home:Some(home),pinned_executable:Some(runtime)}}
     pub fn login_outcome(&self,id:&str)->Option<Result<(),String>> {self.connection.lock().ok()?.as_ref()?.logins.get(id).cloned()}
     pub fn disconnect(&self) -> Result<(), String> {
         *self.connection.lock().map_err(|_| "Codex connection lock failed")? = None;
@@ -196,7 +198,7 @@ impl CodexService {
             .lock()
             .map_err(|_| "Codex connection lock failed")?;
         if guard.is_none() {
-            let executable = crate::provider_paths::resolve_from_file(&self.executable_file, "codex")?
+            let executable = match &self.pinned_executable{Some(path)=>Some(path.clone()),None=>crate::provider_paths::resolve_from_file(&self.executable_file,"codex")?}
                 .ok_or("Codex is not installed. Open provider setup to install it.")?;
             *guard = Some(Client::start(executable.as_os_str(), self.home.as_deref())?);
         }
@@ -661,7 +663,7 @@ for line in sys.stdin:
 "#, dir.path().to_str().unwrap()]);
         let service = CodexService {
             connection: Mutex::new(Some(Client::start_command(command).unwrap())),
-            executable_file: PathBuf::new(), home:None,
+            executable_file: PathBuf::new(), home:None, pinned_executable:None,
         };
         let page = service.threads(dir.path(), None, false).unwrap();
         assert_eq!(page.data.len(), 1);

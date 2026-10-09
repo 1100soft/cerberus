@@ -8,6 +8,7 @@ mod identity_defaults;
 mod agent_sessions;
 mod agent_edits;
 mod codex;
+mod codex_models;
 mod cursor;
 mod cursor_editor;
 mod cursor_launch;
@@ -26,6 +27,7 @@ mod setup_terminal;
 mod db;
 mod git;
 mod github;
+mod repository_creation;
 mod github_credentials;
 mod branch_removal;
 mod automation_worktrees;
@@ -190,15 +192,21 @@ async fn chatgpt_capabilities(profile_id:String,state:State<'_,AppState>)->Resul
  let root=state.data_dir.clone();let agents=state.agents.clone();
  tauri::async_runtime::spawn_blocking(move||{
   let profile=agents.profiles(&root)?.into_iter().find(|p|p.id==profile_id && p.subscription && !p.disconnected).ok_or("Connect this ChatGPT identity first")?;
-  let client=codex::CodexService::for_account(root.join("codex-executable.txt"),chatgpt_accounts::account_home(&root,&profile.id)?);
-  codex_capabilities(|method,params|client.request(method,params),profile.email.as_deref())
+  let executable=provider_paths::resolve(&root,"codex")?.ok_or("Codex runtime is not installed")?;
+  let home=chatgpt_accounts::account_home(&root,&profile.id)?;
+  let client=codex::CodexService::for_account_runtime(root.join("codex-executable.txt"),home.clone(),executable.clone());
+  let denied=codex_models::denied(&home,&codex_models::runtime_key(&executable));
+  let mut capabilities=codex_capabilities(|method,params|client.request(method,params),profile.email.as_deref(),denied)?;
+  capabilities["runtime"]=serde_json::json!({"executable":executable,"version":provider_paths::codex_version(&executable).map(|version|version.to_string())});
+  Ok(capabilities)
  }).await.map_err(|e|e.to_string())?
 }
-fn codex_capabilities(mut request:impl FnMut(&str,serde_json::Value)->Result<serde_json::Value,String>,email:Option<&str>)->Result<serde_json::Value,String>{
-  let account=request("account/read",serde_json::json!({"refreshToken":false}));
+fn codex_capabilities(mut request:impl FnMut(&str,serde_json::Value)->Result<serde_json::Value,String>,email:Option<&str>,denied:Vec<String>)->Result<serde_json::Value,String>{
+  let account=request("account/read",serde_json::json!({"refreshToken":true}));
   let account_error=match account{Ok(account) if account["account"]["type"]=="chatgpt" && !email.is_some_and(|email|account["account"]["email"].as_str()!=Some(email))=>None,Ok(_)=>Some(codex::missing_account_error()),Err(error)=>Some(error)};
   let mut models=Vec::new();let mut cursor:Option<String>=None;let mut seen=std::collections::HashSet::new();
   loop {let page=request("model/list",serde_json::json!({"limit":100,"cursor":cursor,"includeHidden":false}))?;if let Some(data)=page["data"].as_array(){models.extend(data.clone());}cursor=page["nextCursor"].as_str().map(String::from);match &cursor{Some(value) if seen.insert(value.clone())=>{},_=>break}}
+  let models=codex_models::selectable(&models,&denied);
   let usage=match account_error{Some(error)=>Err(error),None=>request("account/rateLimits/read",serde_json::json!({}))};
   Ok(serde_json::json!({"models":models,"usage":usage.as_ref().ok(),"usageError":usage.err()}))
 }
@@ -694,17 +702,9 @@ fn reorder_repositories(repository_ids: Vec<String>, state: State<AppState>) -> 
 }
 
 #[tauri::command]
-fn update_repository(
-    repository_id: String,
-    update: RepositoryUpdate,
-    state: State<AppState>,
-) -> Result<Repository, String> {
-    github::ensure_identity_access(
-        update.identity_id.as_deref().unwrap_or(""),
-        update.canonical_remote.as_deref(),
-    )?;
-    state.db.update(&repository_id, &state.git, update)?;
-    refresh_repository(repository_id, state)
+async fn update_repository(repository_id:String,update:RepositoryUpdate,state:State<'_,AppState>)->Result<Repository,String>{
+    let db=state.db.clone();let git=state.git.clone();
+    tauri::async_runtime::spawn_blocking(move||repository_creation::configure(&db,&git,&repository_id,update)).await.map_err(|error|error.to_string())?
 }
 
 #[tauri::command]
@@ -713,38 +713,9 @@ fn remove_repository(repository_id: String, state: State<AppState>) -> Result<()
 }
 
 #[tauri::command]
-fn create_repository(
-    update: RepositoryUpdate,
-    state: State<AppState>,
-) -> Result<ImportResult, String> {
-    if update.display_name.trim().is_empty() {
-        return Err("Display name is required".into());
-    }
-    let path = PathBuf::from(update.local_path.trim());
-    if path.as_os_str().is_empty() {
-        return Err("Local path is required".into());
-    }
-    if state.git.root(&path).is_ok() {
-        return Err("That folder is already a Git repository. Import it instead.".into());
-    }
-    let branch = update
-        .default_branch
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("main");
-    state.git.init(&path, branch).map_err(|e| e.to_string())?;
-    let id = state.db.import(&state.git, &path)?;
-    github::ensure_identity_access(
-        update.identity_id.as_deref().unwrap_or(""),
-        update.canonical_remote.as_deref(),
-    )?;
-    state.db.update(&id, &state.git, update)?;
-    let repository = refresh_repository(id, state)?;
-    Ok(ImportResult {
-        repository,
-        warnings: Vec::new(),
-    })
+async fn create_repository(update:RepositoryUpdate,state:State<'_,AppState>)->Result<ImportResult,String>{
+    let db=state.db.clone();let git=state.git.clone();
+    tauri::async_runtime::spawn_blocking(move||repository_creation::create(&db,&git,update)).await.map_err(|error|error.to_string())?
 }
 
 #[tauri::command]
@@ -1008,13 +979,13 @@ pub fn run() {
 
 #[cfg(test)] mod codex_catalog_tests {
  use super::*;
- #[test] fn signed_out_account_keeps_catalog_without_reading_usage(){
+ #[test] fn signed_out_account_keeps_runtime_catalog_without_reading_usage(){
   let mut calls=Vec::new();
-  let result=codex_capabilities(|method,_|{calls.push(method.to_owned());match method{"account/read"=>Ok(serde_json::json!({"account":null})),"model/list"=>Ok(serde_json::json!({"data":[{"model":"available-model"}],"nextCursor":null})),_=>panic!("Usage must not be read for an unverified account")}},None).unwrap();
-  assert_eq!(result["models"][0]["model"],"available-model");assert!(result["usage"].is_null());assert!(!result["usageError"].as_str().unwrap().is_empty());assert_eq!(calls,vec!["account/read","model/list"]);
+  let result=codex_capabilities(|method,_|{calls.push(method.to_owned());match method{"account/read"=>Ok(serde_json::json!({"account":null})),"model/list"=>Ok(serde_json::json!({"data":[{"model":"gpt-6.1-sol"},{"model":"gpt-6-luna"}],"nextCursor":null})),_=>panic!("Usage must not be read for an unverified account")}},None,vec![]).unwrap();
+  assert_eq!(result["models"].as_array().unwrap().len(),2);assert_eq!(result["models"][0]["model"],"gpt-6.1-sol");assert!(result["usage"].is_null());assert!(!result["usageError"].as_str().unwrap().is_empty());assert_eq!(calls,vec!["account/read","model/list"]);
  }
  #[test] fn verified_account_retains_paginated_catalog_and_usage(){
-  let result=codex_capabilities(|method,params|Ok(match method{"account/read"=>serde_json::json!({"account":{"type":"chatgpt","email":"test@example.test"}}),"model/list" if params["cursor"].is_null()=>serde_json::json!({"data":[{"model":"first"}],"nextCursor":"page-two"}),"model/list"=>serde_json::json!({"data":[{"model":"second"}],"nextCursor":null}),"account/rateLimits/read"=>serde_json::json!({"rateLimits":{}}),_=>panic!("Unexpected request")}),Some("test@example.test")).unwrap();
+  let result=codex_capabilities(|method,params|Ok(match method{"account/read"=>serde_json::json!({"account":{"type":"chatgpt","email":"test@example.test"}}),"model/list" if params["cursor"].is_null()=>serde_json::json!({"data":[{"model":"first"}],"nextCursor":"page-two"}),"model/list"=>serde_json::json!({"data":[{"model":"second"}],"nextCursor":null}),"account/rateLimits/read"=>serde_json::json!({"rateLimits":{}}),_=>panic!("Unexpected request")}),Some("test@example.test"),vec![]).unwrap();
   assert_eq!(result["models"].as_array().unwrap().len(),2);assert!(!result["usage"].is_null());assert!(result["usageError"].is_null());
  }
 }

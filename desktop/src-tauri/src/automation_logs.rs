@@ -12,6 +12,7 @@ pub struct Context {
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct Entry {
+    #[serde(default,skip_serializing_if="Option::is_none")] pub input_values:Option<serde_json::Value>,
     #[serde(default)] pub dismissed:bool,
     #[serde(flatten)] pub context:Context,
     pub automation_id:String,
@@ -97,7 +98,7 @@ pub fn delete(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Res
     use super::*;
     #[test]fn running_entry_updates_in_place(){
         let root=tempfile::tempdir().unwrap();
-        let mut entry=Entry{dismissed:false,context:Context::default(),conversation:None,retry:None,automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
+        let mut entry=Entry{input_values:None,dismissed:false,context:Context::default(),conversation:None,retry:None,automation_id:"live".into(),repository_id:"repo".into(),run_id:"run".into(),created_at:42,kind:"agent".into(),status:"running".into(),command:"review".into(),stdout:String::new(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();assert_eq!(list(root.path(),"live").unwrap()[0].status,"running");
         assert!(delete(root.path(),"live","repo","run").is_err());
         entry.context.branch=Some("correction/test".into());entry.context.commit_sha=Some("selected-commit".into());entry.activity="working".into();write(root.path(),&entry).unwrap();
@@ -115,11 +116,12 @@ pub fn delete(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Res
     }
     #[test]fn entries_are_scoped_to_automation_and_repository(){
         let root=tempfile::tempdir().unwrap();
-        let entry=Entry{dismissed:false,context:Context::default(),conversation:None,retry:None,automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};
+        let entry=Entry{input_values:Some(serde_json::json!({"version":"minor","publish":false})),dismissed:false,context:Context::default(),conversation:None,retry:None,automation_id:"job-1".into(),repository_id:"repo-1".into(),run_id:"run-1".into(),created_at:42,kind:"shell".into(),status:"completed".into(),command:"printf hello".into(),stdout:"hello".into(),stderr:String::new(),response:String::new(),activity:String::new()};
         write(root.path(),&entry).unwrap();
         assert_eq!(list(root.path(),"job-1").unwrap().len(),1);
         assert!(list(root.path(),"job-2").unwrap().is_empty());
         assert_eq!(read(root.path(),"job-1","repo-1","run-1").unwrap().stdout,"hello");
+        assert_eq!(read(root.path(),"job-1","repo-1","run-1").unwrap().input_values,entry.input_values);
         assert!(read(root.path(),"job-1","../repo-1","run-1").is_err());
     }
 }

@@ -46,6 +46,7 @@ export type GithubAuthStatus = {
 export type ImportResult = { repository: Repository; warnings: string[] };
 
 export type RepositoryUpdate = {
+  githubCreate?: {private:boolean};
   displayName: string;
   localPath: string;
   canonicalRemote?: string | null;

@@ -24,14 +24,14 @@ const useState=()=>[hookState,value=>{hookState=value;}];
 const useEffect=fn=>{effect=fn;};
 const useSyncExternalStore=()=>undefined;
 const inTauri=()=>true;
-const invoke=async()=>{if(fail)throw Error('Catalog offline');return {models:[{model:'available-model'}]};};
+const invoke=async()=>{if(fail)throw Error('Catalog offline');return {models:[{model:'available-model'}],usageError:'Usage check unavailable'};};
 `;
 const fixtureSuffix=`
 export async function verifyRefresh(){
  useChatgptCapabilities('first');cleanup=effect();await new Promise(resolve=>setTimeout(resolve,0));
  if(hookState.data?.models[0].model!=='available-model')throw Error('Catalog was not loaded');
  fail=true;refresh();await new Promise(resolve=>setTimeout(resolve,0));
- if(hookState.data?.models[0].model!=='available-model'||!hookState.error?.includes('offline'))throw Error('Refresh discarded cached catalog or error');
+ if(hookState.data||!hookState.error?.includes('offline'))throw Error('Failed verification retained selectable models');
  cleanup();const other=useChatgptCapabilities('second');if(other.data)throw Error('Catalog leaked across accounts');
  cleanup=effect();await new Promise(resolve=>setTimeout(resolve,0));cleanup();
 }
@@ -39,4 +39,6 @@ export async function verifyRefresh(){
 const fixtureCode=ts.transpileModule(fixturePrefix+hookSource+fixtureSuffix,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const fixture=await import(`data:text/javascript;base64,${Buffer.from(fixtureCode).toString('base64')}`);
 await fixture.verifyRefresh();
-console.log('Codex catalog survives failed refreshes and remains isolated by account');
+assert.deepEqual(fixture.commonCapabilities([{models:[{model:'shared'},{model:'first-only'}]},{models:[{model:'shared'}]}]).models,[{model:'shared'}]);
+assert.deepEqual(fixture.commonCapabilities([{models:[{model:'shared'}]},{models:[],modelsError:'Unavailable'}]).models,[]);
+console.log('Codex runtime catalogs survive usage warnings and remain isolated by account; multiple accounts use their intersection');

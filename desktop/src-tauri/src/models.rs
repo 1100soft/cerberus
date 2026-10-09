@@ -65,9 +65,13 @@ pub struct ImportResult {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubCreate { pub private:bool }
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryUpdate {
+    #[serde(default)] pub github_create:Option<GithubCreate>,
     pub display_name: String,
     pub local_path: String,
     pub canonical_remote: Option<String>,

@@ -1,85 +1,102 @@
-name: Publish Debian package
-
-on:
+name: Stable desktop release
+'on':
   push:
     tags:
-      - "v*.*.*"
-
+    - v*.*.*
+  workflow_dispatch: null
 permissions:
   contents: read
-
 concurrency:
-  group: publish-debian-${{ github.ref }}
+  group: stable-release-${{ github.ref }}
   cancel-in-progress: false
-
 jobs:
-  build-and-publish:
+  candidate:
+    if: github.ref_name != 'autosave' && !startsWith(github.ref_name, 'autosave/')
     runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: desktop/package-lock.json
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop/src-tauri
-
-      - name: Install Linux native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes libwebkit2gtk-4.1-dev libgtk-3-dev \
-            libayatana-appindicator3-dev librsvg2-dev patchelf
-
-      - name: Install frontend dependencies
-        working-directory: desktop
-        run: npm ci
-
-      - name: Build Debian package
-        working-directory: desktop
-        run: npm run tauri -- build --bundles deb
-
-      - name: Prepare and validate Debian package
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -d '' packages < <(find desktop/src-tauri/target/release/bundle/deb \
-            -maxdepth 1 -type f -name 'gitcerberus_*.deb' -print0)
-          test "${#packages[@]}" -eq 1
-
-          package="${packages[0]}"
-          test "$(dpkg-deb --field "$package" Package)" = gitcerberus
-          version="$(dpkg-deb --field "$package" Version)"
-          test "v${version}" = "${GITHUB_REF_NAME}"
-          architecture="$(dpkg-deb --field "$package" Architecture)"
-          [[ "$architecture" =~ ^(amd64|arm64|all)$ ]]
-
-          mkdir -p apt-packages
-          cp "$package" "apt-packages/gitcerberus_${version}_${architecture}.deb"
-          dpkg-deb --info "apt-packages/gitcerberus_${version}_${architecture}.deb" >/dev/null
-
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: apt-packages
-          path: apt-packages/*.deb
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
-
-      - name: Request publication
-        env:
-          GH_TOKEN: ${{ secrets.APT_DISPATCH_TOKEN }}
-          SOURCE_REPOSITORY: ${{ github.repository }}
-          SOURCE_RUN_ID: ${{ github.run_id }}
-        run: |
-          gh api --method POST repos/1100soft/1100/dispatches \
-            -f event_type=apt-package \
-            -F 'client_payload[source_repository]'="${SOURCE_REPOSITORY}" \
-            -F 'client_payload[run_id]'="${SOURCE_RUN_ID}" \
-            -F 'client_payload[artifact]'=apt-packages
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-node@v6
+      with:
+        node-version: '22'
+    - name: Validate stable tag and main ancestry
+      id: candidate
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+        REF_TYPE: ${{ github.ref_type }}
+      run: |
+        set -euo pipefail
+        test "$REF_TYPE" = tag
+        [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+        git merge-base --is-ancestor HEAD origin/main
+        node desktop/scripts/check-release-version.mjs
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  checks:
+    needs: candidate
+    uses: ./.github/workflows/ci.yml
+  packages:
+    needs: checks
+    uses: ./.github/workflows/desktop-packages.yml
+  github-release:
+    needs:
+    - candidate
+    - packages
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: gitcerberus-*
+        path: release-artifacts
+    - name: Prepare release assets and checksums
+      run: python3 .github/scripts/prepare-release-assets.py release-artifacts release-assets
+    - name: Create or finish draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ github.ref_name }}
+        RELEASE_SHA: ${{ needs.candidate.outputs.sha }}
+      run: bash .github/scripts/draft-release.sh
+  apt:
+    needs:
+    - packages
+    - github-release
+    permissions:
+      contents: read
+      actions: read
+    uses: 1100soft/CI/.github/workflows/apt-publish.yml@859fc753347512c1e64d50f487251d41b0778925
+    with:
+      artifact-inputs: '{"gitcerberus-x86_64-unknown-linux-gnu": "apt-input"}'
+      prepare-command: |
+        RELEASE_TAG="${{ github.ref_name }}"
+        set -euo pipefail
+        mapfile -d '' packages < <(find apt-input -type f -name '*.deb' -print0)
+        test "${#packages[@]}" -eq 1
+        package="${packages[0]}"
+        test "$(dpkg-deb --field "$package" Package)" = gitcerberus
+        test "v$(dpkg-deb --field "$package" Version)" = "$RELEASE_TAG"
+        test "$(dpkg-deb --field "$package" Architecture)" = amd64
+        mkdir -p apt-packages
+        cp "$package" "apt-packages/gitcerberus_${RELEASE_TAG#v}_amd64.deb"
+    secrets:
+      APT_DISPATCH_TOKEN: ${{ secrets.APT_DISPATCH_TOKEN }}
+  promote:
+    if: vars.CERBERUS_PUBLISH_STABLE_RELEASE == 'true'
+    needs:
+    - github-release
+    - apt
+    runs-on: ubuntu-24.04
+    environment: stable-release
+    permissions:
+      contents: write
+    steps:
+    - name: Publish reviewed draft
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RELEASE_TAG: ${{ github.ref_name }}
+      run: gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest

@@ -4,14 +4,26 @@ import {inTauri} from './api';
 export type ModelOption={model:string;displayName:string;isDefault:boolean;defaultReasoningEffort:string;supportedReasoningEfforts:{reasoningEffort:string;description:string}[]};
 type Credits={balance?:string;unlimited?:boolean};
 type RateLimits={limitId?:string;limitName?:string;primary?:Window;secondary?:Window;credits?:Credits};
-export type Capabilities={models:ModelOption[];usage?:{rateLimits?:RateLimits;rateLimitsByLimitId?:Record<string,RateLimits>|null};usageError?:string};
+export type Capabilities={models:ModelOption[];runtime?:{executable:string;version?:string};modelsError?:string;usage?:{rateLimits?:RateLimits;rateLimitsByLimitId?:Record<string,RateLimits>|null};usageError?:string};
 type Window={usedPercent:number;windowDurationMins?:number;resetsAt?:number};
 const cache=new Map<string,{time:number;value:Capabilities}>();
 const requests=new Map<string,Promise<Capabilities>>();
-function fetchCapabilities(id:string){let request=requests.get(id);if(!request){request=invoke<Capabilities>('chatgpt_capabilities',{profileId:id}).then(value=>{cache.set(id,{time:Date.now(),value});return value;}).finally(()=>requests.delete(id));requests.set(id,request);}return request;}
-export function useChatgptCapabilities(id?:string){
+function fetchCapabilities(id:string){let request=requests.get(id);if(!request){request=invoke<Capabilities>('chatgpt_capabilities',{profileId:id}).then(value=>{cache.set(id,{time:Date.now(),value});return value;}).catch(error=>{cache.delete(id);throw error;}).finally(()=>requests.delete(id));requests.set(id,request);}return request;}
+export function commonCapabilities(values:Capabilities[]):Capabilities {
+ const first=values[0];
+ const errors=values.map(value=>value.modelsError).filter(Boolean);
+ return {...first,models:errors.length?[]:(first?.models||[]).filter(model=>values.every(value=>value.models.some(item=>item.model===model.model))),modelsError:errors.length?errors.join(' · '):undefined};
+}
+export function useChatgptCapabilities(account?:string|string[]){
+ const ids=[...new Set(typeof account==='string'?[account]:account||[])].sort();
+ const id=ids.join(':');
  const [state,setState]=useState<{id?:string;data?:Capabilities;error?:string}>({});
- useEffect(()=>{let live=true;const refresh=(force=false)=>{if(!id || !inTauri())return;const saved=cache.get(id);if(!force && saved && Date.now()-saved.time<60000){setState({id,data:saved.value});return;}void fetchCapabilities(id).then(data=>{if(live)setState({id,data});}).catch(error=>{if(live)setState({id,data:cache.get(id)?.value,error:String(error)});});};const force=()=>refresh(true);refresh();const interval=setInterval(force,60000);window.addEventListener('chatgpt-usage-refresh',force);return()=>{live=false;clearInterval(interval);window.removeEventListener('chatgpt-usage-refresh',force);};},[id]);
+ useEffect(()=>{let live=true;const refresh=(force=false)=>{
+  if(!ids.length || !inTauri())return;
+  const saved=ids.map(id=>cache.get(id));
+  if(!force && saved.every(value=>value && Date.now()-value.time<60000)){setState({id,data:commonCapabilities(saved.map(value=>value!.value))});return;}
+  void Promise.all(ids.map(fetchCapabilities)).then(values=>{if(live)setState({id,data:commonCapabilities(values)});}).catch(error=>{if(live)setState({id,error:String(error)});});
+ };const force=()=>refresh(true);refresh();const interval=setInterval(force,60000);window.addEventListener('chatgpt-usage-refresh',force);window.addEventListener('agent-configuration-changed',force);return()=>{live=false;clearInterval(interval);window.removeEventListener('chatgpt-usage-refresh',force);window.removeEventListener('agent-configuration-changed',force);};},[id]);
  return state.id===id ? state : {};
 }
 function snapshots(data?:Capabilities){

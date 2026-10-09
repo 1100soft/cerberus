@@ -1101,3 +1101,29 @@ input[type="number"] { text-align: right; }
 
 .automation-detail-log-header { flex-wrap: wrap; }
 .automation-detail-log-header .app-select { flex: 1 1 160px; }
+
+.automation-input-editor-content,.automation-input-fields {min-width:0;display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+.automation-input-editor {flex:0 1 auto;min-width:0;}
+.automation-input-editor[open] {flex:1 1 100%;}
+.automation-input-editor summary {cursor:pointer;border:1px solid var(--border-control);border-radius:6px;padding:6px 9px;}
+.automation-input-editor-content {padding-top:10px;}
+.automation-input-definition {flex:1 1 100%;display:flex;flex-wrap:wrap;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;min-width:0;}
+.automation-input-definition label {display:flex;flex:1 1 130px;flex-direction:column;gap:5px;min-width:0;}
+.automation-input-definition input,.automation-input-definition textarea {width:100%;min-width:0;}
+.automation-input-definition label:has(input[type=checkbox]) {flex-direction:row;align-items:center;}
+.automation-input-definition input[type=checkbox] {width:auto;}
+.automation-input-fields>div {flex:1 1 100%;min-width:0;}
+.automation-input-fields label {display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.automation-input-fields input:not([type=radio]):not([type=checkbox]) {flex:1 1 160px;min-width:0;}
+.automation-input-fields fieldset {display:flex;flex-wrap:wrap;gap:12px;border:1px solid var(--border);border-radius:8px;min-width:0;}
+
+.automation-input-variable {flex:1 1 200px;min-width:0;overflow-wrap:anywhere;align-self:center;}
+
+.github-create-options {display:grid;gap:8px;margin-top:12px;min-width:0;}
+.github-create-options>label {display:flex;align-items:center;gap:8px;}
+.github-create-options .panel-copy {overflow-wrap:anywhere;margin:0;}
+
+/* Keep repeated editor navigation at the same viewport position across actions. */
+.automation-editor-backdrop { align-items: start; }
+.automation-edit-dialog { max-height: calc((100dvh - 32px)/var(--ui-zoom)); }
+.automation-edit-dialog > header, .automation-edit-dialog > footer { flex-shrink: 0; }

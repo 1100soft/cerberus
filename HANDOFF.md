@@ -786,3 +786,248 @@ worktree. Main, wip, autosave, and existing recovery stashes are retained.
 Cleanup validation: production build, TypeScript and dropdown checks passed
 (existing bundle warnings remain); native tests passed 117 with five ignored,
 and binary/doc tests passed. Diff whitespace checks passed.
+
+## Notification interruption recovery (2026-10-08)
+
+Commit reminder had a stranded running log. Startup recovery only considered
+agent automations, while the scheduler refuses orphaned running jobs. A restart
+between the initial log write and final completion could therefore pause even a
+notification indefinitely. Startup now finalizes orphan notification logs and
+clears the stale job state without disabling or replaying them. Notification
+notices carry run IDs as persisted delivery evidence. Confirmed delivery with no
+pending handoff emission is recovered as completed; uncertain delivery/emission
+is preserved as an error and future triggers proceed. Active runs are protected.
+The initial log records pending handoff emission independently of later edits.
+
+Validation: production build/TypeScript/dropdown checks passed. Expanded WebKit
+action fixtures cover legacy orphan recovery, enabled-state preservation, next
+run completion, and confirmed delivery recovery. First run hit the existing
+140% menu-placement check; rerun passed all assertions, with a WebKit allocator
+diagnostic on child teardown. Whitespace checks passed.
+
+## Configurable manual automation inputs (2026-10-08)
+
+Added a compact Manual inputs section beside outgoing handoffs in the automation
+editor. Users define names, labels, types, options, defaults, and required text/
+number inputs. Run once collects text/number fields, boolean checkboxes, radio
+choices (up to four), or larger choice dropdowns. Values are validated before
+claiming the trigger handoff. Agents receive typed JSON context; Shell exports
+CERBERUS_INPUT_<UPPERCASE_NAME> without interpolating command source. Automatic
+triggers omit manual inputs. Values are persisted in native logs, displayed and
+copied with log content, and saved in blocked retry snapshots. Recovered agent
+runs also retain those inputs. Input names cannot collide ignoring case.
+
+The editor stays folded by default to preserve the compact existing dialog.
+Docs and in-app help include the release major/minor/patch example and the Shell
+variable convention. CI runs the new pure input validation/default/environment
+regressions. WebKit fixtures cover editor persistence, defaults, required fields,
+runtime control types, literal Shell context, Agent JSON prompts, and retry
+values after changing defaults. Native tests verify literal environment export
+and JSON log persistence. No paid agent turn was initiated during validation.
+
+Manual-input validation completed: production build, TypeScript/dropdown checks,
+pure input regression suite, actionlint, Python syntax, and whitespace checks
+passed. Native tests passed 117 (five ignored), with binary/doc tests passing;
+Clippy completed with existing 20 library/17 test warnings. WebKit persistence/
+Agent delivery and action/retry fixtures passed; new long-choice keyboard/zoom
+checks passed at 100%, 140%, and 150%. Four-window viewport checks passed. The
+first layout run caught an extra empty-editor row; folding it beside handoffs
+resolved the regression. A WebKit teardown allocator diagnostic occurred after
+one successful fixture run; final action rerun passed without it. Desktop native
+changes require rebuild/restart. Changes remain uncommitted.
+
+## Single-name manual inputs (2026-10-09)
+
+Removed the separate Label field. One readable name is used in the editor and
+run dialog, with a generated script-compatible identifier shown beneath it.
+Spaces/punctuation become underscores, accents are normalized, leading digits
+get a prefix, and names without ASCII letters receive a stable hashed identifier.
+Colliding generated identifiers are rejected. Existing labeled definitions are
+unified internally while retaining their old script identifiers; explicitly
+renaming an input regenerates its identifier. Old retry snapshots remain readable.
+Docs and in-app help explain the convention.
+
+Single-name validation: build/TypeScript/dropdown checks and identifier generation,
+collision, Unicode, and legacy-compatibility regressions passed. Expanded WebKit
+actions verified the single Name field, retained legacy variable, generated renamed
+variable, persistence, and existing keyboard/zoom/retry behavior. Final rerun
+passed without the earlier WebKit teardown diagnostic. Diff whitespace passed.
+
+## Stable release and shared workflow preparation (2026-10-09)
+
+Reviewed local Mountlet CI/package workflows and the external 1100 APT receiver.
+Mountlet is unchanged. Cerberus previously packaged all desktop targets as Actions
+artifacts but only published x64 Debian via an independent tag build. Extracted
+read-only reusable tauri-check.yml and tauri-package.yml with caller app paths,
+check/preparation/verification commands, configurable package matrix, and variant
+artifact names. Cerberus callers consume these locally until a dedicated shared
+repository is provisioned; no unpublished external dependency was introduced.
+
+Stable publish.yml now requires a matching strict stable tag reachable from main,
+runs the full CI gate, builds all five targets, verifies requested bundle outputs,
+and stages a GitHub release draft with uniquely named installers and SHA256SUMS.
+Live tag resolution protects against lightweight/annotated tag movement before
+draft creation. Retry can finish the same-commit draft but refuses to mutate a
+published release or different-commit draft. After draft staging, APT dispatch
+reuses the matrix's x64 Debian package and existing external publication payload.
+GitHub promotion requires CERBERUS_PUBLISH_STABLE_RELEASE=true and the stable-release
+environment; configure required reviewers there before enabling it. Drafts remain
+the default because current Windows packages are unsigned and macOS ad-hoc signed.
+No release, tag, repository, secret, remote setting, or push was created locally.
+
+Shared repository proposal: 1100soft/app-workflows (private). Git remotes confirm
+1100soft as the current owner, despite the colloquial organization name 1100.
+GitHub CLI authentication currently returns HTTP 401; actual organization access,
+secrets, repository creation, and hosted execution could not be verified. Mountlet
+can adopt generic checks first; packaging migration needs app-owned variants,
+credentials, smoke/MSIX checks, signing and R2/preview policy preserved. See the
+updated CI/release guide for exact file paths, inputs, migration and pinning.
+Mobile remains a separate adapter/project/signing task, not a placeholder job.
+
+Release workflow validation: actionlint passed for all five workflows; Bash
+syntax, release version agreement, and whitespace checks passed. Three Python
+release tooling tests cover collision-safe/checksummed assets, invalid/empty
+inputs, same-commit draft retries, published/wrong-SHA refusal, API failure, moved
+tags and annotated tag resolution. No hosted build/publish run was initiated,
+and secrets/signing were not available for remote verification. The unrelated
+manual-input/notification changes remain pending alongside this work.
+
+## GitHub creation and account-list repair (2026-10-09)
+
+GitHub account selectors no longer treat absence from the cached repository
+catalog as proof of missing access. Connected GitHub identities remain selectable;
+native assignment still verifies access directly. The creation/configuration
+form can create an empty private-by-default remote under the selected account
+or an organization URL, and links origin without committing or pushing. Native
+token handling stays outside IPC; existing remotes are rejected for creation,
+and ambiguous POST failures advise checking GitHub before retrying. A failed
+remote creation preserves the initialized local repository and chosen account.
+See desktop/docs/repositories.md. Validation covers stale/empty catalogs, mocked
+GitHub HTTP responses, partial local preservation, no commit/push, and invalid
+branch validation before initialization. No actual GitHub repository was created.
+
+## Account-authorized models, shared CI review, and editor position (2026-10-09)
+
+Supersedes the earlier bundled-catalog fallback: account-specific Codex model
+choices now require a live ChatGPT catalog from api.openai.com/v1/models. Native
+code refreshes Codex authentication, reads that account's Codex Auth keyring entry
+using its canonical CODEX_HOME identifier, and keeps tokens entirely native.
+Only visibility=list choices reach IPC, retaining app-server reasoning metadata.
+Failed availability checks hide choices; account scopes use the intersection of
+all routed ChatGPT accounts. Unsupported saved options no longer reappear in the
+picker; saves use the displayed Provider default. Explicit model execution checks
+current account availability before starting an agent; errors never disable jobs.
+The Codex keyring naming/schema integration is isolated in codex_models.rs and
+must be reviewed if the provider changes its credential format.
+
+The main automation editor has a stable top anchor with an internally scrolling
+body; header navigation does not move when cycling between different action types.
+WebKit regression checks exercise repeated navigation at 100/140/150% zoom.
+
+Reviewed CI_MIGRATION_HANDOFF.md and the pinned shared workflows at local
+/home/eh930/project/apps/CI (1100soft/CI). This supersedes the earlier proposed
+app-workflows repository/local reusable prototypes: Cerberus now consumes commit
+859fc753347512c1e64d50f487251d41b0778925. App triggers/autosave guards, five package
+targets/artifact names, stable tag/main/version gates, draft release policy and
+explicit APT permissions remain app-owned. Shared contract tests (4), Cerberus
+release regressions (3), and actionlint passed. No push, remote policy change or
+hosted publication was performed. Publishing the shared commit and permitting
+private workflow access remain prerequisites for hosted caller execution.
+
+Remote verification during review: noninteractive git ls-remote for CI returned
+Repository not found / authentication failed. This does not establish whether
+the shared SHA has been published; hosted access remains unverified. Model catalog
+verification was exercised with fixtures; no unlocked matching app account
+credential was available here for a live account catalog check.
+
+Final validation for this task: production build/dropdown checks and model hook
+regressions passed; native suite passed 124 tests with 5 intentional ignores.
+Automation action/navigation fixtures passed at 900x620 and 1280x720, with zoom
+100/140/150%. Viewport fixtures passed at four window sizes and zoom 75/100/140/150%.
+The broader saved-prompts fixture passed on sequential rerun; an earlier concurrent
+UI-fixture run reported a retention-dialog bound failure, so do not run these
+shared WebKit browser-state fixtures concurrently. Workflow lint, shared contract
+and release tooling tests, new-module rustfmt, and diff whitespace checks passed.
+
+## Model-picker regression repair (2026-10-09)
+
+Supersedes the preceding live-catalog implementation. It incorrectly applied the
+separate SIWC Responses/API flow to Codex CLI sign-ins and guessed CLI credential
+storage details. Removed direct keyring/token access, api.openai.com/v1/models
+calls and the added sha2 dependency. Native catalog loading again uses model/list
+with the configured account-specific Codex runtime. Account/usage errors do not
+remove the runtime catalog. Model filters exclude hidden entries, the confirmed
+ChatGPT-incompatible gpt-6-luna, and explicit model rejections recorded per account
+for 24 hours. Network/other errors do not remove models. Multi-account scopes still
+use common choices; connected accounts supply catalogs before repository routing
+is configured. Catalog advertising alone is not an entitlement guarantee; do not
+claim otherwise. No inference probes or authentication-schema assumptions remain.
+
+Repair validation: native suite passed 124 tests with 5 intentional ignores;
+updated Codex-specific regressions passed 14 tests, including Sol catalog
+preservation during account warnings and exclusion of Luna. Production build,
+model hook and chat regressions, rustfmt for codex_models.rs and diff whitespace
+checks passed. Explicit model failure immediately refreshes frontend catalogs.
+No live inference/model access probe was made, and no credentials were read by
+the repaired model discovery implementation.
+
+## Preserve proven model access across catalog omissions (2026-10-09)
+
+The sole active app ChatGPT account's current models_cache.json omits GPT-6.1
+Sol, but its durable conversation history contains two completed runs explicitly
+using gpt-6.1-sol. Catalog omission is not proof of denied access. Capabilities
+now supplement runtime choices with models that completed under the same profile,
+unless a newer explicit access rejection, active account denial, or confirmed
+compatibility exclusion applies. Existing runtime ordering is preserved. Native
+regressions cover Sol surviving omission, account isolation and later rejection.
+No live inference was performed to probe access; only model/status/account
+metadata was inspected, with no conversation text or credentials printed.
+
+## Root cause and runtime-based model discovery (2026-10-09)
+
+Controlled live catalog comparison used the same app CODEX_HOME, ChatGPT account,
+OpenAI provider, keyring storage and gitcerberus client identity, changing only
+executable version. Account/read recognized ChatGPT in both. PATH Codex 0.154.0
+listed Astra and 5.6 models but omitted 6.1 Sol/6 Sol/6 Luna. VS Code's installed
+0.162.0-alpha.17.2 listed all three. No inference, credentials extraction or client
+impersonation was used. The omission comes from runtime-version catalog behavior,
+not proof that the account lacks access to Sol. Earlier provider resolution took
+PATH/legacy profile paths first and did not consider installed extension runtimes.
+
+Automatic Codex discovery now probes bounded --version calls and chooses the
+newest installed runtime by semver, including platform-matching local VS Code,
+VS Code Insiders/Server, and Cursor extension executables. Stable beats prerelease
+at the same version. Explicit saved/environment overrides remain authoritative.
+Capabilities pin the resolved executable and expose its path/version; agent
+execution uses the same resolver. App-managed discovery and execution both force
+the OpenAI provider and remove inherited originator overrides, retaining the
+honest gitcerberus identity. Configuration-change events refresh model catalogs.
+
+Removed all model-name incompatibility rules and the successful-history model
+injection; these earlier workarounds are superseded. Catalog metadata and ordering
+come from the configured runtime. Explicit server model rejections are scoped to
+account plus executable fingerprint (path/size/mtime), expire after 24 hours and
+are written atomically. A runtime upgrade/switch re-evaluates models instead of
+inheriting obsolete denial evidence. Source info in the automation editor makes
+future discrepancies diagnosable. No installations, settings overrides, pushes
+or credential changes were made by this investigation.
+
+Runtime-root-cause validation: live account/read + model/list comparison recognized
+the same app ChatGPT identity in both runtimes; it showed Sol omissions in 0.154.0
+and the Sol entries in 0.162.0-alpha.17.2. Production build, model hook/chat checks,
+126 native tests (5 intentional ignores), automation UI checks at 100/140/150%
+zoom, new-module formatting and diff whitespace checks passed. Resolver tests
+cover newer extension over older PATH, stable over same-version prerelease,
+platform-specific extension discovery and explicit override precedence. Model
+filter tests include future catalog entries without hardcoded exclusions and
+account/runtime isolation of explicit rejections.
+
+### Codex catalog versus inference restriction follow-up
+
+The Sol/Luna cached metadata exposes identical visibility, API-support, and access-program fields. Catalog visibility is not proof of ChatGPT inference support. The reported Luna 400 explicitly rejects ChatGPT-account usage; successful Sol runs establish different actual support, but the server-side reason for that policy is not exposed. Fixed rejection scope: explicit ChatGPT-account restrictions survive runtime changes for that account (24-hour TTL); generic model errors remain runtime-scoped. Added a regression using the exact reported JSON error, retaining Sol and isolating other accounts, plus expiry coverage. Targeted codex_models tests: 3 passed. Historical failures predating rejection recording cannot be assumed to have a persisted denial; no inference probe or credential extraction was performed.
+
+### Checkpoint: automation navigation and pending feature work
+
+Previous/next automation actions now wrap at both ends, including Alt+Left/Right, preserve the fixed header position, and save edits before switching. Single-item lists keep navigation disabled. WebKit regression covers both boundary crossings and edit persistence. The context-menu fixture now waits for zoom layout before opening the menu.
+
+Checkpoint validation: production frontend build (dropdown/type checks included), 127 native tests passed / 5 opt-in tests ignored, seven frontend logic suites, three release-tooling tests, actionlint 1.7.12, shell syntax checks, formatting checks for new native modules, and diff whitespace/credential-artifact review. WebKit repository creation plus automation actions/saved prompts/CI/handoffs/card reorder/viewport fixtures passed at multiple sizes and zoom levels. Existing build-size and native dead-code warnings remain. No hosted Windows/macOS builds, live GitHub creation, release publication, or inference probes performed. Shared CI SHA remains unpublished/access-unverified; publish the CI dependency and configure access before pushing callers. This checkpoint includes all intended pending Cerberus changes; no push.

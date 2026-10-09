@@ -43,3 +43,5 @@ approval before executing. Use fixed provider commands and no privilege elevatio
   still be running when a run fails. An open automation log must acknowledge new
   unread errors; after closing, new failures become unread again. Retained blocked
   rows must use neutral styling once acknowledged, keeping their log/retry details.
+
+- Codex model catalogs are advisory, not proof of inference access. Never restore a model rejected explicitly for ChatGPT account support merely because the runtime executable changed. Keep restrictions account-scoped with a bounded lifetime; keep other runtime-specific errors scoped to their runtime. Regression checks must cover Luna rejection surviving upgrades while Sol remains selectable. Never introduce a permanent model-name blacklist or add models from conversation history.

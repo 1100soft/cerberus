@@ -16,7 +16,7 @@ An **Agent** automation starts a new in-app conversation in each target reposito
 
 A **Shell** automation accepts a Bash command or multiline script. Run opens a read-only live terminal showing stdout and stderr. Every shell and agent run writes a structured JSON log under the app data directory at `automation-logs/<automation-id>/<repository-id>/<run-id>.json`. Clicking the automation card opens its saved action and log side by side, with a run picker in the log pane. Shell logs include both output streams, while agent logs include the final response and available activity. Log files remain after automation edits. A failed attempt also writes a per-repository log when execution reached that repository. Its editable field has Bash syntax highlighting, and the inspection view highlights the saved script too. It runs from each repository folder with no stdin, bounded output, and a 15-minute limit per repository. The **Draft with AI** feature button opens drafting alongside the editable result. Drafting starts hidden, giving the result the full editor width. A visible note explains that generating and revising drafts consumes the selected agent’s usage quota. The execution agent selector is in the Agent prompt heading, parallel to the drafting agent selector. It has clipboard Paste for the result field and Copy for its output. Both text fields support Ctrl+Z undo and Ctrl+Y or Ctrl+Shift+Z redo, including generated text and submitted request replacements. Both modes have a **Draft with agent** exchange: choose a drafting provider and optionally a repository for context, describe the task, then press Generate draft or Ctrl+Enter. **Auto context** displays the repository it will use: for scheduled jobs it is the first selected repository with the drafting provider assigned; for manual jobs it is the first local repository with that provider assigned. On submission, the task description field shows the exact request sent. The app launches the agent with that repository as its working directory; the prompt does not repeat the repository name or path. Actual permission limits come from the agent runtime configuration, not from the text of the prompt. Copilot drafting exposes only file-viewing tools and denies write and shell permission requests; Codex drafting uses its read-only sandbox. The response fills the editable prompt or command field. In Agent mode, the execution provider is chosen separately; Shell mode has no execution agent. After the initial task is converted, follow-up text is sent raw into the same provider session to revise the result; each response replaces the editable output. Stop cancels the active Codex/Cursor profile run, Copilot SDK turn, or Cursor/Claude CLI process, while preserving the last successful output. Changing the drafting agent or context starts a new draft conversation. Drafting uses the selected agent's quota. Generation errors stay visible in the dialog. A live Copilot draft request was verified with the connected account; the WebKit fixture mocks the response.
 
-Intervals and pending changes are checked every 30 seconds while GitCerberus is running, including while its Tauri window is hidden. They do not run after the app shuts down. Errors leave scheduled jobs enabled. Failure notifications offer Open log for the failed run and Disable automation for an explicit opt-out, both in the toast and notification history. Preparation failures also create error logs. Interval preparation failures advance the next scheduled time instead of retrying on every scheduler tick. Disabling a job during execution does not cancel its current run, and completion preserves the disabled state. A `running` job left after a crash stays paused for review. Each agent interval starts a new conversation in each selected repository. Older fixed Git jobs remain runnable. Agent automation conversations use the automation’s name. Older exact-conversation jobs remain visible with an unsupported-target error and their enabled setting preserved; Edit converts them to a new in-app conversation target.
+Intervals and pending changes are checked every 30 seconds while GitCerberus is running, including while its Tauri window is hidden. They do not run after the app shuts down. Errors leave scheduled jobs enabled. Failure notifications offer Open log for the failed run and Disable automation for an explicit opt-out, both in the toast and notification history. Preparation failures also create error logs. Interval preparation failures advance the next scheduled time instead of retrying on every scheduler tick. Disabling a job during execution does not cancel its current run, and completion preserves the disabled state. A `running` agent job left after a crash stays paused for review. Orphan notification runs are finalized on startup without replay or disablement, with uncertain delivery or handoff emission recorded as an error. Each agent interval starts a new conversation in each selected repository. Older fixed Git jobs remain runnable. Agent automation conversations use the automation’s name. Older exact-conversation jobs remain visible with an unsupported-target error and their enabled setting preserved; Edit converts them to a new in-app conversation target.
 
 Jobs are stored in `gitcerberus.savedPrompts.v1` in localStorage. Implementation: `src/lib/savedPrompts.ts` stores and runs jobs; `src/lib/automationAccounts.ts` resolves assigned identities; `src/components/SavedPromptsPanel.tsx` renders the page; `src/lib/agentChats.ts` records agent conversations; `src-tauri/src/shell_automation.rs` runs scripts; `src-tauri/src/automation_logs.rs` writes per-repository log files; `src-tauri/src/repository_watcher.rs` owns native recursive file watchers and emits events to the scheduler; `src-tauri/src/repository_changes.rs` counts changed lines for the card metric and threshold trigger. Verification: `npm run build`, `cargo check`, `/usr/bin/python3 scripts/check-ci-automation.py`, `/usr/bin/python3 scripts/check-saved-prompts.py` with Vite on port 3000, and `/usr/bin/python3 scripts/check-viewport.py`. The WebKit fixture covers failed-save recovery, folded repository selection, live-scope summary, manual runtime targeting, per-repository agent identities, prompt prefill, and zoomed layout.
 
@@ -26,7 +26,7 @@ Handoffs pass context and boolean flags to another automation in the same reposi
 
 New automations start with no condition selected. Manual is exclusive and hides repository and branch selection; its repository is chosen at run time and its saved branch scope is unrestricted. Branch-set suggestions include “All except” and restore the checkbox when applied. Condition parameter dialogs close with Done, Enter, or Escape (Enter first applies an open name suggestion). Drafting starts hidden; the Draft with AI feature button toggles the drafting pane and gives the full editor width to the prompt or shell script while closed. The automation list scrolls within its pane.
 
-Agent prompt, Shell command, and Notification message keep separate text and undo histories when switching type. Codex model and reasoning selectors share the action heading with the execution agent; Refresh Codex models reloads the assigned account’s catalog from the configured Codex runtime. Catalog availability depends on the runtime version and account, rather than a hardcoded list.
+Agent prompt, Shell command, and Notification message keep separate text and undo histories when switching type. Codex model and reasoning selectors share the action heading with the execution agent; Refresh Codex models loads the assigned accounts’ model catalogs and reasoning metadata through the configured Codex runtime. No static model list is substituted.
 
 Emit handoffs is available for all three automation types. Its info button opens help; notifications publish their message as the handoff payload under each configured outgoing name, using the normal per-repository queue and cleanup lifecycle.
 
@@ -117,7 +117,7 @@ of conditions; older `conditions` records remain supported.
 
 The in-app handoff popover gives a brief summary and Agent/Shell examples. The separate [handoff guide](handoffs.md) provides detailed instructions and commands. Automation cards grow to display their full names and scope/condition summaries. They do not shrink as more cards are added; the containing automation list scrolls within its pane.
 
-Codex model discovery is independent of the account/usage check. A missing or expired ChatGPT session shows an account warning while preserving the runtime's model catalog; it still needs reconnection before agent execution. A failed catalog refresh retains the last successful catalog for that account and exposes its error through the model-availability info button. No static model list is substituted.
+Codex model discovery uses the configured CLI’s model/list catalog, independently of its account/usage check. Usage or sign-in warnings do not erase the model catalog. Hidden models and explicit model rejections are excluded for the affected account/configuration. A catalog RPC failure is reported through the model-availability info button. Provider default remains available.
 
 Right-click an automation card, or focus it and press Shift+F10, for Open log, Edit, Run once, Enable/Disable, and Remove. Opening its log clears the card’s unread error indicator while retaining the error details. Previous/Next buttons in Edit, or Alt+Left/Alt+Right, save before switching to the adjacent automation without closing the dialog; validation errors block navigation. Only explicit user actions disable automations, including after migration or clearing pending state. Handoff retention defaults to 24 hours and is configurable in the Automation header; see [handoffs.md](handoffs.md).
 
@@ -208,3 +208,51 @@ Opening the log acknowledges the automation's unread error even if another conte
 is still running. Errors arriving while the log stays open are acknowledged too;
 new failures after closing it show a fresh indicator. Blocked runs remain available
 for retry with neutral styling after acknowledgement.
+
+## Manual inputs
+
+Add **Manual inputs** in an automation's edit dialog. Give each input a unique
+name and a Text, Number, Boolean, or Choice type. The same name appears in the
+run dialog. A script identifier is generated automatically: `Version change`
+becomes `version_change`, exported as `CERBERUS_INPUT_VERSION_CHANGE`. The editor
+shows the exact variable. Names that generate the same identifier are rejected.
+Existing inputs retain their previous script identifiers until renamed.
+Choices are listed one per line; defaults prefill **Run once**. Text and Number
+can be required or optional. Booleans use checkboxes, up to four choices use
+radio buttons, and longer choice lists use the app's dropdown. Required inputs
+must be valid before running. Inputs are collected on any manual run, including
+manual runs of event-triggered automations; automatic triggers do not supply them.
+
+For a release, define a Choice named `version` with `major`, `minor`, and `patch`
+and default `patch`. Agent prompts receive a JSON object such as
+`{"version":"minor"}` ahead of the saved instructions. In Shell mode use
+`npm version "$CERBERUS_INPUT_VERSION"`. Text stays text, numbers are finite
+numbers, and booleans are `true`/`false` (exported as strings in Bash). Optional
+empty inputs export an empty string. Values are environment data and are never
+substituted into shell source; quote expansions. They are saved with the run log
+and preserved on blocked-action retries even after editing the automation.
+These inputs are intended for ordinary parameters, not secrets. Notification
+runs collect and record them but do not interpolate the notification message.
+
+Codex model choices and execution use the same configured runtime and ChatGPT
+account. Automatic discovery compares installed CLI versions (including Codex
+bundled with local VS Code/Cursor extensions) and selects the newest. Explicit
+Advanced-settings or environment overrides remain authoritative. The **Codex
+catalog source** info button shows the exact executable and version. Changing
+provider configuration refreshes the catalog, as does **Refresh Codex models**.
+
+The picker follows the runtime's catalog, excludes hidden entries, and intersects
+choices when several accounts are in scope. There is no hardcoded model list or
+history-based model injection. Model lists can differ across CLI versions even
+for the same account: 0.154.0 omitted GPT-6.1 Sol while 0.162.0-alpha.17.2 listed it
+in a controlled comparison. The catalog is advisory: a listed model can still be
+rejected during inference. Explicit server rejections are excluded for 24 hours.
+A rejection that explicitly names ChatGPT account support survives runtime changes
+for that account; other model rejections apply to the runtime binary that produced
+them. Network and login errors never exclude models. No inference requests probe
+model access.
+
+The automation editor is anchored near the top of the viewport. Previous/next
+buttons keep the same vertical position across actions while the body scrolls.
+Previous/next navigation (including Alt+Left/Right) wraps from either end of the
+automation list to the other and saves edits before switching.

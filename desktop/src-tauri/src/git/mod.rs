@@ -90,6 +90,8 @@ impl GitService {
     }
 
     pub fn init(&self, path: &Path, branch: &str) -> Result<(), GitError> {
+        let checked=Command::new("git").args(["check-ref-format","--branch",branch]).output()?;
+        if !checked.status.success(){return Err(GitError::Command("Invalid initial branch name".into()));}
         std::fs::create_dir_all(path)?;
         let with_branch = Command::new("git")
             .args(["init", "-b", branch])

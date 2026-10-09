@@ -57,3 +57,7 @@ console.log('Combined filters, sorting, and folder-link priority passed');
 assert.equal(filterAndSortRepositories(catalog, {...defaults, owners:[], ownersExplicit:true}).length, 0);
 assert.equal(filterAndSortRepositories(catalog, readRepositoryFilters('{"owners":[]}')).length, 2);
 assert.equal(filterAndSortRepositories(catalog, readRepositoryFilters('{"owners":[],"ownersExplicit":true}')).length, 0);
+
+const githubAccounts=[{id:'one',providerUsername:'alice'},{id:'two',providerUsername:'bob'},{id:'local'}];
+assert.deepEqual(identitiesWithRepositoryAccess(githubAccounts,{canonicalRemote:'https://github.com/org/new-repo.git'},[]).map(identity=>identity.id),['one','two']);
+assert.deepEqual(identitiesWithRepositoryAccess(githubAccounts,{canonicalRemote:'https://github.com/owner/repo.git'},[remote]).map(identity=>identity.id),['one','two']);
