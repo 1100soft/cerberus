@@ -1,0 +1,117 @@
+name: Reusable Tauri packages
+on:
+  workflow_call:
+    inputs:
+      app-directory:
+        type: string
+        required: true
+      artifact-prefix:
+        type: string
+        required: true
+      build-matrix:
+        description: JSON include matrix with os, target, bundles and optional variant
+        type: string
+        required: true
+      version-check-command:
+        description: App-owned version/tag consistency check
+        type: string
+        required: true
+      prepare-command:
+        description: App-owned preparation, with BUILD_TARGET and BUILD_VARIANT
+        type: string
+        default: 'true'
+      verify-command:
+        description: App-owned post-build artifact checks
+        type: string
+        default: 'true'
+permissions:
+  contents: read
+jobs:
+  package:
+    if: github.ref_name != 'autosave' && !startsWith(github.ref_name, 'autosave/')
+    name: Package (${{ matrix.target }})
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.build-matrix) }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.app-directory }}
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ${{ inputs.app-directory }}/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.app-directory }}/src-tauri
+          key: package-${{ matrix.target }}
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+      - run: npm ci
+      - name: Verify release versions
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          VERSION_CHECK_COMMAND: ${{ inputs.version-check-command }}
+        run: bash -euo pipefail -c "$VERSION_CHECK_COMMAND"
+      - name: App package preparation
+        env:
+          PREPARE_COMMAND: ${{ inputs.prepare-command }}
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_VARIANT: ${{ matrix.variant }}
+        run: bash -euo pipefail -c "$PREPARE_COMMAND"
+      - name: Build installers
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          APPLE_SIGNING_IDENTITY: '-'
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_BUNDLES: ${{ matrix.bundles }}
+        run: npm run tauri -- build --ci --target "$BUILD_TARGET" --bundles "$BUILD_BUNDLES" -- --locked
+      - name: Verify requested bundle outputs
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_BUNDLES: ${{ matrix.bundles }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a bundles <<<"$BUILD_BUNDLES"
+          for bundle in "${bundles[@]}"; do
+            folder="src-tauri/target/$BUILD_TARGET/release/bundle/$bundle"
+            case "$bundle" in
+              deb) pattern='*.deb' ;;
+              appimage) pattern='*.AppImage' ;;
+              nsis) pattern='*.exe' ;;
+              dmg) pattern='*.dmg' ;;
+              app) folder="src-tauri/target/$BUILD_TARGET/release/bundle/macos"; pattern='*.app' ;;
+              *) echo "Unsupported shared bundle: $bundle" >&2; exit 1 ;;
+            esac
+            test -n "$(find "$folder" -maxdepth 1 -name "$pattern" -print -quit)"
+          done
+      - name: App package verification
+        env:
+          VERIFY_COMMAND: ${{ inputs.verify-command }}
+          BUILD_TARGET: ${{ matrix.target }}
+          BUILD_VARIANT: ${{ matrix.variant }}
+        run: bash -euo pipefail -c "$VERIFY_COMMAND"
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-prefix }}-${{ matrix.target }}${{ matrix.variant && format('-{0}', matrix.variant) || '' }}
+          path: |
+            ${{ inputs.app-directory }}/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            ${{ inputs.app-directory }}/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            ${{ inputs.app-directory }}/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            ${{ inputs.app-directory }}/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

@@ -46,6 +46,9 @@ Conversation providers are opt-in. Codex, Cursor, Copilot, and Claude adapters e
 Provider installation is an explicit in-app action with a displayed command plan. Nothing should install a provider CLI silently.
 
 CI runs desktop checks on Linux, Windows, and macOS for pushes and pull requests.
-Manual and version-tag builds produce desktop installer artifacts. See
+Manual builds produce installer artifacts; stable version tags run the checks
+and package matrix, stage a GitHub release draft with checksums, and request APT
+publication. Desktop checks and packaging use reusable workflows prepared for
+organization-wide sharing. See
 [CI and releases](docs/ci-and-releases.md) for coverage, signing requirements, and
 the Android/iOS readiness plan.

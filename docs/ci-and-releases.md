@@ -12,20 +12,29 @@
   runs native regression tests serially and mocked WebKitGTK integration fixtures
   for automations, CI recovery, handoffs, repository reordering, and viewport zoom.
   Live provider/GitHub tests stay ignored; CI requires no account credentials.
-- **Desktop packages** (`.github/workflows/desktop-packages.yml`) runs manually or
-  on `v*.*.*` tags. Manual builds on autosave branches are skipped. It builds Debian/AppImage installers for Linux x64 and ARM64,
-  an NSIS installer for Windows x64, and DMGs for Intel and Apple Silicon macOS.
-  Installers are uploaded as separate architecture-named artifacts, retained for
-  30 days. It does not create a GitHub release or publish to stores. macOS uses
-  ad-hoc signing; Windows packages are unsigned. Native ARM Linux hosted runners
-  require a public repository; private hosting needs an eligible ARM runner.
-- **Publish Debian package** (`.github/workflows/publish.yml`) is the existing tag
-  workflow. It validates and forwards the x64 Debian artifact to the external APT
-  publication repository using `APT_DISPATCH_TOKEN`. The new packaging workflow
-  does not change this publication path or require that secret.
+- **Desktop packages** (`.github/workflows/desktop-packages.yml`) is manual or
+  called by the stable release workflow. Autosave branches are skipped. It builds
+  Debian/AppImage for Linux x64/ARM64, NSIS for Windows x64, and DMGs for Intel and
+  Apple Silicon macOS. All requested bundles must exist. Architecture-named
+  artifacts remain available for 30 days. This workflow itself does not publish.
+- **Stable desktop release** (`.github/workflows/publish.yml`) runs on `v*.*.*`
+  tags, or can be rerun with a version-tag ref. Only strict stable `vMAJOR.MINOR.PATCH`
+  tags matching the app version and reachable from `main` are accepted. It runs
+  Desktop CI at that tag, waits for every installer build, and creates a GitHub
+  **draft** release with uniquely named installers and SHA256SUMS. Retrying a draft
+  can replace its partial uploads; an already published release is never modified
+  by the drafting script. It forwards the already-built x64 Debian package to
+  `1100soft/1100`, preserving the APT dispatch payload and `APT_DISPATCH_TOKEN`.
+  APT publication is asynchronous: dispatch success is not confirmation that the
+  external index has updated. The external APT service remains app-independent.
 
-Workflow tokens are read-only. CI cancels superseded branch runs; packaging does
-not cancel an in-progress build. Matrix failures do not cancel other platforms.
+Checks/builds use read-only tokens; GitHub release jobs alone request contents
+write permission. CI cancels superseded branch runs; packaging and releases do
+not cancel in-progress work. Stable tags use the release workflow's CI gate,
+without also launching a duplicate standalone CI/package build. Matrix failures
+do not cancel other platforms. Linux ARM64 and Intel macOS use their explicit
+hosted runner labels; runner availability/billing follows organization settings.
+
 The existing Rust source is not rustfmt-clean, so CI does not enforce a new
 repository-wide formatting policy. There is no configured ESLint suite.
 
@@ -48,10 +57,16 @@ repository-wide formatting policy. There is no configured ESLint suite.
    Ad-hoc signing is useful for test artifacts, but does not establish a trusted
    public publisher. Configure updater signing and update endpoints if an updater
    is implemented; the current app has no release updater pipeline.
-5. Push a matching version tag when ready for the existing APT publishing path.
-   Tag builds reject tags that disagree with the native application version.
-   Download artifacts from Actions; public GitHub/store release publication is a
-   separate future step.
+5. Tag the reviewed commit on `main` with its exact `vMAJOR.MINOR.PATCH` version.
+   The stable workflow runs checks and packaging before staging the draft and APT
+   dispatch. Review installer behavior and edit the generated draft release notes.
+   Publish the draft manually when ready. To enable workflow promotion, configure
+   required reviewers on the `stable-release` environment first, then set repository
+   variable `CERBERUS_PUBLISH_STABLE_RELEASE=true`. Promotion waits for both draft
+   creation and successful APT dispatch. This variable defaults to disabled.
+   Windows packages remain unsigned and macOS uses ad-hoc signing; approval does
+   not add publisher signing/notarization. Store and updater publication remain
+   separate future integrations.
 
 Node 22 and Rust stable are used, with npm/Cargo lockfiles enforced. Stable Rust
 is intentionally rolling; pin a tested toolchain when release reproducibility
@@ -95,3 +110,44 @@ run `bash desktop/scripts/check-webkit-ci.sh`. It owns a strict-port Vite server
 3000, waits for readiness, runs fixtures sequentially in virtual displays, and
 stops its server on exit. Stop an existing port-3000 server first. Individual
 Python fixtures can also use an already running development server.
+
+
+## Shared workflows
+
+`tauri-check.yml` and `tauri-package.yml` in `.github/workflows/` are reusable
+`workflow_call` workflows already consumed by Cerberus's small caller workflows.
+They check out the caller's source. Inputs cover app directory, app-owned check
+commands, package preparation/verification, build matrix, and artifact prefix.
+Package matrix entries can include `variant`; variant suffixes prevent artifact
+collisions. The supported installer bundle types are deb, appimage, nsis, dmg,
+and app (validated as part of a DMG build). No caller secrets are implicitly
+inherited. Preparation/verification commands are trusted app-owned CI code.
+
+Move just these reusable files to the dedicated repository, provision Actions
+access, and replace the two local `uses` references with, for example,
+`1100soft/app-workflows/.github/workflows/tauri-package.yml@<full-commit-SHA>`.
+Pin consumers to a reviewed commit, update them explicitly, and test workflow
+changes in the shared repository before updating consumers. A private shared
+repository must grant same-organization caller repositories access in its Actions
+settings; caller policy must also permit the shared workflow. Branch protection
+must be updated if reusable job names change. The org in both current Git remotes
+is `1100soft`; verify the desired destination before creating it.
+
+Mountlet's local `package.yml` is the reference for separating reusable toolchain/
+build mechanics from app-specific release policy. Keep its standard/lean rclone
+variants, packaged runtime smoke tests, MSIX/store checks, build credentials,
+R2 upload manifest, preview/stable rules, and APT preparation in Mountlet. Its
+website checks stay independent. The generic check workflow can be adopted first;
+package migration additionally needs an explicit signing/secret contract and
+Mountlet-specific hooks. This change does not replace Mountlet's existing working
+release workflow or configure its remote secrets.
+
+The dedicated repository and cross-repository references are not provisioned yet.
+Current reusable calls stay local and therefore remain runnable without an
+unpublished dependency. Signing, organization access/rules, and an actual tagged
+multi-platform CI run must be configured/verified on GitHub before calling the
+release pipeline production-verified.
+
+References: [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
+[private workflow access](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations),
+and [hosted runner labels](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).

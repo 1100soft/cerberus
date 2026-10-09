@@ -852,3 +852,42 @@ collision, Unicode, and legacy-compatibility regressions passed. Expanded WebKit
 actions verified the single Name field, retained legacy variable, generated renamed
 variable, persistence, and existing keyboard/zoom/retry behavior. Final rerun
 passed without the earlier WebKit teardown diagnostic. Diff whitespace passed.
+
+## Stable release and shared workflow preparation (2026-10-09)
+
+Reviewed local Mountlet CI/package workflows and the external 1100 APT receiver.
+Mountlet is unchanged. Cerberus previously packaged all desktop targets as Actions
+artifacts but only published x64 Debian via an independent tag build. Extracted
+read-only reusable tauri-check.yml and tauri-package.yml with caller app paths,
+check/preparation/verification commands, configurable package matrix, and variant
+artifact names. Cerberus callers consume these locally until a dedicated shared
+repository is provisioned; no unpublished external dependency was introduced.
+
+Stable publish.yml now requires a matching strict stable tag reachable from main,
+runs the full CI gate, builds all five targets, verifies requested bundle outputs,
+and stages a GitHub release draft with uniquely named installers and SHA256SUMS.
+Live tag resolution protects against lightweight/annotated tag movement before
+draft creation. Retry can finish the same-commit draft but refuses to mutate a
+published release or different-commit draft. After draft staging, APT dispatch
+reuses the matrix's x64 Debian package and existing external publication payload.
+GitHub promotion requires CERBERUS_PUBLISH_STABLE_RELEASE=true and the stable-release
+environment; configure required reviewers there before enabling it. Drafts remain
+the default because current Windows packages are unsigned and macOS ad-hoc signed.
+No release, tag, repository, secret, remote setting, or push was created locally.
+
+Shared repository proposal: 1100soft/app-workflows (private). Git remotes confirm
+1100soft as the current owner, despite the colloquial organization name 1100.
+GitHub CLI authentication currently returns HTTP 401; actual organization access,
+secrets, repository creation, and hosted execution could not be verified. Mountlet
+can adopt generic checks first; packaging migration needs app-owned variants,
+credentials, smoke/MSIX checks, signing and R2/preview policy preserved. See the
+updated CI/release guide for exact file paths, inputs, migration and pinning.
+Mobile remains a separate adapter/project/signing task, not a placeholder job.
+
+Release workflow validation: actionlint passed for all five workflows; Bash
+syntax, release version agreement, and whitespace checks passed. Three Python
+release tooling tests cover collision-safe/checksummed assets, invalid/empty
+inputs, same-commit draft retries, published/wrong-SHA refusal, API failure, moved
+tags and annotated tag resolution. No hosted build/publish run was initiated,
+and secrets/signing were not available for remote verification. The unrelated
+manual-input/notification changes remain pending alongside this work.
