@@ -891,3 +891,17 @@ inputs, same-commit draft retries, published/wrong-SHA refusal, API failure, mov
 tags and annotated tag resolution. No hosted build/publish run was initiated,
 and secrets/signing were not available for remote verification. The unrelated
 manual-input/notification changes remain pending alongside this work.
+
+## GitHub creation and account-list repair (2026-10-09)
+
+GitHub account selectors no longer treat absence from the cached repository
+catalog as proof of missing access. Connected GitHub identities remain selectable;
+native assignment still verifies access directly. The creation/configuration
+form can create an empty private-by-default remote under the selected account
+or an organization URL, and links origin without committing or pushing. Native
+token handling stays outside IPC; existing remotes are rejected for creation,
+and ambiguous POST failures advise checking GitHub before retrying. A failed
+remote creation preserves the initialized local repository and chosen account.
+See desktop/docs/repositories.md. Validation covers stale/empty catalogs, mocked
+GitHub HTTP responses, partial local preservation, no commit/push, and invalid
+branch validation before initialization. No actual GitHub repository was created.

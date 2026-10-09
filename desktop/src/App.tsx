@@ -390,6 +390,8 @@ export function App() {
 
   async function afterAdded(result: ImportResult, verb: string) {
     setRepositories((r) => [...r.filter((repo) => repo.id !== result.repository.id), result.repository]);
+    if(result.repository.identity){await reload();setNotice([`${verb} ${result.repository.displayName} and associated ${result.repository.identity.label}`,...result.warnings].join(' · '));return;}
+    if(result.warnings.length){setNotice(`${verb} ${result.repository.displayName} · ${result.warnings.join(' · ')}`);return;}
     const owner = githubOwner(result.repository.canonicalRemote);
     const matching = owner && identities.find((identity) => identity.providerUsername?.toLowerCase() === owner.toLowerCase());
     if (matching) {

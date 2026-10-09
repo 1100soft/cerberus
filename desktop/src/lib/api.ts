@@ -316,10 +316,12 @@ export const api = {
   async createRepository(update: RepositoryUpdate): Promise<ImportResult> {
     if (inTauri()) return invoke("create_repository", { update });
     const identity = update.identityId ? demoIdentities.find((item) => item.id === update.identityId) : undefined;
+    if(update.githubCreate&&(!identity?.providerUsername||!update.canonicalRemote))throw new Error("Choose a GitHub account and repository destination.");
     const repository: Repository = {
       id: crypto.randomUUID(),
       displayName: update.displayName,
       localPath: update.localPath,
+      ...(update.githubCreate?{github:{id:Date.now(),name:update.canonicalRemote!.split('/').at(-1)!.replace(/\.git$/,''),fullName:update.canonicalRemote!.replace(/^https:\/\/github.com\//,'').replace(/\.git$/,''),owner:update.canonicalRemote!.split('/')[3],private:update.githubCreate.private,htmlUrl:update.canonicalRemote!.replace(/\.git$/,''),identityId:identity!.id}}:{}),
       canonicalRemote: update.canonicalRemote || undefined,
       hostType: update.hostType,
       defaultBranch: update.defaultBranch || "main",

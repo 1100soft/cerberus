@@ -29,9 +29,10 @@ type Props = {
   identities: Identity[];
   onChange: (value: RepositoryFormValue) => void;
   browseTitle?: string;
+  identityRequired?:boolean;
 };
 
-export function RepositoryFields({ value, identities, onChange, browseTitle }: Props) {
+export function RepositoryFields({ value, identities, onChange, browseTitle, identityRequired }: Props) {
   async function browse() {
     const path = await api.selectRepositoryDirectory();
     if (path) onChange({ ...value, localPath: path });
@@ -50,7 +51,7 @@ export function RepositoryFields({ value, identities, onChange, browseTitle }: P
       <input value={value.canonicalRemote} onChange={(e) => onChange({ ...value, canonicalRemote: e.target.value, hostType: detectHost(e.target.value) })} placeholder="https://github.com/owner/repo.git" />
     </label>
     <label>Default branch<input value={value.defaultBranch} onChange={(e) => onChange({ ...value, defaultBranch: e.target.value })} placeholder="main" /></label>
-    <label>Identity<Select label="Identity" value={value.identityId} onChange={(identityId) => onChange({ ...value, identityId })} options={[{value:"",label:"Unassigned"}, ...identities.map((identity) => ({value:identity.id,label:identity.label}))]} /></label>
+    <label>Identity<Select label="Identity" value={value.identityId} onChange={(identityId) => onChange({ ...value, identityId })} options={[...(identityRequired?[]:[{value:"",label:"Unassigned"}]), ...identities.map((identity) => ({value:identity.id,label:identity.label}))]} /></label>
     <label className="full">Tags<input value={value.tags} onChange={(e) => onChange({ ...value, tags: e.target.value })} placeholder="backend, production" /></label>
   </div>;
 }

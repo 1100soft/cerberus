@@ -1118,3 +1118,7 @@ input[type="number"] { text-align: right; }
 .automation-input-fields fieldset {display:flex;flex-wrap:wrap;gap:12px;border:1px solid var(--border);border-radius:8px;min-width:0;}
 
 .automation-input-variable {flex:1 1 200px;min-width:0;overflow-wrap:anywhere;align-self:center;}
+
+.github-create-options {display:grid;gap:8px;margin-top:12px;min-width:0;}
+.github-create-options>label {display:flex;align-items:center;gap:8px;}
+.github-create-options .panel-copy {overflow-wrap:anywhere;margin:0;}

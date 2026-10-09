@@ -281,6 +281,43 @@ fn assign_unique_catalog_identities(db:&Database,catalog:&Catalog)->Result<(),St
     }
     Ok(())
 }
+pub struct CreationPlan { http:Client, secret:String, endpoint:String, name:String, full_name:String, private:bool }
+fn creation_endpoint(owner:&str,login:&str)->String {
+    if owner.eq_ignore_ascii_case(login){"/user/repos".into()}else{format!("/orgs/{owner}/repos")}
+}
+pub fn prepare_creation(db:&Database,identity_id:&str,remote:&str,private:bool)->Result<CreationPlan,String>{
+    if !db.identities()?.iter().any(|identity|identity.id==identity_id&&identity.provider_username.is_some()) {
+        return Err("Choose a connected GitHub account to create the remote repository.".into());
+    }
+    let full_name=github_name(remote).ok_or("Enter a GitHub repository URL with an owner and repository name.")?;
+    let (owner,name)=full_name.split_once('/').ok_or("Invalid GitHub repository destination")?;
+    if name.len()>100{return Err("GitHub repository names must be at most 100 characters.".into());}
+    let secret=token(identity_id)?;let http=client()?;
+    let user:Owner=get(&http,&secret,"/user")?.json().map_err(|_|"Invalid GitHub account response")?;
+    let existing=http.get(format!("https://api.github.com/repos/{full_name}")).bearer_auth(&secret).header("Accept","application/vnd.github+json").send().map_err(|_|"Could not check the GitHub destination. Check your connection and retry.")?;
+    if existing.status().is_success(){return Err("This GitHub repository already exists. Turn off remote creation to link it, or clone it instead.".into());}
+    if existing.status()!=reqwest::StatusCode::NOT_FOUND{return Err(format!("Could not verify the GitHub destination (HTTP {}). Check account permissions and rate limits.",existing.status().as_u16()));}
+    Ok(CreationPlan{endpoint:creation_endpoint(owner,&user.login),name:name.into(),full_name,http,secret,private})
+}
+impl CreationPlan {
+    pub fn create(self)->Result<String,String>{self.create_at("https://api.github.com")}
+    fn create_at(self,base:&str)->Result<String,String>{
+        let response=self.http.post(format!("{base}{}",self.endpoint)).bearer_auth(&self.secret)
+            .header("Accept","application/vnd.github+json").header("X-GitHub-Api-Version","2022-11-28")
+            .json(&serde_json::json!({"name":self.name,"private":self.private,"auto_init":false}))
+            .send().map_err(|_|format!("GitHub creation could not be confirmed for {}. Check GitHub before retrying; if it exists, turn off remote creation to link it.",self.full_name))?;
+        if response.status()!=reqwest::StatusCode::CREATED {
+            let status=response.status();
+            let message=response.json::<serde_json::Value>().ok().and_then(|value|value.get("message").and_then(|value|value.as_str()).map(str::to_owned)).unwrap_or_default();
+            return Err(format!("GitHub creation failed (HTTP {}): {}. Check repository-creation permissions and organization policy.",status.as_u16(),message));
+        }
+        let repository:Remote=response.json().map_err(|_|"GitHub created the repository but its response could not be read. Check GitHub before retrying.")?;
+        if repository.private!=self.private||!repository.full_name.eq_ignore_ascii_case(&self.full_name)||github_name(&repository.html_url).as_deref()!=Some(repository.full_name.as_str()) {
+            return Err("GitHub returned a different destination. Check GitHub before linking the remote.".into());
+        }
+        Ok(format!("{}.git",repository.html_url.trim_end_matches('/')))
+    }
+}
 pub fn ensure_identity_access(identity_id: &str, remote: Option<&str>) -> Result<(), String> {
     if identity_id.trim().is_empty() {
         return Ok(());
@@ -707,5 +744,37 @@ mod tests {
         }
         std::fs::create_dir(parent.path().join("repo")).unwrap();
         assert!(clone_destination(parent.path(), "owner/repo").is_err());
+    }
+}
+
+#[cfg(test)]
+mod creation_tests {
+    use super::*;
+    use std::io::{Read,Write};
+    #[test]
+    fn personal_and_organization_endpoints_are_distinct(){
+        assert_eq!(creation_endpoint("Owner","owner"),"/user/repos");
+        assert_eq!(creation_endpoint("org","owner"),"/orgs/org/repos");
+    }
+    #[test]
+    fn create_posts_private_empty_repository_and_handles_failure(){
+        for status in [201,403,422] {
+            let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();let address=listener.local_addr().unwrap();
+            let server=std::thread::spawn(move||{
+                let (mut stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request=Vec::new();let mut buffer=[0;4096];
+                let end=loop{let size=stream.read(&mut buffer).unwrap();assert!(size>0);request.extend_from_slice(&buffer[..size]);if let Some(end)=request.windows(4).position(|window|window==b"\r\n\r\n"){break end+4;}};
+                let headers=String::from_utf8_lossy(&request[..end]);
+                assert!(headers.starts_with("POST /user/repos "));assert!(headers.to_ascii_lowercase().contains("authorization: bearer test-secret"));
+                let length=headers.lines().find_map(|line|line.to_ascii_lowercase().strip_prefix("content-length:").and_then(|value|value.trim().parse::<usize>().ok())).unwrap();
+                while request.len()<end+length{let size=stream.read(&mut buffer).unwrap();assert!(size>0);request.extend_from_slice(&buffer[..size]);}
+                let data:serde_json::Value=serde_json::from_slice(&request[end..end+length]).unwrap();assert_eq!(data["name"],"new");assert_eq!(data["private"],true);assert_eq!(data["auto_init"],false);
+                let body=if status==201{r#"{"id":1,"name":"new","full_name":"owner/new","owner":{"login":"owner"},"private":true,"html_url":"https://github.com/owner/new","default_branch":"main"}"#}else{r#"{"message":"Denied"}"#};
+                write!(stream,"HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            });
+            let plan=CreationPlan{http:client().unwrap(),secret:"test-secret".into(),endpoint:"/user/repos".into(),name:"new".into(),full_name:"owner/new".into(),private:true};
+            let result=plan.create_at(&format!("http://{address}"));server.join().unwrap();
+            if status==201{assert_eq!(result.unwrap(),"https://github.com/owner/new.git");}else{let error=result.unwrap_err();assert!(error.contains(&status.to_string()));assert!(!error.contains("test-secret"));}
+        }
     }
 }

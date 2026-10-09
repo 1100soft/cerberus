@@ -53,7 +53,8 @@ export function identitiesWithRepositoryAccess(identities: Identity[], repo: { c
     ...(repo.accessibleIdentityIds ?? []),
     ...catalog.filter(item => remoteKey(item.htmlUrl) === key && item.identityId).map(item => item.identityId),
   ]);
-  return identities.filter(identity => allowed.has(identity.id) || identity.id === repo.identity?.id);
+  // Catalog absence is not an access denial: new repos and partial refreshes are absent.
+  return identities.filter(identity => !!identity.providerUsername || allowed.has(identity.id) || identity.id === repo.identity?.id);
 }
 export type RepositoryControl = { id: string; label: string; key: string };
 export function repositoryControls(repo: Repository): RepositoryControl[] {

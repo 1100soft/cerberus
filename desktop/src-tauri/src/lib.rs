@@ -26,6 +26,7 @@ mod setup_terminal;
 mod db;
 mod git;
 mod github;
+mod repository_creation;
 mod github_credentials;
 mod branch_removal;
 mod automation_worktrees;
@@ -694,17 +695,9 @@ fn reorder_repositories(repository_ids: Vec<String>, state: State<AppState>) -> 
 }
 
 #[tauri::command]
-fn update_repository(
-    repository_id: String,
-    update: RepositoryUpdate,
-    state: State<AppState>,
-) -> Result<Repository, String> {
-    github::ensure_identity_access(
-        update.identity_id.as_deref().unwrap_or(""),
-        update.canonical_remote.as_deref(),
-    )?;
-    state.db.update(&repository_id, &state.git, update)?;
-    refresh_repository(repository_id, state)
+async fn update_repository(repository_id:String,update:RepositoryUpdate,state:State<'_,AppState>)->Result<Repository,String>{
+    let db=state.db.clone();let git=state.git.clone();
+    tauri::async_runtime::spawn_blocking(move||repository_creation::configure(&db,&git,&repository_id,update)).await.map_err(|error|error.to_string())?
 }
 
 #[tauri::command]
@@ -713,38 +706,9 @@ fn remove_repository(repository_id: String, state: State<AppState>) -> Result<()
 }
 
 #[tauri::command]
-fn create_repository(
-    update: RepositoryUpdate,
-    state: State<AppState>,
-) -> Result<ImportResult, String> {
-    if update.display_name.trim().is_empty() {
-        return Err("Display name is required".into());
-    }
-    let path = PathBuf::from(update.local_path.trim());
-    if path.as_os_str().is_empty() {
-        return Err("Local path is required".into());
-    }
-    if state.git.root(&path).is_ok() {
-        return Err("That folder is already a Git repository. Import it instead.".into());
-    }
-    let branch = update
-        .default_branch
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("main");
-    state.git.init(&path, branch).map_err(|e| e.to_string())?;
-    let id = state.db.import(&state.git, &path)?;
-    github::ensure_identity_access(
-        update.identity_id.as_deref().unwrap_or(""),
-        update.canonical_remote.as_deref(),
-    )?;
-    state.db.update(&id, &state.git, update)?;
-    let repository = refresh_repository(id, state)?;
-    Ok(ImportResult {
-        repository,
-        warnings: Vec::new(),
-    })
+async fn create_repository(update:RepositoryUpdate,state:State<'_,AppState>)->Result<ImportResult,String>{
+    let db=state.db.clone();let git=state.git.clone();
+    tauri::async_runtime::spawn_blocking(move||repository_creation::create(&db,&git,update)).await.map_err(|error|error.to_string())?
 }
 
 #[tauri::command]
