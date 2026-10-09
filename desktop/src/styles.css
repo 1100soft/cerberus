@@ -1116,3 +1116,5 @@ input[type="number"] { text-align: right; }
 .automation-input-fields label {display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .automation-input-fields input:not([type=radio]):not([type=checkbox]) {flex:1 1 160px;min-width:0;}
 .automation-input-fields fieldset {display:flex;flex-wrap:wrap;gap:12px;border:1px solid var(--border);border-radius:8px;min-width:0;}
+
+.automation-input-variable {flex:1 1 200px;min-width:0;overflow-wrap:anywhere;align-self:center;}

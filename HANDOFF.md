@@ -835,3 +835,20 @@ first layout run caught an extra empty-editor row; folding it beside handoffs
 resolved the regression. A WebKit teardown allocator diagnostic occurred after
 one successful fixture run; final action rerun passed without it. Desktop native
 changes require rebuild/restart. Changes remain uncommitted.
+
+## Single-name manual inputs (2026-10-09)
+
+Removed the separate Label field. One readable name is used in the editor and
+run dialog, with a generated script-compatible identifier shown beneath it.
+Spaces/punctuation become underscores, accents are normalized, leading digits
+get a prefix, and names without ASCII letters receive a stable hashed identifier.
+Colliding generated identifiers are rejected. Existing labeled definitions are
+unified internally while retaining their old script identifiers; explicitly
+renaming an input regenerates its identifier. Old retry snapshots remain readable.
+Docs and in-app help explain the convention.
+
+Single-name validation: build/TypeScript/dropdown checks and identifier generation,
+collision, Unicode, and legacy-compatibility regressions passed. Expanded WebKit
+actions verified the single Name field, retained legacy variable, generated renamed
+variable, persistence, and existing keyboard/zoom/retry behavior. Final rerun
+passed without the earlier WebKit teardown diagnostic. Diff whitespace passed.

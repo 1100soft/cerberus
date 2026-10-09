@@ -212,8 +212,11 @@ for retry with neutral styling after acknowledgement.
 ## Manual inputs
 
 Add **Manual inputs** in an automation's edit dialog. Give each input a unique
-name, an optional display label, and a Text, Number, Boolean, or Choice type.
-Names use letters, digits, and underscores and cannot collide ignoring case.
+name and a Text, Number, Boolean, or Choice type. The same name appears in the
+run dialog. A script identifier is generated automatically: `Version change`
+becomes `version_change`, exported as `CERBERUS_INPUT_VERSION_CHANGE`. The editor
+shows the exact variable. Names that generate the same identifier are rejected.
+Existing inputs retain their previous script identifiers until renamed.
 Choices are listed one per line; defaults prefill **Run once**. Text and Number
 can be required or optional. Booleans use checkboxes, up to four choices use
 radio buttons, and longer choice lists use the app's dropdown. Required inputs

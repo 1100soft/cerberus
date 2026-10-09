@@ -1,5 +1,5 @@
 import { AutomationInputEditor } from './AutomationInputs';
-import { inputDefinitionsError, type AutomationInput } from '../lib/automationInputs';
+import { inputDefinitionsError, unifyInput, type AutomationInput } from '../lib/automationInputs';
 import { refreshBlockedAutomations } from '../lib/savedPrompts';
 import { AutomationSettingsDialog } from './HandoffRetentionDialog';
 import { CopyButton } from './CopyButton';
@@ -199,7 +199,7 @@ export function SavedPromptsPanel({repositories,profiles,chatgptSettings,externa
   };
   const editJob=(job:SavedPrompt)=>{
     if(job.state==='running'){setNotice('Wait for this automation to finish before editing it.');return;}
-    setEditingJob(job);setManualInputs(job.manualInputs||[]);setShowDraft(false);
+    setEditingJob(job);setManualInputs((job.manualInputs||[]).map(unifyInput));setShowDraft(false);
     setOtherSets(automationConditionSets(job).slice(1));
     setName(job.title);
     setKind(job.kind==='notification'?'notification':job.kind==='shell'||job.kind==='git'?'shell':'prompt');
