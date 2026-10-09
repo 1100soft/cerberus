@@ -254,3 +254,5 @@ model access.
 
 The automation editor is anchored near the top of the viewport. Previous/next
 buttons keep the same vertical position across actions while the body scrolls.
+Previous/next navigation (including Alt+Left/Right) wraps from either end of the
+automation list to the other and saves edits before switching.

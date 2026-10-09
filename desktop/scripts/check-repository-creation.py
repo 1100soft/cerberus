@@ -18,7 +18,7 @@ script = r"""
  await wait(()=>document.querySelectorAll('.repo-row').length>0);const accounts=await api.identities();
  api.githubRepositories=async()=>({repositories:[],warnings:[]});
  let received;const create=api.createRepository;api.createRepository=async update=>{received=update;return create(update);};
- document.querySelector('[aria-label="Add repository"]').click();await wait(()=>document.querySelector('.chooser-actions'));[...document.querySelectorAll('.chooser-actions button')].find(button=>button.textContent.includes('Create new repository')).click();await wait(()=>document.querySelector('.config-grid')); 
+ document.querySelector('[aria-label="Add repository"]').click();await wait(()=>document.querySelector('.chooser-actions'));[...document.querySelectorAll('.chooser-actions button')].find(button=>button.textContent.includes('Create new repository')).click();await wait(()=>document.querySelector('.config-grid'));
  const setInput=(label,value)=>{const node=[...document.querySelectorAll('.config-grid label')].find(node=>node.textContent.trim().startsWith(label)).querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));};
  const choose=async(label,value)=>{document.querySelector(`[aria-label="${label}"]`).click();const option=await wait(()=>document.querySelector(`[role="option"][data-value="${value}"]`));option.click();await pause();};
  setInput('Display name','New Project');setInput('Local path','/tmp/fixture-new-project');await choose('Host type','github');
