@@ -48,7 +48,7 @@ script = r"""
  const retentionDialog=await wait(()=>document.querySelector('[role="dialog"][aria-label="Automation settings"]'));
  const retentionInput=await wait(()=>{const input=retentionDialog.querySelector('input');return input&&!input.disabled?input:null;});
  assert(retentionInput.value==='24','Handoff retention does not default to 24 hours');
- for(const zoom of [1,1.4,1.5]){document.body.style.zoom=String(zoom);await pause();const rect=retentionDialog.getBoundingClientRect();assert(rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,'Retention dialog overflows at zoom '+zoom);}
+ for(const zoom of [1,1.4,1.5]){document.body.style.zoom=String(zoom);await pause();const rect=retentionDialog.getBoundingClientRect();assert(rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,'Retention dialog overflows at zoom '+zoom+' '+JSON.stringify({left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:innerWidth,height:innerHeight}));}
  document.body.style.zoom='1';await pause();
 
  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(retentionInput,'48');retentionInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();

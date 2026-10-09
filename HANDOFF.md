@@ -905,3 +905,46 @@ remote creation preserves the initialized local repository and chosen account.
 See desktop/docs/repositories.md. Validation covers stale/empty catalogs, mocked
 GitHub HTTP responses, partial local preservation, no commit/push, and invalid
 branch validation before initialization. No actual GitHub repository was created.
+
+## Account-authorized models, shared CI review, and editor position (2026-10-09)
+
+Supersedes the earlier bundled-catalog fallback: account-specific Codex model
+choices now require a live ChatGPT catalog from api.openai.com/v1/models. Native
+code refreshes Codex authentication, reads that account's Codex Auth keyring entry
+using its canonical CODEX_HOME identifier, and keeps tokens entirely native.
+Only visibility=list choices reach IPC, retaining app-server reasoning metadata.
+Failed availability checks hide choices; account scopes use the intersection of
+all routed ChatGPT accounts. Unsupported saved options no longer reappear in the
+picker; saves use the displayed Provider default. Explicit model execution checks
+current account availability before starting an agent; errors never disable jobs.
+The Codex keyring naming/schema integration is isolated in codex_models.rs and
+must be reviewed if the provider changes its credential format.
+
+The main automation editor has a stable top anchor with an internally scrolling
+body; header navigation does not move when cycling between different action types.
+WebKit regression checks exercise repeated navigation at 100/140/150% zoom.
+
+Reviewed CI_MIGRATION_HANDOFF.md and the pinned shared workflows at local
+/home/eh930/project/apps/CI (1100soft/CI). This supersedes the earlier proposed
+app-workflows repository/local reusable prototypes: Cerberus now consumes commit
+859fc753347512c1e64d50f487251d41b0778925. App triggers/autosave guards, five package
+targets/artifact names, stable tag/main/version gates, draft release policy and
+explicit APT permissions remain app-owned. Shared contract tests (4), Cerberus
+release regressions (3), and actionlint passed. No push, remote policy change or
+hosted publication was performed. Publishing the shared commit and permitting
+private workflow access remain prerequisites for hosted caller execution.
+
+Remote verification during review: noninteractive git ls-remote for CI returned
+Repository not found / authentication failed. This does not establish whether
+the shared SHA has been published; hosted access remains unverified. Model catalog
+verification was exercised with fixtures; no unlocked matching app account
+credential was available here for a live account catalog check.
+
+Final validation for this task: production build/dropdown checks and model hook
+regressions passed; native suite passed 124 tests with 5 intentional ignores.
+Automation action/navigation fixtures passed at 900x620 and 1280x720, with zoom
+100/140/150%. Viewport fixtures passed at four window sizes and zoom 75/100/140/150%.
+The broader saved-prompts fixture passed on sequential rerun; an earlier concurrent
+UI-fixture run reported a retention-dialog bound failure, so do not run these
+shared WebKit browser-state fixtures concurrently. Workflow lint, shared contract
+and release tooling tests, new-module rustfmt, and diff whitespace checks passed.

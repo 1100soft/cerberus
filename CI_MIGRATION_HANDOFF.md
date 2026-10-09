@@ -97,3 +97,13 @@ permissions, signing, and live APT publication have not been verified.
 
 The removed local reusable prototypes are represented in the shared implementation;
 restoring them as parallel maintained workflows would reintroduce duplication.
+
+## Cerberus review (2026-10-09)
+
+The dedicated Cerberus agent reviewed the shared check/package/APT implementations
+and caller contracts. Five target artifacts, stable tag/main/version checks,
+app-owned Debian validation, autosave exclusions, and explicit secret forwarding
+remain consistent. Shared offline contracts (4), Cerberus release tooling tests
+(3), and actionlint passed again. The earlier HANDOFF.md repository proposal is
+superseded by 1100soft/CI and the pinned commit documented here. No hosted runs,
+pushes, remote access-policy changes, or releases were performed by this review.

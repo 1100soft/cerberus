@@ -8,6 +8,7 @@ mod identity_defaults;
 mod agent_sessions;
 mod agent_edits;
 mod codex;
+mod codex_models;
 mod cursor;
 mod cursor_editor;
 mod cursor_launch;
@@ -192,16 +193,18 @@ async fn chatgpt_capabilities(profile_id:String,state:State<'_,AppState>)->Resul
  tauri::async_runtime::spawn_blocking(move||{
   let profile=agents.profiles(&root)?.into_iter().find(|p|p.id==profile_id && p.subscription && !p.disconnected).ok_or("Connect this ChatGPT identity first")?;
   let client=codex::CodexService::for_account(root.join("codex-executable.txt"),chatgpt_accounts::account_home(&root,&profile.id)?);
-  codex_capabilities(|method,params|client.request(method,params),profile.email.as_deref())
+  codex_capabilities(|method,params|client.request(method,params),profile.email.as_deref(),||codex_models::catalog(&chatgpt_accounts::account_home(&root,&profile.id)?))
  }).await.map_err(|e|e.to_string())?
 }
-fn codex_capabilities(mut request:impl FnMut(&str,serde_json::Value)->Result<serde_json::Value,String>,email:Option<&str>)->Result<serde_json::Value,String>{
-  let account=request("account/read",serde_json::json!({"refreshToken":false}));
+fn codex_capabilities(mut request:impl FnMut(&str,serde_json::Value)->Result<serde_json::Value,String>,email:Option<&str>,live_catalog:impl FnOnce()->Result<serde_json::Value,String>)->Result<serde_json::Value,String>{
+  let account=request("account/read",serde_json::json!({"refreshToken":true}));
   let account_error=match account{Ok(account) if account["account"]["type"]=="chatgpt" && !email.is_some_and(|email|account["account"]["email"].as_str()!=Some(email))=>None,Ok(_)=>Some(codex::missing_account_error()),Err(error)=>Some(error)};
   let mut models=Vec::new();let mut cursor:Option<String>=None;let mut seen=std::collections::HashSet::new();
   loop {let page=request("model/list",serde_json::json!({"limit":100,"cursor":cursor,"includeHidden":false}))?;if let Some(data)=page["data"].as_array(){models.extend(data.clone());}cursor=page["nextCursor"].as_str().map(String::from);match &cursor{Some(value) if seen.insert(value.clone())=>{},_=>break}}
+  let live=if let Some(error)=&account_error{Err(error.clone())}else{live_catalog()};
+  let models=live.as_ref().map(|catalog|codex_models::selectable(catalog,&models)).unwrap_or_default();
   let usage=match account_error{Some(error)=>Err(error),None=>request("account/rateLimits/read",serde_json::json!({}))};
-  Ok(serde_json::json!({"models":models,"usage":usage.as_ref().ok(),"usageError":usage.err()}))
+  Ok(serde_json::json!({"models":models,"modelsError":live.err(),"usage":usage.as_ref().ok(),"usageError":usage.err()}))
 }
 #[tauri::command]
 async fn save_agent_profile(label: String, provider: String, executable: String, key: String, state: State<'_, AppState>) -> Result<agents::Profile, String> {
@@ -972,13 +975,13 @@ pub fn run() {
 
 #[cfg(test)] mod codex_catalog_tests {
  use super::*;
- #[test] fn signed_out_account_keeps_catalog_without_reading_usage(){
+ #[test] fn signed_out_account_hides_unverified_catalog_without_reading_usage(){
   let mut calls=Vec::new();
-  let result=codex_capabilities(|method,_|{calls.push(method.to_owned());match method{"account/read"=>Ok(serde_json::json!({"account":null})),"model/list"=>Ok(serde_json::json!({"data":[{"model":"available-model"}],"nextCursor":null})),_=>panic!("Usage must not be read for an unverified account")}},None).unwrap();
-  assert_eq!(result["models"][0]["model"],"available-model");assert!(result["usage"].is_null());assert!(!result["usageError"].as_str().unwrap().is_empty());assert_eq!(calls,vec!["account/read","model/list"]);
+  let result=codex_capabilities(|method,_|{calls.push(method.to_owned());match method{"account/read"=>Ok(serde_json::json!({"account":null})),"model/list"=>Ok(serde_json::json!({"data":[{"model":"available-model"}],"nextCursor":null})),_=>panic!("Usage must not be read for an unverified account")}},None,||panic!("Signed out accounts must not query the live catalog")).unwrap();
+  assert!(result["models"].as_array().unwrap().is_empty());assert!(result["usage"].is_null());assert!(!result["usageError"].as_str().unwrap().is_empty());assert_eq!(calls,vec!["account/read","model/list"]);
  }
  #[test] fn verified_account_retains_paginated_catalog_and_usage(){
-  let result=codex_capabilities(|method,params|Ok(match method{"account/read"=>serde_json::json!({"account":{"type":"chatgpt","email":"test@example.test"}}),"model/list" if params["cursor"].is_null()=>serde_json::json!({"data":[{"model":"first"}],"nextCursor":"page-two"}),"model/list"=>serde_json::json!({"data":[{"model":"second"}],"nextCursor":null}),"account/rateLimits/read"=>serde_json::json!({"rateLimits":{}}),_=>panic!("Unexpected request")}),Some("test@example.test")).unwrap();
+  let result=codex_capabilities(|method,params|Ok(match method{"account/read"=>serde_json::json!({"account":{"type":"chatgpt","email":"test@example.test"}}),"model/list" if params["cursor"].is_null()=>serde_json::json!({"data":[{"model":"first"}],"nextCursor":"page-two"}),"model/list"=>serde_json::json!({"data":[{"model":"second"}],"nextCursor":null}),"account/rateLimits/read"=>serde_json::json!({"rateLimits":{}}),_=>panic!("Unexpected request")}),Some("test@example.test"),||Ok(serde_json::json!({"models":[{"slug":"first","visibility":"list"},{"slug":"second","visibility":"list"}]}))).unwrap();
   assert_eq!(result["models"].as_array().unwrap().len(),2);assert!(!result["usage"].is_null());assert!(result["usageError"].is_null());
  }
 }

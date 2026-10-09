@@ -151,6 +151,14 @@ impl Agents {
         .to_string_lossy()
         .into_owned();
         if profile.disconnected { return Err("This ChatGPT identity is disconnected. Reconnect it in Identities.".into()); }
+        if profile.subscription {
+            if let Some(model)=selected_model.filter(|model| !model.is_empty()) {
+                let home=crate::chatgpt_accounts::account_home(root,profile_id)?;
+                let client=crate::codex::CodexService::for_account(root.join("codex-executable.txt"),home.clone());
+                client.request("account/read",serde_json::json!({"refreshToken":true}))?;
+                crate::codex_models::validate(&home,model)?;
+            }
+        }
         let key = if profile.subscription { String::new() } else { entry(profile_id)?.get_password().map_err(|e| format!("Agent key is unavailable: {e}"))? };
         let path = Path::new(&repo.local_path)
             .canonicalize()
