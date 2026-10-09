@@ -26,7 +26,7 @@ Handoffs pass context and boolean flags to another automation in the same reposi
 
 New automations start with no condition selected. Manual is exclusive and hides repository and branch selection; its repository is chosen at run time and its saved branch scope is unrestricted. Branch-set suggestions include “All except” and restore the checkbox when applied. Condition parameter dialogs close with Done, Enter, or Escape (Enter first applies an open name suggestion). Drafting starts hidden; the Draft with AI feature button toggles the drafting pane and gives the full editor width to the prompt or shell script while closed. The automation list scrolls within its pane.
 
-Agent prompt, Shell command, and Notification message keep separate text and undo histories when switching type. Codex model and reasoning selectors share the action heading with the execution agent; Refresh Codex models verifies available choices with the assigned ChatGPT accounts and obtains reasoning metadata from the configured Codex runtime. No static model list is substituted.
+Agent prompt, Shell command, and Notification message keep separate text and undo histories when switching type. Codex model and reasoning selectors share the action heading with the execution agent; Refresh Codex models loads the assigned accounts’ model catalogs and reasoning metadata through the configured Codex runtime. No static model list is substituted.
 
 Emit handoffs is available for all three automation types. Its info button opens help; notifications publish their message as the handoff payload under each configured outgoing name, using the normal per-repository queue and cleanup lifecycle.
 
@@ -117,7 +117,7 @@ of conditions; older `conditions` records remain supported.
 
 The in-app handoff popover gives a brief summary and Agent/Shell examples. The separate [handoff guide](handoffs.md) provides detailed instructions and commands. Automation cards grow to display their full names and scope/condition summaries. They do not shrink as more cards are added; the containing automation list scrolls within its pane.
 
-Codex model discovery requires a verified account and a successful live catalog request. A missing session or failed catalog refresh hides model choices and exposes the problem through the model-availability info button. Usage failures are reported separately. Provider default remains available.
+Codex model discovery uses the configured CLI’s model/list catalog, independently of its account/usage check. Usage or sign-in warnings do not erase the model catalog. Hidden models and explicit model rejections are excluded for the affected account/configuration. A catalog RPC failure is reported through the model-availability info button. Provider default remains available.
 
 Right-click an automation card, or focus it and press Shift+F10, for Open log, Edit, Run once, Enable/Disable, and Remove. Opening its log clears the card’s unread error indicator while retaining the error details. Previous/Next buttons in Edit, or Alt+Left/Alt+Right, save before switching to the adjacent automation without closing the dialog; validation errors block navigation. Only explicit user actions disable automations, including after migration or clearing pending state. Handoff retention defaults to 24 hours and is configurable in the Automation header; see [handoffs.md](handoffs.md).
 
@@ -234,14 +234,23 @@ and preserved on blocked-action retries even after editing the automation.
 These inputs are intended for ordinary parameters, not secrets. Notification
 runs collect and record them but do not interpolate the notification message.
 
-Codex model choices are verified against the currently assigned ChatGPT accounts,
-not just the CLI's bundled catalog. When an automation covers several accounts,
-the picker offers their common available models. Refresh after changing account
-access. If availability cannot be verified, use **Provider default** or repair
-account access and refresh. Saved models unavailable for the configured scope are
-not offered; saving uses the displayed Provider default. Execution also checks
-explicit model availability for the actual account and reports an error without
-disabling the automation if access has changed.
+Codex model choices and execution use the same configured runtime and ChatGPT
+account. Automatic discovery compares installed CLI versions (including Codex
+bundled with local VS Code/Cursor extensions) and selects the newest. Explicit
+Advanced-settings or environment overrides remain authoritative. The **Codex
+catalog source** info button shows the exact executable and version. Changing
+provider configuration refreshes the catalog, as does **Refresh Codex models**.
+
+The picker follows the runtime's catalog, excludes hidden entries, and intersects
+choices when several accounts are in scope. There is no hardcoded model list or
+history-based model injection. Model lists can differ across CLI versions even
+for the same account: 0.154.0 omitted GPT-6.1 Sol while 0.162.0-alpha.17.2 listed it
+in a controlled comparison. The catalog is advisory: a listed model can still be
+rejected during inference. Explicit server rejections are excluded for 24 hours.
+A rejection that explicitly names ChatGPT account support survives runtime changes
+for that account; other model rejections apply to the runtime binary that produced
+them. Network and login errors never exclude models. No inference requests probe
+model access.
 
 The automation editor is anchored near the top of the viewport. Previous/next
 buttons keep the same vertical position across actions while the body scrolls.

@@ -1,110 +1,166 @@
-//! Account-authorized model catalog. Authentication never crosses IPC.
+//! Filter the runtime catalog using explicit account or runtime rejections.
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use std::{path::Path, time::Duration};
-
-fn credential_user(home: &Path) -> Result<String, String> {
-    let home = home
+use std::{
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
+#[derive(Serialize, Deserialize)]
+struct Denial {
+    model: String,
+    at: u64,
+    #[serde(default)]
+    runtime: String,
+    #[serde(default)]
+    account_restriction: bool,
+}
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+pub fn runtime_key(executable: &Path) -> String {
+    let path = executable
         .canonicalize()
-        .map_err(|_| "ChatGPT account home is unavailable")?;
-    let digest = format!("{:x}", Sha256::digest(home.to_string_lossy().as_bytes()));
-    Ok(format!("cli-{}", &digest[..16]))
+        .unwrap_or_else(|_| executable.into());
+    let metadata = std::fs::metadata(&path).ok();
+    let modified = metadata
+        .as_ref()
+        .and_then(|value| value.modified().ok())
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos())
+        .unwrap_or_default();
+    format!(
+        "{}:{}:{modified}",
+        path.display(),
+        metadata.map(|value| value.len()).unwrap_or_default()
+    )
 }
-pub fn catalog(home: &Path) -> Result<Value, String> {
-    let user = credential_user(home)?;
-    let raw = keyring::Entry::new("Codex Auth", &user)
-        .and_then(|entry| entry.get_password())
-        .map_err(|_| "Cannot verify model availability: ChatGPT credentials are unavailable in the OS credential store.")?;
-    let auth: Value =
-        serde_json::from_str(&raw).map_err(|_| "Cannot read ChatGPT model credentials")?;
-    let token = auth["tokens"]["access_token"]
-        .as_str()
-        .filter(|value| !value.is_empty())
-        .ok_or("ChatGPT model credentials contain no access token")?;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|_| "Cannot initialize the model catalog client")?;
-    let mut request = client
-        .get("https://api.openai.com/v1/models")
-        .bearer_auth(token);
-    if let Some(account) = auth["tokens"]["account_id"].as_str() {
-        request = request.header("ChatGPT-Account-ID", account);
-    }
-    let response = request.send().map_err(|_| "Cannot verify model availability: model catalog request failed. Check your connection and refresh.")?;
-    if !response.status().is_success() {
-        return Err(format!("Cannot verify model availability (HTTP {}). Refresh or reconnect the selected ChatGPT account.", response.status().as_u16()));
-    }
-    let catalog: Value = response
-        .json()
-        .map_err(|_| "Invalid account model catalog response")?;
-    if !catalog["models"].is_array() {
-        return Err("The account did not return a selectable model catalog".into());
-    }
-    Ok(catalog)
+fn records(home: &Path) -> Vec<Denial> {
+    std::fs::read(home.join("rejected-models.json"))
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
 }
-pub fn selectable(catalog: &Value, metadata: &[Value]) -> Vec<Value> {
-    catalog["models"]
-        .as_array()
+pub fn denied(home: &Path, runtime: &str) -> Vec<String> {
+    records(home)
         .into_iter()
-        .flatten()
-        .filter(|item| item["visibility"] == "list")
-        .filter_map(|item| {
-            let slug = item["slug"].as_str().filter(|slug| !slug.is_empty())?;
-            let mut model = metadata
-                .iter()
-                .find(|model| model["model"] == slug)
-                .cloned()
-                .unwrap_or_else(|| {
-                    serde_json::json!({
-                        "model":slug,"displayName":slug,"isDefault":false,
-                        "defaultReasoningEffort":"medium","supportedReasoningEfforts":[]
-                    })
-                });
-            if let Some(name) = item["display_name"].as_str() {
-                model["displayName"] = name.into();
-            }
-            Some(model)
+        .filter(|item| {
+            (item.account_restriction || item.runtime == runtime)
+                && now().saturating_sub(item.at) < 86400
         })
+        .map(|item| item.model)
         .collect()
 }
-pub fn validate(home: &Path, model: &str) -> Result<(), String> {
-    let catalog = catalog(home)?;
-    if selectable(&catalog, &[])
+pub fn selectable(models: &[Value], denied: &[String]) -> Vec<Value> {
+    models
         .iter()
-        .any(|item| item["model"] == model)
-    {
-        Ok(())
+        .filter(|item| item["hidden"] != true)
+        .filter(|item| {
+            item["model"]
+                .as_str()
+                .is_some_and(|model| !denied.iter().any(|value| value == model))
+        })
+        .cloned()
+        .collect()
+}
+fn is_rejection(model: &str, error: &str) -> bool {
+    let lower = error.to_lowercase();
+    error.contains(model)
+        && (lower.contains("not supported")
+            || lower.contains("unsupported model")
+            || lower.contains("do not have access to model"))
+}
+pub fn validate(home: &Path, model: &str, runtime: &str) -> Result<(), String> {
+    if denied(home, runtime).iter().any(|value| value == model) {
+        Err(format!("Model {model} was rejected for this Codex configuration. Choose another listed model or Provider default. The automation remains enabled."))
     } else {
-        Err(format!("Model {model} is unavailable for the selected ChatGPT account. Choose an available model or Provider default; the automation remains enabled."))
+        Ok(())
     }
+}
+pub fn remember_rejection(
+    home: &Path,
+    model: &str,
+    error: &str,
+    runtime: &str,
+) -> Result<(), String> {
+    if !is_rejection(model, error) {
+        return Ok(());
+    }
+    static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = WRITE_LOCK.lock().map_err(|error| error.to_string())?;
+    let mut entries = records(home)
+        .into_iter()
+        .filter(|entry| {
+            now().saturating_sub(entry.at) < 86400
+                && !(entry.model == model && entry.runtime == runtime)
+        })
+        .collect::<Vec<_>>();
+    let account_restriction = error.to_lowercase().contains("chatgpt account");
+    entries.push(Denial {
+        model: model.into(),
+        at: now(),
+        runtime: runtime.into(),
+        account_restriction,
+    });
+    let pending = home.join("rejected-models.pending");
+    std::fs::write(
+        &pending,
+        serde_json::to_vec(&entries).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    std::fs::rename(pending, home.join("rejected-models.json")).map_err(|error| error.to_string())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn live_catalog_excludes_bundled_and_hidden_models() {
-        let catalog = serde_json::json!({"models":[{"slug":"supported","display_name":"Supported","visibility":"list"},{"slug":"hidden","visibility":"hide"}]});
-        let metadata = vec![
+    fn catalog_controls_choices_without_hardcoded_models_or_history() {
+        let catalog = vec![
+            serde_json::json!({"model":"gpt-6.1-sol"}),
             serde_json::json!({"model":"gpt-6-luna"}),
-            serde_json::json!({"model":"supported","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"high"}]}),
+            serde_json::json!({"model":"future-model"}),
+            serde_json::json!({"model":"hidden","hidden":true}),
         ];
-        let models = selectable(&catalog, &metadata);
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0]["model"], "supported");
-        assert_eq!(models[0]["displayName"], "Supported");
-        assert_eq!(
-            models[0]["supportedReasoningEfforts"][0]["reasoningEffort"],
-            "high"
-        );
+        assert_eq!(selectable(&catalog, &[]).len(), 3);
+        assert_eq!(selectable(&catalog, &["gpt-6-luna".into()]).len(), 2);
+        assert!(selectable(&[], &[]).is_empty());
     }
     #[test]
-    fn live_only_models_are_available_without_bundled_metadata() {
-        let models = selectable(
-            &serde_json::json!({"models":[{"slug":"new","visibility":"list"}]}),
-            &[],
+    fn chatgpt_restriction_survives_runtime_upgrade_without_hiding_sol() {
+        let account = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let error = r#"{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account."}}"#;
+        remember_rejection(account.path(), "gpt-6-luna", error, "old").unwrap();
+        assert!(validate(account.path(), "gpt-6-luna", "new").is_err());
+        assert!(validate(other.path(), "gpt-6-luna", "new").is_ok());
+        let catalog = vec![
+            serde_json::json!({"model":"gpt-6-luna"}),
+            serde_json::json!({"model":"gpt-6.1-sol"}),
+        ];
+        assert_eq!(
+            selectable(&catalog, &denied(account.path(), "new")),
+            vec![catalog[1].clone()]
         );
-        assert_eq!(models[0]["model"], "new");
-        assert!(selectable(&serde_json::json!({}), &[]).is_empty());
+        let mut entries = records(account.path());
+        entries[0].at = now().saturating_sub(86401);
+        std::fs::write(
+            account.path().join("rejected-models.json"),
+            serde_json::to_vec(&entries).unwrap(),
+        )
+        .unwrap();
+        assert!(validate(account.path(), "gpt-6-luna", "new").is_ok());
+    }
+    #[test]
+    fn rejections_are_account_and_runtime_scoped() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        remember_rejection(first.path(), "model", "network unavailable", "old").unwrap();
+        assert!(denied(first.path(), "old").is_empty());
+        remember_rejection(first.path(), "model", "unsupported model: model", "old").unwrap();
+        assert!(validate(first.path(), "model", "old").is_err());
+        assert!(validate(first.path(), "model", "new").is_ok());
+        assert!(validate(second.path(), "model", "old").is_ok());
     }
 }

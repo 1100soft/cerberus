@@ -154,9 +154,7 @@ impl Agents {
         if profile.subscription {
             if let Some(model)=selected_model.filter(|model| !model.is_empty()) {
                 let home=crate::chatgpt_accounts::account_home(root,profile_id)?;
-                let client=crate::codex::CodexService::for_account(root.join("codex-executable.txt"),home.clone());
-                client.request("account/read",serde_json::json!({"refreshToken":true}))?;
-                crate::codex_models::validate(&home,model)?;
+                crate::codex_models::validate(&home,model,&crate::codex_models::runtime_key(Path::new(&profile.executable)))?;
             }
         }
         let key = if profile.subscription { String::new() } else { entry(profile_id)?.get_password().map_err(|e| format!("Agent key is unavailable: {e}"))? };
@@ -240,6 +238,13 @@ impl Agents {
                 output,
                 &key,
             ) };
+            if profile.subscription {
+                if let (Some(model),Err(error))=(selected_model,&result) {
+                    if let Err(storage_error)=crate::codex_models::remember_rejection(&home,model,error,&crate::codex_models::runtime_key(Path::new(&profile.executable))){
+                        let _=summary_output.send(SetupOutput{text:format!("Could not remember model rejection: {storage_error}\n")});
+                    }
+                }
+            }
             match before.and_then(|before| crate::agent_edits::snapshot(&path).map(|after| crate::agent_edits::changes(&before, &after))) {
                 Ok(changes) => { let _ = summary_output.send(SetupOutput {text:format!("{}\n", serde_json::json!({"type":"workspace_changes","repository":path,"changes":changes}))}); }
                 Err(error) => { let _ = summary_output.send(SetupOutput {text:format!("Workspace change summary unavailable: {error}\n")}); }
@@ -277,6 +282,7 @@ fn command(
         .env_remove("OPENAI_API_KEY")
         .env_remove("CODEX_API_KEY")
         .env_remove("CODEX_ACCESS_TOKEN")
+        .env_remove("CODEX_INTERNAL_ORIGINATOR_OVERRIDE")
         .env_remove("CURSOR_API_KEY")
         .env_remove("GH_TOKEN")
         .env_remove("GITHUB_TOKEN");

@@ -4,7 +4,7 @@ import {inTauri} from './api';
 export type ModelOption={model:string;displayName:string;isDefault:boolean;defaultReasoningEffort:string;supportedReasoningEfforts:{reasoningEffort:string;description:string}[]};
 type Credits={balance?:string;unlimited?:boolean};
 type RateLimits={limitId?:string;limitName?:string;primary?:Window;secondary?:Window;credits?:Credits};
-export type Capabilities={models:ModelOption[];modelsError?:string;usage?:{rateLimits?:RateLimits;rateLimitsByLimitId?:Record<string,RateLimits>|null};usageError?:string};
+export type Capabilities={models:ModelOption[];runtime?:{executable:string;version?:string};modelsError?:string;usage?:{rateLimits?:RateLimits;rateLimitsByLimitId?:Record<string,RateLimits>|null};usageError?:string};
 type Window={usedPercent:number;windowDurationMins?:number;resetsAt?:number};
 const cache=new Map<string,{time:number;value:Capabilities}>();
 const requests=new Map<string,Promise<Capabilities>>();
@@ -23,7 +23,7 @@ export function useChatgptCapabilities(account?:string|string[]){
   const saved=ids.map(id=>cache.get(id));
   if(!force && saved.every(value=>value && Date.now()-value.time<60000)){setState({id,data:commonCapabilities(saved.map(value=>value!.value))});return;}
   void Promise.all(ids.map(fetchCapabilities)).then(values=>{if(live)setState({id,data:commonCapabilities(values)});}).catch(error=>{if(live)setState({id,error:String(error)});});
- };const force=()=>refresh(true);refresh();const interval=setInterval(force,60000);window.addEventListener('chatgpt-usage-refresh',force);return()=>{live=false;clearInterval(interval);window.removeEventListener('chatgpt-usage-refresh',force);};},[id]);
+ };const force=()=>refresh(true);refresh();const interval=setInterval(force,60000);window.addEventListener('chatgpt-usage-refresh',force);window.addEventListener('agent-configuration-changed',force);return()=>{live=false;clearInterval(interval);window.removeEventListener('chatgpt-usage-refresh',force);window.removeEventListener('agent-configuration-changed',force);};},[id]);
  return state.id===id ? state : {};
 }
 function snapshots(data?:Capabilities){

@@ -24,7 +24,7 @@ const useState=()=>[hookState,value=>{hookState=value;}];
 const useEffect=fn=>{effect=fn;};
 const useSyncExternalStore=()=>undefined;
 const inTauri=()=>true;
-const invoke=async()=>{if(fail)throw Error('Catalog offline');return {models:[{model:'available-model'}]};};
+const invoke=async()=>{if(fail)throw Error('Catalog offline');return {models:[{model:'available-model'}],usageError:'Usage check unavailable'};};
 `;
 const fixtureSuffix=`
 export async function verifyRefresh(){
@@ -41,4 +41,4 @@ const fixture=await import(`data:text/javascript;base64,${Buffer.from(fixtureCod
 await fixture.verifyRefresh();
 assert.deepEqual(fixture.commonCapabilities([{models:[{model:'shared'},{model:'first-only'}]},{models:[{model:'shared'}]}]).models,[{model:'shared'}]);
 assert.deepEqual(fixture.commonCapabilities([{models:[{model:'shared'}]},{models:[],modelsError:'Unavailable'}]).models,[]);
-console.log('Codex choices require verified availability and remain isolated by account; multiple accounts use their intersection');
+console.log('Codex runtime catalogs survive usage warnings and remain isolated by account; multiple accounts use their intersection');

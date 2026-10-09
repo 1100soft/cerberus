@@ -948,3 +948,80 @@ The broader saved-prompts fixture passed on sequential rerun; an earlier concurr
 UI-fixture run reported a retention-dialog bound failure, so do not run these
 shared WebKit browser-state fixtures concurrently. Workflow lint, shared contract
 and release tooling tests, new-module rustfmt, and diff whitespace checks passed.
+
+## Model-picker regression repair (2026-10-09)
+
+Supersedes the preceding live-catalog implementation. It incorrectly applied the
+separate SIWC Responses/API flow to Codex CLI sign-ins and guessed CLI credential
+storage details. Removed direct keyring/token access, api.openai.com/v1/models
+calls and the added sha2 dependency. Native catalog loading again uses model/list
+with the configured account-specific Codex runtime. Account/usage errors do not
+remove the runtime catalog. Model filters exclude hidden entries, the confirmed
+ChatGPT-incompatible gpt-6-luna, and explicit model rejections recorded per account
+for 24 hours. Network/other errors do not remove models. Multi-account scopes still
+use common choices; connected accounts supply catalogs before repository routing
+is configured. Catalog advertising alone is not an entitlement guarantee; do not
+claim otherwise. No inference probes or authentication-schema assumptions remain.
+
+Repair validation: native suite passed 124 tests with 5 intentional ignores;
+updated Codex-specific regressions passed 14 tests, including Sol catalog
+preservation during account warnings and exclusion of Luna. Production build,
+model hook and chat regressions, rustfmt for codex_models.rs and diff whitespace
+checks passed. Explicit model failure immediately refreshes frontend catalogs.
+No live inference/model access probe was made, and no credentials were read by
+the repaired model discovery implementation.
+
+## Preserve proven model access across catalog omissions (2026-10-09)
+
+The sole active app ChatGPT account's current models_cache.json omits GPT-6.1
+Sol, but its durable conversation history contains two completed runs explicitly
+using gpt-6.1-sol. Catalog omission is not proof of denied access. Capabilities
+now supplement runtime choices with models that completed under the same profile,
+unless a newer explicit access rejection, active account denial, or confirmed
+compatibility exclusion applies. Existing runtime ordering is preserved. Native
+regressions cover Sol surviving omission, account isolation and later rejection.
+No live inference was performed to probe access; only model/status/account
+metadata was inspected, with no conversation text or credentials printed.
+
+## Root cause and runtime-based model discovery (2026-10-09)
+
+Controlled live catalog comparison used the same app CODEX_HOME, ChatGPT account,
+OpenAI provider, keyring storage and gitcerberus client identity, changing only
+executable version. Account/read recognized ChatGPT in both. PATH Codex 0.154.0
+listed Astra and 5.6 models but omitted 6.1 Sol/6 Sol/6 Luna. VS Code's installed
+0.162.0-alpha.17.2 listed all three. No inference, credentials extraction or client
+impersonation was used. The omission comes from runtime-version catalog behavior,
+not proof that the account lacks access to Sol. Earlier provider resolution took
+PATH/legacy profile paths first and did not consider installed extension runtimes.
+
+Automatic Codex discovery now probes bounded --version calls and chooses the
+newest installed runtime by semver, including platform-matching local VS Code,
+VS Code Insiders/Server, and Cursor extension executables. Stable beats prerelease
+at the same version. Explicit saved/environment overrides remain authoritative.
+Capabilities pin the resolved executable and expose its path/version; agent
+execution uses the same resolver. App-managed discovery and execution both force
+the OpenAI provider and remove inherited originator overrides, retaining the
+honest gitcerberus identity. Configuration-change events refresh model catalogs.
+
+Removed all model-name incompatibility rules and the successful-history model
+injection; these earlier workarounds are superseded. Catalog metadata and ordering
+come from the configured runtime. Explicit server model rejections are scoped to
+account plus executable fingerprint (path/size/mtime), expire after 24 hours and
+are written atomically. A runtime upgrade/switch re-evaluates models instead of
+inheriting obsolete denial evidence. Source info in the automation editor makes
+future discrepancies diagnosable. No installations, settings overrides, pushes
+or credential changes were made by this investigation.
+
+Runtime-root-cause validation: live account/read + model/list comparison recognized
+the same app ChatGPT identity in both runtimes; it showed Sol omissions in 0.154.0
+and the Sol entries in 0.162.0-alpha.17.2. Production build, model hook/chat checks,
+126 native tests (5 intentional ignores), automation UI checks at 100/140/150%
+zoom, new-module formatting and diff whitespace checks passed. Resolver tests
+cover newer extension over older PATH, stable over same-version prerelease,
+platform-specific extension discovery and explicit override precedence. Model
+filter tests include future catalog entries without hardcoded exclusions and
+account/runtime isolation of explicit rejections.
+
+### Codex catalog versus inference restriction follow-up
+
+The Sol/Luna cached metadata exposes identical visibility, API-support, and access-program fields. Catalog visibility is not proof of ChatGPT inference support. The reported Luna 400 explicitly rejects ChatGPT-account usage; successful Sol runs establish different actual support, but the server-side reason for that policy is not exposed. Fixed rejection scope: explicit ChatGPT-account restrictions survive runtime changes for that account (24-hour TTL); generic model errors remain runtime-scoped. Added a regression using the exact reported JSON error, retaining Sol and isolating other accounts, plus expiry coverage. Targeted codex_models tests: 3 passed. Historical failures predating rejection recording cannot be assumed to have a persisted denial; no inference probe or credential extraction was performed.
