@@ -13,7 +13,7 @@ from gi.repository import Gtk, WebKit2, GLib
 urllib.request.urlopen('http://127.0.0.1:3000', timeout=5).close()
 script = r"""
 (async()=>{
- const pause=()=>new Promise(resolve=>setTimeout(resolve,80));const assert=(ok,message)=>{if(!ok)throw Error(message)};const wait=async(get)=>{for(let i=0;i<100;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for repository UI');};
+ const pause=()=>new Promise(resolve=>setTimeout(resolve,80));const assert=(ok,message)=>{if(!ok)throw Error(message)};const wait=async(get)=>{for(let i=0;i<100;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for repository UI: '+get.toString());};
  const apiSource=await (await fetch('/src/lib/conversationCache.ts')).text();const apiPath=apiSource.match(/from "([^"\n]*\/api\.ts[^"\n]*)"/)[1];const {api}=await import(apiPath);
  await wait(()=>document.querySelectorAll('.repo-row').length>0);const accounts=await api.identities();
  api.githubRepositories=async()=>({repositories:[],warnings:[]});
@@ -29,9 +29,15 @@ script = r"""
   for(const label of ['Identity','GitHub repository visibility']){const button=document.querySelector(`[aria-label="${label}"]`);button.scrollIntoView({block:'center'});await pause();button.click();const list=await wait(()=>document.querySelector('[role="listbox"]'));await pause();const bounds=list.getBoundingClientRect();assert(bounds.right<=innerWidth+1&&bounds.bottom<=innerHeight+1,'Creation menu overflows '+zoom);if(label==='Identity')assert(accounts.every(account=>list.textContent.includes(account.label)),'Accounts disappeared without catalog matches');list.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await wait(()=>!document.querySelector('[role="listbox"]'));}
  }
  // Wait for committed option state between keys rather than relying on an 80 ms delay.
- document.documentElement.style.setProperty('--ui-zoom',1);await pause();
- document.querySelector('[aria-label="GitHub repository visibility"]').click();
+ document.documentElement.style.setProperty('--ui-zoom',1);
+ const visibility=document.querySelector('[aria-label="GitHub repository visibility"]');
+ visibility.scrollIntoView({block:'center'});
+ // Zoom and scrolling can dismiss an open Select. Settle layout before opening it.
+ let previousBounds='';let stableSamples=0;
+ await wait(()=>{const bounds=JSON.stringify(visibility.getBoundingClientRect());stableSamples=bounds===previousBounds?stableSamples+1:0;previousBounds=bounds;return stableSamples>=3;});
+ visibility.click();
  const menu=await wait(()=>document.querySelector('[role="listbox"]'));
+ menu.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));
  await wait(()=>menu.querySelector('[data-value="private"]').id===menu.getAttribute('aria-activedescendant'));
  menu.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
  await wait(()=>menu.querySelector('[data-value="public"]').id===menu.getAttribute('aria-activedescendant'));
