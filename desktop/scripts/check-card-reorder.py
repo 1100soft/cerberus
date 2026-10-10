@@ -43,11 +43,11 @@ script = r"""
  document.querySelector('.repo-row.repo-local[data-repository-id="'+sourceId+'"]').click();
  await wait(()=>document.querySelector('.history-tabs [role="tab"]')?.textContent.includes('main'));
  branchNames=['main','private/agent-work'];window.dispatchEvent(new Event('focus'));
- const privateBranch=await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.textContent==='private/agent-work'));
+ const privateBranch=await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.getAttribute('aria-label')==='private/agent-work'));
  privateBranch.click();await wait(()=>historyBranch==='private/agent-work');
  assert(pollBranches,'Branch list has no independent polling fallback');
  branchNames=['main','private/agent-work','private/second-worktree'];pollBranches();
- await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.textContent==='private/second-worktree'));
+ await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.getAttribute('aria-label')==='private/second-worktree'));
  window.setInterval=nativeSetInterval;
  const originalPlan=api.branchRemovalPlan,originalRemove=api.removeBranch;
  const plan={branch:'private/agent-work',head:'a'.repeat(40),merged:true,worktrees:['/tmp/linked tree'],remote:'origin',remoteHead:'a'.repeat(40)};
@@ -71,11 +71,11 @@ script = r"""
  document.querySelector('.branch-removal-dialog footer button:last-child').click();
  await wait(()=>document.querySelector('.branch-removal-dialog').textContent.includes('Branch removal completed'));
  assert(removalCalls===1,'Confirmation ran removal more than once');
- await wait(()=>![...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.textContent===plan.branch));
+ await wait(()=>![...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.getAttribute('aria-label')===plan.branch));
  assert(document.querySelector('.history-tabs [aria-selected="true"]').textContent==='main','History retained the removed branch selection');
  document.querySelector('[aria-label="Close branch removal"]').click();await pause();
  assert(document.querySelector('[aria-label="Remove selected branch"]').disabled,'Current checkout branch removal was enabled');
- const remainingBranch=[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.textContent==='private/second-worktree');remainingBranch.click();await pause();
+ const remainingBranch=[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.getAttribute('aria-label')==='private/second-worktree');remainingBranch.click();await pause();
  api.branchRemovalPlan=async()=>{throw Error('Branch is unmerged');};
  document.querySelector('[aria-label="Remove selected branch"]').click();
  await wait(()=>document.querySelector('.branch-removal-dialog [role="alert"]')?.textContent.includes('unmerged'));

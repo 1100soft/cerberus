@@ -9,6 +9,12 @@ fn active_runs() -> &'static std::sync::Mutex<std::collections::HashMap<String, 
         std::sync::OnceLock::new();
     RUNS.get_or_init(Default::default)
 }
+pub fn is_active(run_id: &str) -> bool {
+    active_runs()
+        .lock()
+        .map(|runs| runs.contains_key(run_id))
+        .unwrap_or(true)
+}
 pub struct Activity(String);
 pub fn activate(run_id: &str) -> Activity {
     *active_runs()
@@ -270,6 +276,54 @@ pub fn cleanup(
 mod cleanup_tests {
     use super::*;
     #[test]
+    fn retention_deadline_controls_periodic_cleanup() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q"]).unwrap();
+        git(
+            repo.path(),
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "base",
+            ],
+        )
+        .unwrap();
+        let checkout = prepare(root.path(), repo.path(), "repo", "scheduled", None).unwrap();
+        let deadline = cleanup_at(root.path(), &checkout).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert!(deadline > now + 23 * 3_600_000);
+        assert_eq!(sweep(root.path(), repo.path(), "repo", &[]).unwrap(), 0);
+        assert!(checkout.exists());
+        fs::write(root.path().join("handoff-retention-hours"), "1").unwrap();
+        assert_eq!(
+            cleanup_at(root.path(), &checkout).unwrap() + 23 * 3_600_000,
+            deadline
+        );
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(checkout.join(".git"))
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        assert_eq!(
+            sweep(root.path(), repo.path(), "repo", &["scheduled".into()]).unwrap(),
+            0
+        );
+        assert!(checkout.exists());
+        assert_eq!(sweep(root.path(), repo.path(), "repo", &[]).unwrap(), 1);
+        assert!(!checkout.exists());
+    }
+    #[test]
     fn clean_referenced_checkouts_are_removed_but_dirty_and_unique_work_are_kept() {
         let repo = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -336,6 +390,22 @@ mod cleanup_tests {
     }
 }
 
+/// Earliest periodic cleanup attempt; active/blocked leases and Git safety still apply.
+pub fn cleanup_at(root: &Path, checkout: &Path) -> Option<u64> {
+    let hours = fs::read_to_string(root.join("handoff-retention-hours"))
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .filter(|hours| (1..=8760).contains(hours))
+        .unwrap_or(24);
+    let created = fs::metadata(checkout.join(".git"))
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as u64;
+    Some(created.saturating_add(hours * 3_600_000))
+}
 /// Revisit retained checkouts after their active/blocked lease ends. Never force removal.
 pub fn sweep(
     root: &Path,
@@ -358,6 +428,13 @@ pub fn sweep(
             || protected.contains(&id)
             || !entry.file_type().map_err(|e| e.to_string())?.is_dir()
         {
+            continue;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        if cleanup_at(root, &entry.path()).is_none_or(|deadline| now < deadline) {
             continue;
         }
         match cleanup(root, repository, repository_id, &id) {

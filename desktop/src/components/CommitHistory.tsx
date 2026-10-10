@@ -1,14 +1,18 @@
+import { useAutomationRuns } from '../lib/savedPrompts';
 import { requestTimeout } from '../lib/requestTimeout';
 import { matchesShortcut } from '../lib/shortcuts';
 import { useEffect, useId, useRef, useState } from "react";
-import { GitBranch, GitCommitHorizontal, RefreshCw, Trash2, X } from "lucide-react";
-import { api, inTauri, type BranchRemovalPlan } from "../lib/api";
+import { GitBranch, GitCommitHorizontal, RefreshCw, Trash2, X, ArrowDownToLine, AlertTriangle, Clock } from "lucide-react";
+import { api, inTauri, type BranchListEntry, type BranchSyncStatus, type BranchRemovalPlan } from "../lib/api";
 import { listen } from "@tauri-apps/api/event";
 import type { Commit, Repository } from "../types";
 
 export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = true }: { repository?: Repository; unlinkedName?: string; shortcutsEnabled?: boolean }) {
   const [branch, setBranch] = useState(repository?.branch ?? "");
   const [branches, setBranches] = useState<string[]>([]);
+  const [branchDetails,setBranchDetails]=useState<BranchListEntry[]>([]);
+  const activeRuns=useAutomationRuns().filter(run=>run.repositoryId===repository?.id);
+  const activeRunKey=activeRuns.map(run=>run.id).join(',');
   const [branchError, setBranchError] = useState("");
   const [removalOpen,setRemovalOpen]=useState(false);
   const [removalPlan,setRemovalPlan]=useState<BranchRemovalPlan|null>(null);
@@ -22,18 +26,28 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   useEffect(()=>{if(removalOpen)requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.branch-removal-dialog footer button')?.focus());},[removalOpen]);
   const removalRequest=useRef(0);
   const removalRepository=useRef(repository?.id);removalRepository.current=repository?.id;
-  useEffect(()=>{removalRequest.current++;setBranch(repository?.branch||'');setBranches([]);setRemovalOpen(false);setRemovalBusy(false);setRemovalExecuting(false);setRemovalPlan(null);setRemovalError('');setRemovalSteps([]);},[repository?.id]);
+  useEffect(()=>{removalRequest.current++;setBranch(repository?.branch||'');setBranches([]);setBranchDetails([]);setRemovalOpen(false);setRemovalBusy(false);setRemovalExecuting(false);setRemovalPlan(null);setRemovalError('');setRemovalSteps([]);},[repository?.id]);
 
   const [selectedCommit, setSelectedCommit] = useState(-1);
   const panelId = useId();
   const panel = useRef<HTMLElement>(null);
-  const tabs = [...new Set([repository?.branch ?? "", ...branches])];
+  const names=[...new Set([repository?.branch ?? "", ...branches])];
+  const branchKind=(name:string)=>{const item=branchDetails.find(item=>item.name===name);if(activeRuns.some(run=>name===`private/automation-${run.id}`)||item?.kind==='retained'&&name===repository?.branch)return 'used';return item?.kind||'permanent';};
+  const groups=[{kind:'permanent',label:'Permanent'},{kind:'used',label:'Temporary · in use'},{kind:'retained',label:'Temporary · retained for reruns'}];
+  const tabs=groups.flatMap(group=>names.filter(name=>branchKind(name)===group.kind));
   const [commits, setCommits] = useState<Commit[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
+  const [sync,setSync]=useState<BranchSyncStatus>();
+  const [syncError,setSyncError]=useState('');
+  const [syncBusy,setSyncBusy]=useState(false);
+  const syncRequest=useRef(0);
+  useEffect(()=>{const request=++syncRequest.current;setSync(undefined);setSyncError('');if(repository&&branch)void requestTimeout(api.branchSyncStatus(repository.id,branch),'Branch status').then(value=>{if(request===syncRequest.current)setSync(value);}).catch(reason=>{if(request===syncRequest.current)setSyncError(String(reason));});return()=>{syncRequest.current++;};},[repository?.id,branch,revision,repository?.ahead,repository?.behind,repository?.modifiedCount,repository?.stagedCount,repository?.untrackedCount]);
+  const fastForward=async()=>{if(!repository||!branch||syncBusy||!sync?.safe)return;const request=syncRequest.current;setSyncBusy(true);setSyncError('');try{const result=await api.fastForwardBranch(repository.id,branch);if(request===syncRequest.current){setSync(result);setRevision(value=>value+1);}window.dispatchEvent(new Event('focus'));}catch(reason){if(request===syncRequest.current){setSyncError(String(reason));void api.branchSyncStatus(repository.id,branch).then(value=>{if(request===syncRequest.current)setSync(value);}).catch(()=>{});}}finally{setSyncBusy(false);}};
+
 
   useEffect(() => {
     const request = ++generation.current;
@@ -57,10 +71,11 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     let debounce: number | undefined;
     const refreshBranches = () => {
       const generation = ++request;
-      void api.branches(repository.id).then(items => {
+      void api.branchListing(repository.id).then(details => {
+        const items=details.map(item=>item.name);
         if (!active || generation !== request) return;
         setBranches(current => current.length === items.length && current.every((value,index) => value === items[index]) ? current : items);
-        setBranchError("");
+        setBranchDetails(details);setBranchError("");
       }).catch(error => { if (active && generation === request) setBranchError(String(error)); });
     };
     const onVisible = () => { if (!document.hidden) refreshBranches(); };
@@ -78,7 +93,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
       window.removeEventListener('focus', onVisible);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [repository?.id, revision]);
+  }, [repository?.id, revision, activeRunKey]);
 
   useEffect(() => {
     if (!shortcutsEnabled || !repository) return;
@@ -151,13 +166,15 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     <header><div><p>Commit history</p><h2>{repository?.displayName || unlinkedName || "Select a repository"}</h2></div><button type="button" disabled={!repository || !branch || removalBusy || branch===repository.branch} aria-label="Remove selected branch" title={branch===repository?.branch?"Switch the checkout to another branch before removing its current branch":"Remove the selected branch and its linked worktree"} onClick={()=>void prepareRemoval()}><Trash2 size={16}/></button><button type="button" disabled={!repository} aria-label="Refresh history" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} className={loading ? "spin" : ""} /></button></header>
     {repository && <>
       <div className="history-tabs" role="tablist" aria-label="Branches">
-        {tabs.map((name, index) => <button key={name} id={`${panelId}-tab-${index}`} role="tab" type="button" aria-selected={branch === name} aria-controls={`${panelId}-commits`} tabIndex={branch === name ? 0 : -1} onClick={() => setBranch(name)} onKeyDown={(event) => {
+        {groups.filter(group=>tabs.some(name=>branchKind(name)===group.kind)).map(group=><div className={`branch-group branch-group-${group.kind}`} role="group" aria-label={group.label} key={group.kind}><span className="branch-group-label">{group.label}</span><div className="branch-group-tabs">{tabs.filter(name=>branchKind(name)===group.kind).map(name=>{const index=tabs.indexOf(name),detail=branchDetails.find(item=>item.name===name);return <button key={name} data-full-name={name||"Detached HEAD"} data-cleanup={group.kind==='retained'||undefined} onMouseEnter={event=>{const bounds=event.currentTarget.getBoundingClientRect(),edge=panel.current?.getBoundingClientRect().right||innerWidth;const zoom=Number.parseFloat(getComputedStyle(document.body).zoom)||1;event.currentTarget.style.setProperty('--branch-hover-space',`${Math.max(100,(edge-bounds.left-24)/zoom)}px`);}} id={`${panelId}-tab-${index}`} role="tab" type="button" aria-label={name||"Detached HEAD"} aria-selected={branch === name} aria-controls={`${panelId}-commits`} tabIndex={branch === name ? 0 : -1} onClick={() => setBranch(name)} onKeyDown={(event) => {
           if (event.shiftKey || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
           event.preventDefault();
           const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-          setBranch(tabs[next]);
-        }}><GitBranch size={13} />{name || "Detached HEAD"}</button>)}
+          setBranch(tabs[next]);document.getElementById(`${panelId}-tab-${next}`)?.focus();
+        }}><GitBranch size={13} /><span className="branch-tab-name">{name || "Detached HEAD"}</span>{group.kind==='retained'&&<small className="branch-cleanup-time" title={detail?.cleanupAt?`Delete after ${new Date(detail.cleanupAt).toLocaleString()}. ${detail.cleanupNote||''}`:detail?.cleanupNote||'No automatic deletion scheduled for this branch.'}><Trash2 size={10}/><Clock size={10}/>{detail?.cleanupAt&&<time dateTime={new Date(detail.cleanupAt).toISOString()}>{new Date(detail.cleanupAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})}</time>}</small>}</button>;})}</div></div>)}
       </div>
+      <div className="branch-sync-status"><button type="button" aria-label="Fast-forward selected branch" title={sync?.reason||syncError||'Checking upstream status…'} disabled={!sync?.safe||syncBusy||removalExecuting} onClick={()=>void fastForward()}>{syncBusy?<RefreshCw size={15} className="spin"/>:<ArrowDownToLine size={15}/>}</button><span>{sync?`${sync.upstream?.replace(/^refs\/remotes\//,'').replace(/^refs\/heads\//,'')||'No upstream'} · ${sync.ahead} ahead · ${sync.behind} behind`:syncError?'Upstream status unavailable':branch?'Checking upstream…':'Detached HEAD · no branch to advance'}</span>{sync&&!sync.safe&&<span className="branch-sync-reason">{sync.behind>0&&<AlertTriangle size={14}/>} {sync.reason}</span>}</div>
+      {syncError&&<p className="config-error" role="status">{syncError}</p>}
       <p className="history-shortcuts">Commit time order · Shift + ← / → branches · Shift + ↑ / ↓ commits</p>
     </>}
     {branchError && <p className="config-error" role="alert">{branchError}</p>}

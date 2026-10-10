@@ -1127,3 +1127,26 @@ input[type="number"] { text-align: right; }
 .automation-editor-backdrop { align-items: start; }
 .automation-edit-dialog { max-height: calc((100dvh - 32px)/var(--ui-zoom)); }
 .automation-edit-dialog > header, .automation-edit-dialog > footer { flex-shrink: 0; }
+
+.branch-sync-status {display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:6px 12px;font-size:12px;min-width:0;overflow-wrap:anywhere;}
+.branch-sync-status button,.branch-sync-reason {display:inline-flex;align-items:center;gap:5px;}
+.branch-sync-reason {color:var(--text-secondary);}
+
+.history-tabs {flex-direction:column;gap:10px;}
+.branch-group {min-width:0;border-left:3px solid var(--accent-codex-border);padding-left:8px;}
+.branch-group-used {border-left-color:#64bb91;}
+.branch-group-retained {border-left-color:#ba9757;}
+.branch-group-label {display:block;font-size:10px;opacity:.8;margin-bottom:5px;}
+.branch-group-tabs {display:flex;flex-wrap:wrap;gap:5px;min-width:0;}
+.history-panel .branch-group-tabs button {max-width:180px;}
+.history-panel .branch-group-tabs .branch-tab-name {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;color:inherit;font:inherit;}
+.history-panel .branch-group-tabs button:focus-visible,.history-panel .branch-group-tabs button[aria-selected="true"] {max-width:100%;}
+.history-panel .branch-group-tabs button:focus-visible .branch-tab-name,.history-panel .branch-group-tabs button[aria-selected="true"] .branch-tab-name {white-space:normal;overflow-wrap:anywhere;}
+
+.history-panel .branch-group-tabs button {position:relative;flex-wrap:nowrap;}
+.history-panel .branch-group-tabs button:hover {z-index:2;}
+.history-panel .branch-group-tabs button:hover::after {content:attr(data-full-name);position:absolute;left:0;top:0;box-sizing:border-box;width:max-content;max-width:var(--branch-hover-space,300px);padding:7px 10px;border:1px solid var(--color-a28fe8);border-radius:6px;background:var(--color-292430);color:inherit;font:inherit;white-space:normal;overflow-wrap:anywhere;pointer-events:none;box-shadow:0 4px 12px #0005;}
+.history-panel .branch-group-tabs button > svg {flex-shrink:0;}
+.history-panel .branch-group-tabs button[data-cleanup] {padding-right:72px;}
+.branch-cleanup-time {position:absolute;top:3px;right:4px;display:inline-flex;align-items:center;gap:2px;font-size:9px;line-height:12px;opacity:.8;white-space:nowrap;}
+.branch-cleanup-time time {font:inherit;}

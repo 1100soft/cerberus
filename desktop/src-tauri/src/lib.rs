@@ -30,6 +30,8 @@ mod github;
 mod repository_creation;
 mod github_credentials;
 mod branch_removal;
+mod branch_sync;
+mod branch_listing;
 mod automation_worktrees;
 mod conversation_store;
 mod awake;
@@ -48,7 +50,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State, WindowEvent,
+    Emitter, Manager, State, WindowEvent,
 };
 
 struct AppState {
@@ -678,6 +680,12 @@ fn list_branches(repository_id: String, state: State<AppState>) -> Result<Vec<St
 }
 
 #[tauri::command]
+async fn branch_listing(repository_id:String,state:State<'_,AppState>)->Result<Vec<branch_listing::Branch>,String>{let path=state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();let git=state.git.clone();tauri::async_runtime::spawn_blocking(move||{let names=git.branches(&path).map_err(|e|e.to_string())?;branch_listing::list(&root,&path,&repository_id,names)}).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn branch_sync_status(repository_id:String,branch:String,state:State<'_,AppState>)->Result<branch_sync::Status,String>{let path=state.db.repository_path(&repository_id)?;tauri::async_runtime::spawn_blocking(move||branch_sync::status(&path,&branch)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn fast_forward_branch(repository_id:String,branch:String,app:tauri::AppHandle,state:State<'_,AppState>)->Result<branch_sync::Status,String>{let path=state.db.repository_path(&repository_id)?;let result=tauri::async_runtime::spawn_blocking(move||branch_sync::advance(&path,&branch)).await.map_err(|e|e.to_string())?;let _=app.emit("automation-git-change",serde_json::json!({"repositoryId":repository_id}));result}
+#[tauri::command]
 async fn branch_removal_plan(repository_id:String,branch:String,state:State<'_,AppState>)->Result<branch_removal::Plan,String>{
     let path=state.db.repository_path(&repository_id)?;
     let remote=std::env::var("REMOTE").ok().filter(|value|!value.is_empty()).unwrap_or_else(||"origin".into());
@@ -948,7 +956,7 @@ pub fn run() {
             link_repository_folder,
             clone_github_repository,
             open_in_cursor,
-            list_branches, branch_removal_plan, remove_branch,
+            list_branches, branch_listing, branch_sync_status, fast_forward_branch, branch_removal_plan, remove_branch,
             commit_history,
             list_identities,
             disconnect_github_identity,

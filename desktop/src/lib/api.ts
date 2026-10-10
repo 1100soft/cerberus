@@ -6,6 +6,8 @@ import type { CodexAccount, CodexThreadPage, CodexMessagePage, Commit, GithubCat
 import { identitiesWithRepositoryAccess } from "./repositories";
 
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
+export type BranchListEntry={name:string;kind:'permanent'|'used'|'retained';worktree?:string;cleanupAt?:number;cleanupNote?:string};
+export type BranchSyncStatus={upstream?:string;ahead:number;behind:number;safe:boolean;reason:string};
 export type AutomationLog={inputValues?:import('./automationInputs').AutomationInputValues;dismissed?:boolean;automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;conversation?:Partial<AgentChat>&{id:string;prompt:string};retry?:AutomationRetry};
 export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'>;
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
@@ -239,6 +241,9 @@ export const api = {
     const repo = demoRepositories.find((repo) => repo.id === repositoryId);
     return [...new Set([repo?.branch || "main", "main", "develop", "feature/offline"])];
   },
+  async branchListing(repositoryId:string):Promise<BranchListEntry[]>{if(!inTauri())return (await api.branches(repositoryId)).map(name=>({name,kind:/^(private|correction|integration|revision|temp|tmp)\//.test(name)?'retained':'permanent'}));return invoke('branch_listing',{repositoryId});},
+  async branchSyncStatus(repositoryId:string,branch:string):Promise<BranchSyncStatus>{if(!inTauri())return {upstream:'origin/'+branch,ahead:0,behind:2,safe:true,reason:'Fast-forward from upstream (fetches and rechecks first).'};return invoke('branch_sync_status',{repositoryId,branch});},
+  async fastForwardBranch(repositoryId:string,branch:string):Promise<BranchSyncStatus>{if(!inTauri())return {upstream:'origin/'+branch,ahead:0,behind:0,safe:false,reason:'Branch is up to date.'};return invoke('fast_forward_branch',{repositoryId,branch});},
   async branchRemovalPlan(repositoryId:string,branch:string):Promise<BranchRemovalPlan>{
     if(!inTauri())throw new Error('Branch removal requires the desktop app.');
     return invoke('branch_removal_plan',{repositoryId,branch});
