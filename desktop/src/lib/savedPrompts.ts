@@ -123,7 +123,6 @@ export function currentAutomationRuns(){return executionSnapshot;}
 export function useAutomationRuns(){return useSyncExternalStore(listener=>{executionListeners.add(listener);return()=>{executionListeners.delete(listener);};},currentAutomationRuns);}
 function publishExecutions(){executionSnapshot=[...executions.values()];for(const listener of executionListeners)listener();}
 function isJobRunning(id:string){return executionSnapshot.some(run=>run.automationId===id);}
-function interrupted(job:SavedPrompt){return job.state==='running'&&!isJobRunning(job.id);}
 export function isAutomationContextRunning(id:string,repositoryId:string,branch?:string,sha?:string,handoff?:HandoffClaim){return executions.has(contextKey(id,repositoryId,branch,sha,handoff));}
 const pendingChanges=new Map<string,{changedAt:number}>();
 const debounceTimers=new Map<string,number>();
@@ -219,7 +218,7 @@ async function releaseIncomingHandoff(incoming:HandoffClaim){
   else await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);
 }
 export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string,matchedConditions?:Trigger[],retry?:AutomationRetry,manualInputValues?:AutomationInputValues):Promise<void>{
-  const job=retry?.job||jobs.find(item=>item.id===id);if(!job||job.handoffOnly||interrupted(job)&&!manual){if(incoming)await releaseIncomingHandoff(incoming);return;}
+  const job=retry?.job||jobs.find(item=>item.id===id);if(!job||job.handoffOnly){if(incoming)await releaseIncomingHandoff(incoming);return;}
   if(!manual&&!job.enabled){if(incoming)await releaseIncomingHandoff(incoming);return;}
   if(!runtimeRepositoryId&&!manual){
     const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
@@ -357,7 +356,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
 async function tick(now=Date.now()){
   if(checking){recheck=true;return;}checking=true;
   try{
-    const fileJobs=jobs.filter(job=>job.enabled&&!composite(job)&&(job.trigger==='fileChange'||job.trigger==='changeCount')&&!interrupted(job));
+    const fileJobs=jobs.filter(job=>job.enabled&&!composite(job)&&(job.trigger==='fileChange'||job.trigger==='changeCount'));
     for(const job of fileJobs){
       for(const [key,pending] of pendingChanges){
         if(!key.startsWith(`${job.id}:`)||now-pending.changedAt<Math.max(30,job.debounceSeconds||300)*1000)continue;
@@ -374,7 +373,7 @@ async function tick(now=Date.now()){
         void runSavedPrompt(job.id,false,repositoryId);
       }
     }
-    for(const job of jobs.filter(item=>item.enabled&&!composite(item)&&item.trigger==='commit'&&!interrupted(item))){
+    for(const job of jobs.filter(item=>item.enabled&&!composite(item)&&item.trigger==='commit')){
       for(const key of pendingCommits.keys()){
         if(!key.startsWith(`${job.id}:`))continue;
         const repositoryId=key.slice(job.id.length+1);
@@ -385,13 +384,13 @@ async function tick(now=Date.now()){
     for(const [key,pending] of pendingCi){
       const job=jobs.find(item=>item.id===pending.jobId);
       if(!job||!job.enabled||composite(job)||(job.trigger!=='ciPass'&&job.trigger!=='ciFail')||!ciCompletedSince(pending.run,job.ciSince)||!matchesCommitBranch(pending.run.headBranch||'',job.commitBranch||'*',job.commitAllExcept)){pendingCi.delete(key);continue;}
-      if(interrupted(job)||isAutomationContextRunning(job.id,pending.repositoryId,pending.run.headBranch||undefined,pending.run.headSha))continue;
+      if(isAutomationContextRunning(job.id,pending.repositoryId,pending.run.headBranch||undefined,pending.run.headSha))continue;
       if(job.kind!=='notification'&&job.kind!=='prompt'&&await repositoryAgentBusy(pending.repositoryId))continue;
       try{markCiHandled(job.id,pending.repositoryId,pending.run);}catch(error){console.warn('Could not save handled CI run:',error);break;}
       pendingCi.delete(key);
       void runSavedPrompt(job.id,false,pending.repositoryId,undefined,pending.run);
     }
-    for(const job of jobs.filter(item=>item.enabled&&composite(item)&&!interrupted(item))){
+    for(const job of jobs.filter(item=>item.enabled&&composite(item))){
       const conditions=automationConditions(job);
       if(conditions.includes('handoff')&&validHandoffName(job.handoffName||'')){
         const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
@@ -433,7 +432,7 @@ async function tick(now=Date.now()){
       }
     }
     let futureHandoffTargets:string[]|undefined;
-    for(const job of jobs.filter(item=>item.enabled&&!composite(item)&&item.trigger==='handoff'&&validHandoffName(item.handoffName||'')&&!interrupted(item))){
+    for(const job of jobs.filter(item=>item.enabled&&!composite(item)&&item.trigger==='handoff'&&validHandoffName(item.handoffName||''))){
       if(job.includeFutureRepositories&&!futureHandoffTargets)futureHandoffTargets=inTauri()?[...watchedRepositoryIds]:(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id);
       const targets=job.includeFutureRepositories?futureHandoffTargets!:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
       for(const repositoryId of targets){
@@ -446,7 +445,7 @@ async function tick(now=Date.now()){
       }
     }
     for(const job of [...jobs]){
-      if(!job.enabled||composite(job)||interrupted(job)||job.trigger==='manual')continue;
+      if(!job.enabled||composite(job)||job.trigger==='manual')continue;
       if(job.trigger==='interval'){
         if(now>=job.nextAt)void runSavedPrompt(job.id);
         continue;
@@ -559,7 +558,7 @@ export function recordAutomationFileChange(repositoryId:string,occurredAt=Date.n
     }).catch(error=>console.warn('Could not count changes for automation:',error));
   }
   for(const job of jobs){
-    if(!job.enabled||composite(job)||(job.trigger!=='fileChange'&&job.trigger!=='changeCount')||interrupted(job))continue;
+    if(!job.enabled||composite(job)||(job.trigger!=='fileChange'&&job.trigger!=='changeCount'))continue;
     const targets=job.repositoryIds?.length?job.repositoryIds:[job.repositoryId];
     if(!(job.includeFutureRepositories?watchedRepositoryIds.has(repositoryId):targets.includes(repositoryId)))continue;
     const key=`${job.id}:${repositoryId}`;
@@ -653,7 +652,8 @@ export async function recoverAutomationConversations(){
 export function startSavedPromptScheduler(){
   void recoverNotificationAutomations().then(recoverAutomationConversations).then(refreshBlockedAutomations).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Automation recovery/cleanup:',error));
   // The dashboard remains mounted when the Tauri window is hidden. A crash or
-  // restart leaves a running job paused for inspection instead of retrying it.
+  // restart preserves interrupted runs for explicit retry. Saved job state is
+  // presentation metadata; only execution context leases prevent duplicates.
   let stopped=false;let unlisten:(()=>void)|undefined;let unlistenGit:(()=>void)|undefined;
   if(inTauri())void listen<{repositoryId:string;occurredAt:number}>('automation-file-change',event=>recordAutomationFileChange(event.payload.repositoryId,event.payload.occurredAt)).then(stop=>{if(stopped)stop();else unlisten=stop;});
   if(inTauri())void listen<{repositoryId:string}>('automation-git-change',event=>void recordAutomationCommit(event.payload.repositoryId).catch(error=>console.warn('Commit automation:',error))).then(stop=>{if(stopped)stop();else unlistenGit=stop;});

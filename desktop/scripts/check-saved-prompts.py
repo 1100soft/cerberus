@@ -303,7 +303,7 @@ script = r"""
  await checkSavedPromptSchedule(clock+65000);assert(shellCalls.length===beforeFileRuns+1,'File automation reran without a new file change');
  window.__automationStage='commit event repository scope';
  savePrompt({...savedPrompts().find(job=>job.id==='file-change-fixture'),enabled:false});
- savePrompt({...jobs[0],id:'commit-scope-fixture',title:'Commit scope fixture',repositoryIds:targetIds,repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'commit',commitBranch:'*',enabled:true,state:undefined});
+ savePrompt({...jobs[0],id:'commit-scope-fixture',title:'Commit scope fixture',repositoryIds:targetIds,repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'commit',commitBranch:'*',enabled:true,state:'running'});
  const beforeCommitRuns=shellCalls.length;
  await recordAutomationCommit(targetIds[1],{head:'commit-before',branch:'wip',reflog:'commit: baseline'});
  await recordAutomationCommit(targetIds[1],{head:'commit-after',branch:'wip',reflog:'commit: fixture'});
@@ -326,6 +326,14 @@ script = r"""
  await checkSavedPromptSchedule();await wait(()=>shellCalls.length===worktreeBefore+3);await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');
  assert(shellCalls.slice(-2).map(call=>call.context.CERBERUS_BRANCH).sort().join(',')==='agent/new,agent/second','Concurrent branch commits overwrote a pending event');
 
+ window.__automationStage='stale aggregate state with OR commit triggers';
+ savePrompt({...savedPrompts().find(job=>job.id==='commit-scope-fixture'),state:'running',conditions:['handoff'],conditionSets:[['handoff'],['commit']],handoffName:'fixture-unavailable'});
+ const beforeStaleComposite=shellCalls.length;
+ await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged'),branchRef('agent/new','fresh-after-interruption'),branchRef('agent/second','second-commit')]));
+ await checkSavedPromptSchedule();await wait(()=>shellCalls.length===beforeStaleComposite+1);
+ await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');
+ assert(shellCalls.at(-1).context.CERBERUS_COMMIT_SHA==='fresh-after-interruption','Stale aggregate state lost the new context');
+ assert(savedPrompts().find(job=>job.id==='commit-scope-fixture').enabled,'Recovery disabled the automation');
  savePrompt({...savedPrompts().find(job=>job.id==='commit-scope-fixture'),enabled:false});
  window.__automationStage='interval repository scope';
  savePrompt({...jobs[0],id:'interval-scope-fixture',title:'Interval scope fixture',repositoryIds:targetIds,repositoryId:targetIds[0],includeFutureRepositories:false,runtimeTarget:false,trigger:'interval',conditions:undefined,nextAt:0,enabled:true,state:undefined});
@@ -566,7 +574,7 @@ window=Gtk.OffscreenWindow()
 manager=WebKit2.UserContentManager()
 manager.add_script(WebKit2.UserScript.new("let fixtureClipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>fixtureClipboard,writeText:async value=>{fixtureClipboard=value;}}});",WebKit2.UserContentInjectedFrames.TOP_FRAME,WebKit2.UserScriptInjectionTime.START,None,None))
 view=WebKit2.WebView.new_with_user_content_manager(manager)
-view.set_size_request(900,620)
+view.set_size_request(*(map(int,sys.argv[1:3]) if len(sys.argv)>2 else (900,620)))
 window.add(view)
 window.show_all()
 exit_code=1
