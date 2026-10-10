@@ -22,3 +22,30 @@ remote repositories are never overwritten or automatically adopted.
 GitHub accounts remain available in the assignment list even when a repository
 is new or absent from the cached GitHub catalog. Assignment checks access with
 GitHub directly; appearing in the list does not grant repository access.
+
+In the commit history pane, the fast-forward icon shows the selected branch’s
+configured upstream and ahead/behind counts. Unsafe states display a reason and
+disable the action: divergence, local changes (including untracked files), or an
+unfinished Git operation. Counts use the last fetched remote state. The action
+fetches that branch’s configured remote and rechecks before advancing, uses the
+linked worktree when checked out, and never merges, rebases, stashes, or forces.
+Branches without an upstream must be configured first. Refresh history to recheck.
+
+Branch tabs are grouped into Permanent, Temporary in use, and Temporary retained
+for reruns, with distinct borders and labels. Temporary namespaces are `private/`,
+`correction/`, `integration/`, `revision/`, `temp/`, and `tmp/`; other names remain
+permanent. A running app-managed checkout is in use, while an idle managed
+checkout or an unchecked temporary branch is retained. Temporary branches held
+by other worktrees are in use; grouping does not promise automatic cleanup or
+that a saved agent conversation can resume. Full names expand when selected,
+hovered, or keyboard-focused. Navigation crosses group boundaries.
+
+Retained app-managed branches show trash and clock icons with a compact local
+HH:mm cleanup time in the top-right corner. The full date and safety details
+appear on hover. The time uses the automation retention setting (24 hours by default). This is the earliest
+periodic cleanup attempt, not a guarantee: active/retry-protected runs, dirty
+worktrees, and unique commits remain safe.
+Unmanaged branches show only the icons, with “No deletion scheduled” in their
+help text; Cerberus does not claim to
+delete worktrees it does not own. Hover names overlay neighboring tabs without
+changing tab positions; selecting a branch may expand its tab normally.

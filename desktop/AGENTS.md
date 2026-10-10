@@ -45,3 +45,5 @@ approval before executing. Use fixed provider commands and no privilege elevatio
   rows must use neutral styling once acknowledged, keeping their log/retry details.
 
 - Codex model catalogs are advisory, not proof of inference access. Never restore a model rejected explicitly for ChatGPT account support merely because the runtime executable changed. Keep restrictions account-scoped with a bounded lifetime; keep other runtime-specific errors scoped to their runtime. Regression checks must cover Luna rejection surviving upgrades while Sol remains selectable. Never introduce a permanent model-name blacklist or add models from conversation history.
+
+- Keep branch cards compact: icons stay inline with names; cleanup metadata uses a small top-right icon/time indicator with detailed dates in help text, never a dedicated row. Prefer compact controls and metadata over extra rows throughout the UI.
