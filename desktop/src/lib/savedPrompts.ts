@@ -1,3 +1,4 @@
+import { createsLocalCommit } from './commitEvents';
 import { ciAccessNotice } from './ciAccessNotice';
 import { startAutomationMaintenance } from './automationMaintenance';
 import { resolveInputValues, inputEnvironment, type AutomationInput, type AutomationInputValues } from './automationInputs';
@@ -580,7 +581,7 @@ export async function recordAutomationCommit(repositoryId:string,state?:CommitSn
     commitHeads.set(repositoryId,new Map(refs.map(ref=>[ref.key,ref.head])));
     if(!previous)return;
     for(const ref of refs){
-      if(previous.get(ref.key)===ref.head||!ref.head||!/^(commit|merge|cherry-pick)(?:\b|\s*\()/i.test(ref.reflog))continue;
+      if(previous.get(ref.key)===ref.head||!ref.head||!createsLocalCommit(ref.reflog))continue;
       for(const job of jobs){
         if(!job.enabled||!automationConditions(job).includes('commit')||!matchesCommitBranch(ref.branch,job.commitBranch||'',job.commitAllExcept))continue;
         const targets=job.repositoryIds?.length?job.repositoryIds:[job.repositoryId];

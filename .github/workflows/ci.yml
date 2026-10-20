@@ -60,4 +60,5 @@ jobs:
         node scripts/check-automation-inputs.mjs
         node scripts/check-automation-maintenance.mjs
         node scripts/check-ci-access-notice.mjs
+        node scripts/check-commit-events.mjs
       linux-check-command: bash scripts/check-webkit-ci.sh

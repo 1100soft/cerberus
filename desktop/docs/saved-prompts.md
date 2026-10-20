@@ -264,3 +264,8 @@ notification history remains scrollable. Storage failures are distinct from
 missing/expired tokens: open/unlock the store if needed; if it is already open
 but unresponsive, save work and restart the desktop session before reconnecting
 GitHub only when the app reports a missing or expired token.
+
+On commit triggers respond to local commit creation, including real merge and
+cherry-pick commits. Fetching remote refs, pulling or merging by fast-forward,
+and the fast-forward shortcut only import existing history and do not trigger
+these automations. The next local commit still triggers normally.
