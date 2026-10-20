@@ -59,4 +59,5 @@ jobs:
         node scripts/check-conversation-recovery.mjs
         node scripts/check-automation-inputs.mjs
         node scripts/check-automation-maintenance.mjs
+        node scripts/check-ci-access-notice.mjs
       linux-check-command: bash scripts/check-webkit-ci.sh

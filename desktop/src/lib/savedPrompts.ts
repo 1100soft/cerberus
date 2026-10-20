@@ -1,3 +1,4 @@
+import { ciAccessNotice } from './ciAccessNotice';
 import { startAutomationMaintenance } from './automationMaintenance';
 import { resolveInputValues, inputEnvironment, type AutomationInput, type AutomationInputValues } from './automationInputs';
 import { conversationFromLog } from './conversationRecovery';
@@ -544,7 +545,7 @@ export async function pollAutomationCi(now?:number){
     const denied=repositories.filter(repo=>{const health=ciPollHealth.get(repo.id);return health&&!transientCiError(health.error)&&!health.notified;});
     if(denied.length){
       for(const repo of denied)ciPollHealth.get(repo.id)!.notified=true;
-      addAutomationNotice({automationId:'ci-monitor',title:'CI access needs attention',message:denied.map(repo=>`${repo.displayName}: ${ciPollHealth.get(repo.id)!.error.message}`).join('\n'),status:'message'});
+      addAutomationNotice({automationId:'ci-monitor',...ciAccessNotice(denied.map(repo=>({repository:repo.displayName,message:ciPollHealth.get(repo.id)!.error.message}))),status:'message'});
     }
   }catch(error){console.warn('Could not list repositories for CI monitoring:',error);}
   finally{checkingCi=false;}

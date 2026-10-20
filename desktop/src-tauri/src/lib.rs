@@ -804,7 +804,7 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 fn permitted_external_url(url:&str)->bool{
-    permitted_github_url(url) || matches!(url, "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
+    permitted_github_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
 }
 
 #[cfg(test)]
@@ -812,10 +812,11 @@ mod external_url_tests {
     use super::permitted_external_url;
     #[test]
     fn usage_pages_are_permitted(){
-        for url in ["https://cursor.com/dashboard/spending","https://claude.ai/settings/usage","https://github.com/settings/copilot","https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli","https://code.claude.com/docs/en/setup"]{
+        for url in ["https://help.gnome.org/seahorse/keyring-unlock.html","https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html","https://cursor.com/dashboard/spending","https://claude.ai/settings/usage","https://github.com/settings/copilot","https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli","https://code.claude.com/docs/en/setup"]{
             assert!(permitted_external_url(url),"{url}");
         }
         assert!(!permitted_external_url("https://cursor.com/dashboard/spending?redirect=https://example.com"));
+        assert!(!permitted_external_url("https://help.gnome.org/seahorse/keyring-unlock.html?redirect=https://example.com"));
     }
 }
 
