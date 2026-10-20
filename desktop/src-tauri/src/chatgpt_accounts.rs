@@ -65,6 +65,15 @@ fn service(root: &Path, id: &str) -> Result<Arc<CodexService>, String> {
         account_home(root, id)?,
     )))
 }
+fn account_connection(result: Result<serde_json::Value,String>) -> (bool,Option<String>) {
+    match result {
+        Ok(value) if value.get("account").is_some_and(serde_json::Value::is_null) => (false,None),
+        Ok(value) if value["account"]["type"] == "chatgpt" => (true,None),
+        Ok(_) => (false,Some("ChatGPT authentication could not be verified. Retry the account check; an unexpected runtime response is not proof of sign-out.".into())),
+        Err(error) if ["refresh_token_expired","refresh_token_reused","refresh_token_invalidated","refresh token has expired","refresh token has been invalidated","please log in again","not logged in","authentication required"].iter().any(|marker|error.to_lowercase().contains(marker)) => (false,None),
+        Err(error) => (false,Some(format!("ChatGPT account verification is unavailable. Check the local Codex runtime and credential store, then retry. {error}"))),
+    }
+}
 impl ChatgptAccounts {
     pub fn ensure_default(&self, root:&Path, agents:&Agents)->Result<AccountSettings,String>{
         let _lock=self.settings_lock.lock().map_err(|e|e.to_string())?;
@@ -79,6 +88,19 @@ impl ChatgptAccounts {
     pub fn settings(&self, root: &Path) -> Result<AccountSettings, String> {
         let _lock = self.settings_lock.lock().map_err(|e| e.to_string())?;
         read_settings(root)
+    }
+    pub fn refresh_auth_state(&self, root: &Path, agents: &Agents) -> Result<Vec<Profile>, String> {
+        let mut profiles = agents.profiles(root)?;
+        for profile in &mut profiles {
+            if !profile.subscription || profile.disconnected { continue; }
+            // Verification is a snapshot. Never persist a temporary runtime,
+            // network or secure-storage failure as an explicit user logout.
+            let result=service(root,&profile.id).and_then(|service|service.request("account/read",json!({"refreshToken":false})));
+            let (connected,error)=account_connection(result);
+            profile.disconnected=!connected;
+            profile.connection_error=error;
+        }
+        Ok(profiles)
     }
     pub fn assign(
         &self,
@@ -308,6 +330,44 @@ for line in sys.stdin:
         assert!(accounts.poll(root, &agents, &id).err().unwrap().contains("did not persist"));
         assert!(agents.profiles(root).unwrap().is_empty());
         assert!(accounts.pending.lock().unwrap().is_none());
+    }
+    #[test]
+    #[cfg(unix)]
+    fn verification_snapshot_recovers_without_persisting_logout() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir=tempfile::tempdir().unwrap();let root=dir.path();
+        let response=root.join("response.json");let script=root.join("mock-codex");
+        let fixture=r#"#!/usr/bin/env python3
+import json,sys
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ payload=json.load(open(__RESPONSE__)) if r['method']=='account/read' else {'result':{}}
+ print(json.dumps({'id':r['id'],**payload}),flush=True)
+"#.replace("__RESPONSE__",&serde_json::to_string(&response).unwrap());
+        std::fs::write(&script,fixture).unwrap();
+        std::fs::set_permissions(&script,std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(root.join("codex-executable.txt"),script.to_str().unwrap()).unwrap();
+        let agents=Agents::default();let accounts=ChatgptAccounts::default();
+        agents.store_subscription(root,Profile{id:uuid::Uuid::new_v4().to_string(),provider:"codex".into(),subscription:true,..Profile::default()}).unwrap();
+        for payload in [json!({"error":{"code":-32000,"message":"credential store timeout"}}),json!({"result":{"account":null}})] {
+            std::fs::write(&response,payload.to_string()).unwrap();
+            assert!(accounts.refresh_auth_state(root,&agents).unwrap()[0].disconnected);
+            assert!(!agents.profiles(root).unwrap()[0].disconnected);
+        }
+        std::fs::write(&response,json!({"result":{"account":{"type":"chatgpt"}}}).to_string()).unwrap();
+        let recovered=accounts.refresh_auth_state(root,&agents).unwrap();
+        assert!(!recovered[0].disconnected && recovered[0].connection_error.is_none());
+    }
+    #[test]
+    fn account_verification_distinguishes_signout_from_temporary_failures() {
+        assert_eq!(super::account_connection(Ok(json!({"account":null}))), (false,None));
+        assert_eq!(super::account_connection(Ok(json!({"account":{"type":"chatgpt"}}))), (true,None));
+        let (connected,error)=super::account_connection(Err("credential store timeout".into()));
+        assert!(!connected && error.unwrap().contains("credential store timeout"));
+        assert!(super::account_connection(Ok(json!({}))).1.is_some());
+        assert_eq!(super::account_connection(Err("refresh_token_expired: please log in again".into())), (false,None));
+        assert_eq!(super::account_connection(Ok(json!({"account":{"type":"chatgpt"}}))), (true,None));
     }
     #[test]
     fn defaults_and_overrides_persist_without_credentials() {

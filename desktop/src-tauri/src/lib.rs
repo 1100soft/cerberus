@@ -148,7 +148,9 @@ async fn set_provider_path(tool: String, path: Option<String>, state: State<'_, 
 }
 
 #[tauri::command]
-fn chatgpt_settings(state:State<AppState>)->Result<chatgpt_accounts::AccountSettings,String>{state.chatgpt.ensure_default(&state.data_dir,&state.agents)}
+fn chatgpt_settings(state:State<AppState>)->Result<chatgpt_accounts::AccountSettings,String>{
+    state.chatgpt.ensure_default(&state.data_dir,&state.agents)
+}
 #[tauri::command]
 fn external_identities(state:State<AppState>) -> Vec<external_identities::ExternalIdentity> { external_identities::identities(&state.data_dir) }
 #[tauri::command]
@@ -188,7 +190,10 @@ async fn cancel_chatgpt_login(id:String,state:State<'_,AppState>)->Result<(),Str
 #[tauri::command]
 async fn disconnect_chatgpt(id:String,state:State<'_,AppState>)->Result<(),String>{let service=state.chatgpt.clone();let agents=state.agents.clone();let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||service.disconnect(&root,&agents,&id)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
-fn agent_profiles(state: State<AppState>) -> Result<Vec<agents::Profile>, String> { state.agents.profiles(&state.data_dir) }
+async fn agent_profiles(state: State<'_,AppState>) -> Result<Vec<agents::Profile>, String> {
+    let service=state.chatgpt.clone();let root=state.data_dir.clone();let agents=state.agents.clone();
+    tauri::async_runtime::spawn_blocking(move||service.refresh_auth_state(&root,&agents)).await.map_err(|error|error.to_string())?
+}
 #[tauri::command]
 async fn chatgpt_capabilities(profile_id:String,state:State<'_,AppState>)->Result<serde_json::Value,String>{
  let root=state.data_dir.clone();let agents=state.agents.clone();
@@ -571,17 +576,19 @@ async fn codex_update_thread(repository_id: String, thread_id: String, action: S
 }
 
 #[tauri::command]
-fn list_identities(state: State<AppState>) -> Result<Vec<Identity>, String> {
-    let mut identities = state.db.identities()?;
+async fn list_identities(state: State<'_,AppState>) -> Result<Vec<Identity>, String> {
+    let db=state.db.clone();tauri::async_runtime::spawn_blocking(move||{
+    let mut identities = db.identities()?;
     let connected = std::thread::scope(|scope| {
         let checks = identities.iter().map(|identity| {
             let id = identity.id.clone();
-            scope.spawn(move || oauth::github_connected(&id))
+            scope.spawn(move || oauth::github_connection(&id))
         }).collect::<Vec<_>>();
-        checks.into_iter().map(|check| check.join().unwrap_or(false)).collect::<Vec<_>>()
+        checks.into_iter().map(|check| check.join().unwrap_or((false,Some("Account verification failed; retry the check.".into())))).collect::<Vec<_>>()
     });
-    for (identity, connected) in identities.iter_mut().zip(connected) { identity.connected = connected; }
+    for (identity, (connected,error)) in identities.iter_mut().zip(connected) { identity.connected = connected; identity.connection_error=error; }
     Ok(identities)
+    }).await.map_err(|error|error.to_string())?
 }
 
 #[tauri::command]

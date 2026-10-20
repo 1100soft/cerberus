@@ -198,8 +198,39 @@ pub fn complete(
     identity_from_token(db, &access_token).map(Some)
 }
 
-pub fn github_connected(id: &str) -> bool {
-    crate::github_credentials::token(id).is_ok()
+pub fn github_connection(id: &str) -> (bool, Option<String>) {
+    let token = match crate::github_credentials::token(id) {
+        Ok(token) => token,
+        Err(error) => return (false, if error.contains("token is missing") { None } else { Some(error) }),
+    };
+    let result = client().and_then(|http| http.get(format!("{API_URL}/user"))
+        .bearer_auth(token)
+        .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(10))
+        .send().map_err(|_| "GitHub account verification is unavailable. Check your network connection and retry; reconnect only if GitHub rejects the credential.".to_string()));
+    match result {
+        Ok(response) => github_connection_response(response.status().as_u16()),
+        Err(error) => (false, Some(error)),
+    }
+}
+fn github_connection_response(status: u16) -> (bool, Option<String>) {
+    match status {
+        200..=299 => (true, None),
+        401 => (false, None),
+        _ => (false, Some(format!("GitHub account verification is unavailable (HTTP {status}). Retry later; this does not establish that your account is signed out."))),
+    }
+}
+#[cfg(test)]
+mod connection_tests {
+    #[test]
+    fn authentication_rejection_is_distinct_from_unavailable_verification() {
+        assert_eq!(super::github_connection_response(200), (true, None));
+        assert_eq!(super::github_connection_response(401), (false, None));
+        for status in [403, 429, 500, 503] {
+            let (connected, error) = super::github_connection_response(status);
+            assert!(!connected && error.is_some());
+        }
+    }
 }
 pub fn github_token(id: &str) -> Result<String,String> {
     crate::github_credentials::token(id)

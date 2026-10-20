@@ -85,7 +85,7 @@ impl Database {
                     git_email: row.get(3)?,
                     color: Some("#8b7cf6".into()),
                     provider_username: row.get(4)?,
-                    connected: false,
+                    connected: false, connection_error: None,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -118,7 +118,7 @@ impl Database {
             git_email: email.into(),
             color: Some("#8b7cf6".into()),
             provider_username: Some(login.into()),
-            connected: true,
+            connected: true, connection_error: None,
         })
     }
 
@@ -289,7 +289,7 @@ impl Database {
                             git_email: row.get(19).unwrap_or_default(),
                             color: None,
                             provider_username: row.get(20).ok(),
-                            connected: false,
+                            connected: false, connection_error: None,
                         }),
                         identity_mismatch: false,
                         tags: Vec::new(),

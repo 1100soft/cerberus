@@ -11,6 +11,8 @@ pub struct Identity {
     pub provider_username: Option<String>,
     #[serde(default)]
     pub connected: bool,
+    #[serde(default)]
+    pub connection_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
