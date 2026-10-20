@@ -17,3 +17,7 @@
 *.db
 *.db-shm
 *.db-wal
+
+# Python validation caches must not keep automation worktrees dirty.
+__pycache__/
+*.py[cod]
