@@ -219,11 +219,17 @@ pub fn cleanup(
     {
         return Ok(false);
     }
-    let branch = format!("private/automation-{run_id}");
+    let owned_branch = format!("private/automation-{run_id}");
     let current = git(&checkout, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    if current != "HEAD" && current != branch {
+    if current != "HEAD" && !crate::branch_listing::temporary(&current) {
         return Ok(false);
     }
+    let branch = if current == "HEAD" {
+        owned_branch
+    } else {
+        current
+    };
+    let reference = format!("refs/heads/{branch}");
     let head = git(&checkout, &["rev-parse", "HEAD"])?;
     let refs = git(
         repository,
@@ -237,11 +243,10 @@ pub fn cleanup(
     )?;
     if !refs
         .lines()
-        .any(|name| !name.starts_with("refs/heads/private/automation-"))
+        .any(|name| name != reference && !name.starts_with("refs/heads/private/automation-"))
     {
         return Ok(false);
     }
-    let reference = format!("refs/heads/{branch}");
     let tip = git(repository, &["rev-parse", "--verify", &reference]).ok();
     // An agent can detach or switch branches. Never discard a different branch tip.
     if tip.as_ref().is_some_and(|tip| tip != &head) {
@@ -275,6 +280,59 @@ pub fn cleanup(
 #[cfg(test)]
 mod cleanup_tests {
     use super::*;
+    #[test]
+    fn agent_named_temporary_branch_cleanup_preserves_unique_and_permanent_work() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q"]).unwrap();
+        git(
+            repo.path(),
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "base",
+            ],
+        )
+        .unwrap();
+        let checkout = prepare(root.path(), repo.path(), "repo", "renamed", None).unwrap();
+        git(&checkout, &["checkout", "-b", "correction/fixture"]).unwrap();
+        git(
+            &checkout,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "unique",
+            ],
+        )
+        .unwrap();
+        assert!(!cleanup(root.path(), repo.path(), "repo", "renamed").unwrap());
+        git(repo.path(), &["branch", "preserved", "correction/fixture"]).unwrap();
+        assert!(cleanup(root.path(), repo.path(), "repo", "renamed").unwrap());
+        assert!(git(
+            repo.path(),
+            &["show-ref", "--verify", "refs/heads/correction/fixture"]
+        )
+        .is_err());
+        assert!(git(
+            repo.path(),
+            &["show-ref", "--verify", "refs/heads/preserved"]
+        )
+        .is_ok());
+        let other = prepare(root.path(), repo.path(), "repo", "permanent", None).unwrap();
+        git(&other, &["checkout", "-b", "test-rebase"]).unwrap();
+        assert!(!cleanup(root.path(), repo.path(), "repo", "permanent").unwrap());
+        assert!(other.exists());
+    }
     #[test]
     fn retention_deadline_controls_periodic_cleanup() {
         let root = tempfile::tempdir().unwrap();

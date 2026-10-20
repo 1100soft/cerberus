@@ -14,7 +14,7 @@ pub struct Branch {
     pub cleanup_at: Option<u64>,
     pub cleanup_note: Option<String>,
 }
-fn temporary(name: &str) -> bool {
+pub(crate) fn temporary(name: &str) -> bool {
     [
         "private/",
         "correction/",
