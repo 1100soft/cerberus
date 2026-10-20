@@ -49,3 +49,11 @@ Unmanaged branches show only the icons, with “No deletion scheduled” in thei
 help text; Cerberus does not claim to
 delete worktrees it does not own. Hover names overlay neighboring tabs without
 changing tab positions; selecting a branch may expand its tab normally.
+
+Overdue cleanup runs immediately when the app starts, independently of conversation
+recovery, and retries after recovery and during periodic maintenance. Missing the
+scheduled time while the app is closed does not cancel cleanup. Each repository
+is swept independently. Clean temporary branches created or selected by agents
+inside managed worktrees are eligible too, provided another ref preserves their
+commits. Arbitrary branch names (such as `test-rebase`), dirty worktrees, active
+runs, and unique commits are preserved for inspection.

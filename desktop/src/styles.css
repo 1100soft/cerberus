@@ -1150,3 +1150,21 @@ input[type="number"] { text-align: right; }
 .history-panel .branch-group-tabs button[data-cleanup] {padding-right:72px;}
 .branch-cleanup-time {position:absolute;top:3px;right:4px;display:inline-flex;align-items:center;gap:2px;font-size:9px;line-height:12px;opacity:.8;white-space:nowrap;}
 .branch-cleanup-time time {font:inherit;}
+
+.notification-item p,.notification-toast small {white-space:pre-line;}
+.notification-text,.notification-item > div {min-width:0;}
+.notification-steps {padding-left:20px;margin:8px 0;font-size:12px;line-height:1.5;}
+.notification-steps li + li {margin-top:7px;}
+.notification-help-links {display:flex;flex-wrap:wrap;gap:6px 12px;margin:8px 0;font-size:12px;}
+.notification-help-links a {color:var(--accent-codex);text-decoration:underline;}
+.notification-details {margin:8px 0;font-size:11px;}
+.notification-details summary {cursor:pointer;}
+.notification-details pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;}
+.notification-toast .notification-text > button {margin-top:6px;text-decoration:underline;}
+.identity-connection-error {flex-basis:100%;white-space:pre-line;overflow-wrap:anywhere;color:var(--status-error);}
+.identities-panel .oauth-message {white-space:pre-line;}
+
+/* Keep automation dialogs within the viewport at application zoom. */
+.automation-dialog-backdrop {align-items:start;overflow:auto;}
+.automation-dialog {max-height:calc((100dvh - 32px)/var(--ui-zoom));}
+.automation-dialog > header,.automation-dialog > footer {flex-shrink:0;}

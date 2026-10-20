@@ -122,3 +122,10 @@ agent work. Long suspend gaps do not consume the runner's active timeout budget.
 A surviving connection continues on wake; a broken connection requires explicit
 retry with the saved session and inputs. No upstream handoff or paid turn is replayed
 automatically merely because the machine wakes.
+
+Account status is verified when Identities opens and when the app regains focus.
+GitHub credentials rejected by GitHub and missing/expired ChatGPT authentication
+show Disconnected with Reconnect. Network, runtime and credential-store errors
+show Unavailable with Retry check and the specific error. Verification snapshots
+do not persist a user logout or clear account assignments. A restart may expose
+a credential persistence problem, but warnings do not claim it caused sign-out.

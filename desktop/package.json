@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:dropdowns && tsc && vite build",
+    "build": "npm run check:dropdowns && npm run check:styles && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "check:dropdowns": "node scripts/check-dropdowns.mjs"
+    "check:dropdowns": "node scripts/check-dropdowns.mjs",
+    "check:styles": "node scripts/check-styles.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

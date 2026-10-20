@@ -9,7 +9,7 @@ import { IdentitySignIn } from './IdentitySignIn';
 import { ProviderIdentityBadge } from './ProviderIdentityBadge';
 import { CopilotQuota, type CopilotQuotaResponse } from './CopilotQuota';
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, HelpCircle, ExternalLink, Github, Link2, PlugZap, ShieldCheck, Unplug, X } from "lucide-react";
 import { api, inTauri } from "../lib/api";
 import { useProviderPreferences } from "../lib/providerPreferences";
@@ -78,9 +78,29 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
   const [flow, setFlow] = useState<GithubDeviceFlow>();
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string>();
+  const reconnectWarning = useMemo(() => {
+    const disconnected = new Set<string>();
+    for (const account of chatgptAccounts.profiles) {
+      if (account.subscription && account.disconnected && !account.connectionError) disconnected.add(account.label);
+    }
+    for (const account of externalAccounts.identities) {
+      if (!account.connected) disconnected.add(account.label);
+    }
+    for (const identity of identities) {
+      if (identity.connected === false && !identity.connectionError) disconnected.add(identity.providerUsername ? `@${identity.providerUsername}` : identity.label);
+    }
+    const unavailable=[...identities.filter(identity=>identity.connectionError).map(identity=>identity.providerUsername?`@${identity.providerUsername}`:identity.label),...chatgptAccounts.profiles.filter(account=>account.connectionError).map(account=>account.label)];
+    const unavailableMessage=unavailable.length?`Account verification is unavailable for ${unavailable.join(', ')}. Check the account details below. Credential-store or network failures do not necessarily mean you were signed out.`:'';
+    if (!disconnected.size) return unavailableMessage;
+    const names = [...disconnected].slice(0, 4);
+    const more = disconnected.size - names.length;
+    const tail = more > 0 ? ` and ${more} more account${more === 1 ? "" : "s"}` : "";
+    return `These saved accounts are not authenticated: ${names.join(", ")}${tail}. Reconnect the affected accounts to restore access. If this appeared after restarting your computer, the saved credentials may not have been restored.${unavailableMessage?`\n\n${unavailableMessage}`:''}`;
+  }, [chatgptAccounts.profiles, externalAccounts.identities, identities]);
   const helpDialog = useRef<HTMLElement>(null);
   const autoStarted = useRef(false);
   const authAttempt = useRef(0);
+  useEffect(()=>{const refresh=()=>{void onChanged().catch(error=>setMessage(String(error)));};refresh();window.addEventListener('focus',refresh);return()=>window.removeEventListener('focus',refresh);},[]);
   const reconnecting = useRef<Identity>();
 
   useEffect(() => {
@@ -188,10 +208,11 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
         <IdentitySignIn onExternalLogin={externalLogin} github={{onClick: () => { void connectBrowser(); }, disabled: !statusReady || !status.browserSignIn || !!flow, message: !statusReady ? 'Checking sign-in availability…' : !status.browserSignIn ? 'GitHub sign-in is unavailable because this build has no product OAuth client ID.' : undefined}} />
       </div>
     </header>
+    {reconnectWarning && <p className="oauth-message" role="alert">{reconnectWarning}</p>}
     <IdentityOrderContext.Provider value={{reorder:reorderCards,position:id=>orderedCardIds.indexOf(id)}}><div className="identity-list"><ChatgptIdentityCards/><ExternalIdentityCards startLogin={startExternalLogin}/>
       {identities.map((identity) => {
         const connectedAccount = identity.connected !== false;
-        return <IdentityCard key={identity.id} icon={<ProviderIdentityBadge provider="github" id={identity.id} label={identity.label}/>} label={identity.label} detail={`${identity.providerUsername ? `@${identity.providerUsername} · ` : ""}${identity.gitEmail}`} initialsId={identity.id} connected={connectedAccount} busy={busyId === identity.id || !!flow} onConnect={()=>reconnect(identity)} onDisconnect={()=>void disconnect(identity)}><GithubUsage identity={identity}/></IdentityCard>;
+        return <IdentityCard key={identity.id} icon={<ProviderIdentityBadge provider="github" id={identity.id} label={identity.label}/>} label={identity.label} detail={`${identity.providerUsername ? `@${identity.providerUsername} · ` : ""}${identity.gitEmail}`} initialsId={identity.id} connected={connectedAccount} connectionError={identity.connectionError} onRetry={()=>void onChanged().catch(error=>setMessage(String(error)))} busy={busyId === identity.id || !!flow} onConnect={()=>reconnect(identity)} onDisconnect={()=>void disconnect(identity)}><GithubUsage identity={identity}/></IdentityCard>;
       })}
     </div></IdentityOrderContext.Provider>
     <ChatgptSettings/>

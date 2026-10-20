@@ -22,6 +22,7 @@ pub struct Profile {
     pub executable: String,
     #[serde(default)] pub subscription: bool,
     #[serde(default)] pub disconnected: bool,
+    #[serde(default)] pub connection_error: Option<String>,
     #[serde(default)] pub email: Option<String>,
     #[serde(default)] pub plan: Option<String>,
 }

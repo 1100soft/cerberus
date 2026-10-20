@@ -48,8 +48,8 @@ script = r"""
  const retentionDialog=await wait(()=>document.querySelector('[role="dialog"][aria-label="Automation settings"]'));
  const retentionInput=await wait(()=>{const input=retentionDialog.querySelector('input');return input&&!input.disabled?input:null;});
  assert(retentionInput.value==='24','Handoff retention does not default to 24 hours');
- for(const zoom of [1,1.4,1.5]){document.body.style.zoom=String(zoom);await pause();const rect=retentionDialog.getBoundingClientRect();assert(rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,'Retention dialog overflows at zoom '+zoom+' '+JSON.stringify({left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:innerWidth,height:innerHeight}));}
- document.body.style.zoom='1';await pause();
+ for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',String(zoom));await pause();const rect=retentionDialog.getBoundingClientRect();assert(rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,'Retention dialog overflows at zoom '+zoom+' '+JSON.stringify({left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:innerWidth,height:innerHeight}));}
+ document.documentElement.style.setProperty('--ui-zoom','1');await pause();
 
  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(retentionInput,'48');retentionInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  retentionDialog.querySelector('footer button').click();await wait(()=>!document.querySelector('[role="dialog"][aria-label="Automation settings"]'));
@@ -329,6 +329,9 @@ script = r"""
  window.__automationStage='stale aggregate state with OR commit triggers';
  savePrompt({...savedPrompts().find(job=>job.id==='commit-scope-fixture'),state:'running',conditions:['handoff'],conditionSets:[['handoff'],['commit']],handoffName:'fixture-unavailable'});
  const beforeStaleComposite=shellCalls.length;
+ await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged'),branchRef('agent/new','imported-from-remote','merge refs/remotes/origin/wip: Fast-forward'),branchRef('agent/second','second-commit')]));
+ await checkSavedPromptSchedule();await pause();
+ assert(shellCalls.length===beforeStaleComposite,'Catching up from remote triggered a commit automation');
  await recordAutomationCommit(targetIds[1],state([branchRef('main','primary-unchanged'),branchRef('agent/new','fresh-after-interruption'),branchRef('agent/second','second-commit')]));
  await checkSavedPromptSchedule();await wait(()=>shellCalls.length===beforeStaleComposite+1);
  await wait(()=>savedPrompts().find(job=>job.id==='commit-scope-fixture')?.state==='completed');

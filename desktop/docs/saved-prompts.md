@@ -256,3 +256,16 @@ The automation editor is anchored near the top of the viewport. Previous/next
 buttons keep the same vertical position across actions while the body scrolls.
 Previous/next navigation (including Alt+Left/Right) wraps from either end of the
 automation list to the other and saves edits before switching.
+
+CI credential-store warnings group affected repositories, show numbered recovery
+steps and link to official GNOME/KDE wallet help. Raw errors remain in collapsed
+Technical details. Toasts open these details through View recovery steps, and
+notification history remains scrollable. Storage failures are distinct from
+missing/expired tokens: open/unlock the store if needed; if it is already open
+but unresponsive, save work and restart the desktop session before reconnecting
+GitHub only when the app reports a missing or expired token.
+
+On commit triggers respond to local commit creation, including real merge and
+cherry-pick commits. Fetching remote refs, pulling or merging by fast-forward,
+and the fast-forward shortcut only import existing history and do not trigger
+these automations. The next local commit still triggers normally.

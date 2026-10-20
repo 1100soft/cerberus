@@ -4,7 +4,7 @@ import { eventEdits, mergeEdits, agentFailure } from './agentEdits';
 import { agentOutput } from './agentOutput';
 import { api } from './api';
 import type { CodexMessage, FileEdit } from '../types';
-export type AgentProfile = {id: string; label: string; provider: string; subscription?:boolean; disconnected?:boolean; email?:string; plan?:string};
+export type AgentProfile = {id: string; label: string; provider: string; subscription?:boolean; disconnected?:boolean; connectionError?:string; email?:string; plan?:string};
 export type ResumeTarget = {sessionId:string; provider:string; source:'app'|'codex-history'|'cursor-history'};
 export type ResumeStatus = {available:boolean; reason:string};
 export type AutomationAgentContext={runId:string;commit?:string};

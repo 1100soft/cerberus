@@ -6,6 +6,7 @@ export type Identity = {
   color?: string;
   providerUsername?: string;
   connected?: boolean;
+  connectionError?: string;
 };
 
 export type GithubDeviceFlow = {

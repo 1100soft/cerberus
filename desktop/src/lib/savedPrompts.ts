@@ -1,3 +1,6 @@
+import { createsLocalCommit } from './commitEvents';
+import { ciAccessNotice } from './ciAccessNotice';
+import { startAutomationMaintenance } from './automationMaintenance';
 import { resolveInputValues, inputEnvironment, type AutomationInput, type AutomationInputValues } from './automationInputs';
 import { conversationFromLog } from './conversationRecovery';
 import { beginAutomationLog, updateAutomationLog, finishAutomationLog, currentAutomationLogs, deleteSavedAutomationLog, saveDismissedAutomationLog, notifyAutomationLogViews } from './automationLogs';
@@ -60,7 +63,8 @@ export async function cleanupRetainedAutomationCheckouts(){
   for(const chat of currentAgentChats())if(chat.running&&chat.automationContext)protectedIds.add(chat.automationContext.runId);
   for(const log of blockedRuns.values())if(!expiredRuns.has(retryKey(log))&&Date.now()-log.createdAt<settings.retentionHours*3600000){protectedIds.add(log.runId);const id=log.retry?.chatId&&getAgentChat(log.retry.chatId)?.automationContext?.runId;if(id)protectedIds.add(id);}
   const repos=(await api.repositories()).filter(repo=>repo.localPath).map(repo=>repo.id);
-  await api.sweepAutomationCheckouts(repos,[...protectedIds]);
+  const results=await Promise.allSettled(repos.map(id=>api.sweepAutomationCheckouts([id],[...protectedIds])));
+  for(const result of results)if(result.status==='rejected')console.warn('Repository checkout cleanup:',result.reason);
 }
 function originalConversationRun(chatId:string){
   const chat=getAgentChat(chatId);if(!chat||chat.running)return;
@@ -542,7 +546,7 @@ export async function pollAutomationCi(now?:number){
     const denied=repositories.filter(repo=>{const health=ciPollHealth.get(repo.id);return health&&!transientCiError(health.error)&&!health.notified;});
     if(denied.length){
       for(const repo of denied)ciPollHealth.get(repo.id)!.notified=true;
-      addAutomationNotice({automationId:'ci-monitor',title:'CI access needs attention',message:denied.map(repo=>`${repo.displayName}: ${ciPollHealth.get(repo.id)!.error.message}`).join('\n'),status:'message'});
+      addAutomationNotice({automationId:'ci-monitor',...ciAccessNotice(denied.map(repo=>({repository:repo.displayName,message:ciPollHealth.get(repo.id)!.error.message}))),status:'message'});
     }
   }catch(error){console.warn('Could not list repositories for CI monitoring:',error);}
   finally{checkingCi=false;}
@@ -577,7 +581,7 @@ export async function recordAutomationCommit(repositoryId:string,state?:CommitSn
     commitHeads.set(repositoryId,new Map(refs.map(ref=>[ref.key,ref.head])));
     if(!previous)return;
     for(const ref of refs){
-      if(previous.get(ref.key)===ref.head||!ref.head||!/^(commit|merge|cherry-pick)(?:\b|\s*\()/i.test(ref.reflog))continue;
+      if(previous.get(ref.key)===ref.head||!ref.head||!createsLocalCommit(ref.reflog))continue;
       for(const job of jobs){
         if(!job.enabled||!automationConditions(job).includes('commit')||!matchesCommitBranch(ref.branch,job.commitBranch||'',job.commitAllExcept))continue;
         const targets=job.repositoryIds?.length?job.repositoryIds:[job.repositoryId];
@@ -603,7 +607,7 @@ async function syncFileWatchers(){
   const errors=await api.watchAutomationRepositories(ids);
   await Promise.allSettled(ids.filter(id=>!fresh.includes(id)).map(id=>recordAutomationCommit(id)));
   if(errors.length)console.warn('Automation file watchers:',errors.join('; '));
-  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Handoff cleanup:',error));}
+  if(Date.now()-lastHandoffCleanupAt>30*60_000){lastHandoffCleanupAt=Date.now();void startAutomationMaintenance(()=>api.cleanupStaleHandoffs(ids).then(()=>refreshBlockedAutomations()),cleanupRetainedAutomationCheckouts,error=>console.warn('Handoff/checkout cleanup:',error));}
 }
 export async function recoverNotificationAutomations(){
   for(const job of jobs.filter(item=>item.kind==='notification'))try{
@@ -650,7 +654,7 @@ export async function recoverAutomationConversations(){
   }catch(error){console.warn('Could not recover automation conversation history:',error);}
 }
 export function startSavedPromptScheduler(){
-  void recoverNotificationAutomations().then(recoverAutomationConversations).then(refreshBlockedAutomations).then(cleanupRetainedAutomationCheckouts).catch(error=>console.warn('Automation recovery/cleanup:',error));
+  void startAutomationMaintenance(()=>recoverNotificationAutomations().then(recoverAutomationConversations).then(refreshBlockedAutomations),cleanupRetainedAutomationCheckouts,error=>console.warn('Automation recovery/cleanup:',error));
   // The dashboard remains mounted when the Tauri window is hidden. A crash or
   // restart preserves interrupted runs for explicit retry. Saved job state is
   // presentation metadata; only execution context leases prevent duplicates.
