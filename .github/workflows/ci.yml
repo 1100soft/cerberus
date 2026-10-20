@@ -32,15 +32,22 @@ jobs:
       - name: Release tooling regressions
         run: python3 .github/scripts/check-release-tooling.py
       - name: Lint GitHub Actions workflows
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color
+        env:
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          tool_dir=$(mktemp -d "$RUNNER_TEMP/actionlint.XXXXXX")
+          curl --fail --location --retry 3 --output "$tool_dir/actionlint.tar.gz" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "$ACTIONLINT_SHA256  $tool_dir/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$tool_dir/actionlint.tar.gz" -C "$tool_dir" actionlint
+          "$tool_dir/actionlint" -color
 
   desktop:
     if: >-
       github.ref_name != 'autosave' && !startsWith(github.ref_name, 'autosave/') &&
       github.head_ref != 'autosave' && !startsWith(github.head_ref, 'autosave/')
-    uses: 1100soft/CI/.github/workflows/tauri-check.yml@859fc753347512c1e64d50f487251d41b0778925
+    uses: 1100soft/CI/.github/workflows/tauri-check.yml@31cd08b2a9314c358ce2589a095b5cbeb8dcadf7
     with:
       app-directory: desktop
       check-command: |
