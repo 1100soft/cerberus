@@ -74,7 +74,7 @@ fn git_relevant(event:&Event,git_dir:&Path)->bool{
     if !matches!(event.kind,EventKind::Create(_)|EventKind::Modify(_)|EventKind::Remove(_)){return false;}
     event.paths.iter().any(|path|path.strip_prefix(git_dir).ok().is_some_and(|relative|{
         let name=relative.to_string_lossy().replace('\\',"/");
-        name.starts_with("worktrees/")&&(name.ends_with("/HEAD")||name.ends_with("/logs/HEAD"))||name=="HEAD"||name=="packed-refs"||name=="logs/HEAD"||name.starts_with("refs/heads/")||name.starts_with("logs/refs/heads/")
+        name.starts_with("worktrees/")&&(name.ends_with("/HEAD")||name.ends_with("/logs/HEAD"))||name=="HEAD"||name=="packed-refs"||name=="logs/HEAD"||name.starts_with("refs/heads/")||name.starts_with("logs/refs/heads/")||name.starts_with("refs/tags/")||name=="refs/tags"
     }))
 }
 
@@ -103,6 +103,10 @@ mod tests {
         let commit=Event::new(EventKind::Modify(ModifyKind::Any)).add_path(root.join(".git/refs/heads/main"));
         assert!(git_relevant(&commit,&root.join(".git")));
         assert!(!git_relevant(&git,&root.join(".git")));
+        for kind in [EventKind::Create(CreateKind::File),EventKind::Modify(ModifyKind::Any),EventKind::Remove(notify::event::RemoveKind::File)] {
+            let tag=Event::new(kind).add_path(root.join(".git/refs/tags/v1"));
+            assert!(git_relevant(&tag,&root.join(".git")));
+        }
     }
     #[test]
     fn linked_worktree_uses_shared_git_directory(){

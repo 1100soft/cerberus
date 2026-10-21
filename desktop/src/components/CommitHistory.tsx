@@ -63,6 +63,29 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     return () => { generation.current++; };
   }, [repository?.id, branch, revision]);
 
+  const visibleCommitCount=useRef(0);visibleCommitCount.current=commits.length;
+  useEffect(()=>{
+    if(!repository)return;
+    let active=true,inFlight=false;
+    const refresh=async()=>{
+      if(document.hidden||inFlight)return;
+      inFlight=true;const request=generation.current;
+      try{
+        const count=Math.max(50,visibleCommitCount.current);
+        const pages=await Promise.all(Array.from({length:Math.ceil(count/50)},(_,index)=>requestTimeout(api.history(repository.id,branch||undefined,index*50),'Commit refresh')));
+        if(!active||request!==generation.current)return;
+        const items=pages.flat();
+        setCommits(current=>JSON.stringify(current)===JSON.stringify(items)?current:items);
+        setHasMore(pages.at(-1)?.length===50);setError('');
+      }catch(reason){if(active&&request===generation.current)setError(String(reason));}
+      finally{inFlight=false;}
+    };
+    const onVisible=()=>void refresh();
+    window.addEventListener('focus',onVisible);document.addEventListener('visibilitychange',onVisible);
+    const timer=window.setInterval(onVisible,15000);
+    return()=>{active=false;window.clearInterval(timer);window.removeEventListener('focus',onVisible);document.removeEventListener('visibilitychange',onVisible);};
+  },[repository?.id,branch]);
+
   useEffect(() => {
     if (!repository) return;
     let active = true;
@@ -152,7 +175,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
 
   async function loadMore() {
     if (!repository || loading) return;
-    const request = generation.current;
+    const request = ++generation.current;
     setLoading(true); setError("");
     try {
       const items = await requestTimeout(api.history(repository.id, branch || undefined, commits.length),'Commit loading');
