@@ -1168,3 +1168,9 @@ input[type="number"] { text-align: right; }
 .automation-dialog-backdrop {align-items:start;overflow:auto;}
 .automation-dialog {max-height:calc((100dvh - 32px)/var(--ui-zoom));}
 .automation-dialog > header,.automation-dialog > footer {flex-shrink:0;}
+
+.history-panel .branch-group-tabs .branch-tag,.commit-tag {display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--accent-codex-border);}
+.history-panel .branch-group-tabs .branch-tag {min-width:0;max-width:72px;flex-shrink:0;overflow:hidden;white-space:nowrap;margin:0;}
+.branch-tag svg,.commit-tag svg {flex-shrink:0;}
+.commit-tag {max-width:100%;overflow-wrap:anywhere;}
+.commit-meta {flex-wrap:wrap;}

@@ -57,7 +57,7 @@ export type RepositoryUpdate = {
   tags: string[];
 };
 
-export type Commit = { hash: string; author: string; email: string; committedAt: string; summary: string };
+export type Commit = { tags?: string[]; hash: string; author: string; email: string; committedAt: string; summary: string };
 
 export type CodexAccount = { account: { type: string; email?: string; planType?: string } | null };
 export type CodexThread = { id: string; name?: string; preview: string; cwd: string; updatedAt: number; working?: boolean; gitInfo?: { branch?: string } };

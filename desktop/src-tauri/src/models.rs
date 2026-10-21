@@ -86,6 +86,7 @@ pub struct RepositoryUpdate {
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Commit {
+    pub tags: Vec<String>,
     pub hash: String,
     pub author: String,
     pub email: String,

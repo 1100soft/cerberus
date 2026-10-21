@@ -32,6 +32,7 @@ mod github_credentials;
 mod branch_removal;
 mod branch_sync;
 mod branch_listing;
+mod git_tags;
 mod automation_worktrees;
 mod conversation_store;
 mod awake;

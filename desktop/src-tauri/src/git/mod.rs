@@ -83,7 +83,9 @@ impl GitService {
         let output = self.output(repo, &["log", "--date-order", "--max-count=50", &format!("--skip={skip}"), "--format=%H%x00%an%x00%ae%x00%cI%x00%s", "-z", &hash, "--"])?;
         let text = String::from_utf8_lossy(&output.stdout);
         let fields: Vec<_> = text.split_terminator('\0').collect();
+        let tags=crate::git_tags::by_commit(repo).map_err(GitError::Command)?;
         Ok(fields.chunks_exact(5).map(|fields| crate::models::Commit {
+            tags: tags.get(fields[0]).cloned().unwrap_or_default(),
             hash: fields[0].into(), author: fields[1].into(), email: fields[2].into(),
             committed_at: fields[3].into(), summary: fields[4].into(),
         }).collect())
