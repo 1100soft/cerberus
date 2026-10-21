@@ -1174,3 +1174,9 @@ input[type="number"] { text-align: right; }
 .branch-tag svg,.commit-tag svg {flex-shrink:0;}
 .commit-tag {max-width:100%;overflow-wrap:anywhere;}
 .commit-meta {flex-wrap:wrap;}
+
+.script-runtime-controls {display:flex;flex-direction:column;gap:5px;min-width:0;margin:4px 0;}
+.script-runtime-row {display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;}
+.script-runtime-controls label {display:flex;flex-wrap:wrap;gap:6px;min-width:0;}
+.script-runtime-controls input,.script-runtime-controls textarea {min-width:0;max-width:100%;flex:1;}
+.script-runtime-controls small {white-space:normal;overflow-wrap:anywhere;}

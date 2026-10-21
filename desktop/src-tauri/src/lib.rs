@@ -19,6 +19,7 @@ mod copilot_history;
 mod claude_history;
 mod prompt_delivery;
 mod shell_automation;
+mod script_runtime;
 mod automation_logs;
 mod handoffs;
 mod repository_watcher;
@@ -295,10 +296,23 @@ async fn run_new_agent_conversation(repository_id:String,provider:String,identit
 #[tauri::command]
 fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
 #[tauri::command]
-async fn run_automation_shell(repository_id:String,script:String,output:tauri::ipc::Channel<shell_automation::ShellChunk>,handoff_input_path:Option<String>,handoff_output_paths:std::collections::HashMap<String,String>,context:Option<std::collections::HashMap<String,String>>,state:State<'_,AppState>)->Result<shell_automation::ShellRun,String>{
+fn script_runtime_settings(state:State<AppState>)->Result<script_runtime::Runtime,String>{script_runtime::settings(&state.data_dir)}
+#[tauri::command]
+fn save_script_runtime(config:script_runtime::Runtime,state:State<AppState>)->Result<(),String>{script_runtime::save(&state.data_dir,&config)}
+#[tauri::command]
+fn script_runtime_candidates(repository_id:Option<String>,state:State<AppState>)->Result<Vec<script_runtime::Status>,String>{let repo=if let Some(id)=repository_id{state.db.repository_path(&id)?}else{std::env::current_dir().map_err(|e|e.to_string())?};Ok(script_runtime::candidates(&repo))}
+#[tauri::command]
+async fn check_script_runtime(repository_id:Option<String>,config:script_runtime::Runtime,state:State<'_,AppState>)->Result<script_runtime::Status,String>{
+ let repo=if let Some(id)=repository_id{state.db.repository_path(&id)?}else{std::env::current_dir().map_err(|e|e.to_string())?};
+ let config=if config.preset=="default"{script_runtime::settings(&state.data_dir)?}else{config};
+ tauri::async_runtime::spawn_blocking(move||script_runtime::check(&repo,&config)).await.map_err(|e|e.to_string())
+}
+#[tauri::command]
+async fn run_automation_shell(repository_id:String,script:String,runtime:Option<script_runtime::Runtime>,output:tauri::ipc::Channel<shell_automation::ShellChunk>,handoff_input_path:Option<String>,handoff_output_paths:std::collections::HashMap<String,String>,context:Option<std::collections::HashMap<String,String>>,state:State<'_,AppState>)->Result<shell_automation::ShellRun,String>{
     let _awake=awake::acquire();
     let repository=state.db.repository_path(&repository_id)?;
-    tauri::async_runtime::spawn_blocking(move||shell_automation::run_stream_with_context(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context.unwrap_or_default())).await.map_err(|error|error.to_string())?
+    let runtime=match runtime{Some(config) if config.preset=="default"=>script_runtime::settings(&state.data_dir)?,Some(config)=>config,None=>script_runtime::Runtime{preset:"bash".into(),..Default::default()}};
+    tauri::async_runtime::spawn_blocking(move||shell_automation::run_stream_with_runtime(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context.unwrap_or_default(),&runtime)).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
 async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
@@ -943,7 +957,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,
