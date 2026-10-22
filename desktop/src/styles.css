@@ -1168,3 +1168,15 @@ input[type="number"] { text-align: right; }
 .automation-dialog-backdrop {align-items:start;overflow:auto;}
 .automation-dialog {max-height:calc((100dvh - 32px)/var(--ui-zoom));}
 .automation-dialog > header,.automation-dialog > footer {flex-shrink:0;}
+
+.history-panel .branch-group-tabs .branch-tag,.commit-tag {display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--accent-codex-border);}
+.history-panel .branch-group-tabs .branch-tag {min-width:0;max-width:72px;flex-shrink:0;overflow:hidden;white-space:nowrap;margin:0;}
+.branch-tag svg,.commit-tag svg {flex-shrink:0;}
+.commit-tag {max-width:100%;overflow-wrap:anywhere;}
+.commit-meta {flex-wrap:wrap;}
+
+.script-runtime-controls {display:flex;flex-direction:column;gap:5px;min-width:0;margin:4px 0;}
+.script-runtime-row {display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;}
+.script-runtime-controls label {display:flex;flex-wrap:wrap;gap:6px;min-width:0;}
+.script-runtime-controls input,.script-runtime-controls textarea {min-width:0;max-width:100%;flex:1;}
+.script-runtime-controls small {white-space:normal;overflow-wrap:anywhere;}

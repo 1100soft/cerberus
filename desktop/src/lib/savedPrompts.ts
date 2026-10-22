@@ -1,3 +1,5 @@
+import { resolveScriptRuntime } from './scriptRuntime';
+import type { ScriptRuntime } from './scriptRuntime';
 import { createsLocalCommit } from './commitEvents';
 import { ciAccessNotice } from './ciAccessNotice';
 import { startAutomationMaintenance } from './automationMaintenance';
@@ -20,7 +22,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export type AutomationRetry={inputValues?:AutomationInputValues;job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
 const blockedRuns=new Map<string,AutomationLog>();
 const retryingRuns=new Set<string>();
@@ -197,7 +199,7 @@ let jobs:SavedPrompt[]=read();
 let checking=false;
 let recheck=false;
 
-function read():SavedPrompt[] {try {const data=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(data)?data.filter(item=>item&&typeof item.id==='string'&&typeof item.prompt==='string'&&typeof item.threadId==='string').map(item=>item.kind==='git'||item.kind==='shell'||item.kind==='notification'||item.target==='new'?item:{...item,state:'error',lastResult:'Existing-conversation delivery was retired. Create a new in-app automation from this prompt.'}):[];}catch{return [];}}
+function read():SavedPrompt[] {try {const data=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(data)?data.filter(item=>item&&typeof item.id==='string'&&typeof item.prompt==='string'&&typeof item.threadId==='string').map(item=>item.kind==='shell'&&!item.scriptRuntime?{...item,scriptRuntime:{preset:'bash'}}:item).map(item=>item.kind==='git'||item.kind==='shell'||item.kind==='notification'||item.target==='new'?item:{...item,state:'error',lastResult:'Existing-conversation delivery was retired. Create a new in-app automation from this prompt.'}):[];}catch{return [];}}
 function publish(next:SavedPrompt[]){const serialized=JSON.stringify(next);localStorage.setItem(key,serialized);if(localStorage.getItem(key)!==serialized)throw new Error('Automation could not be saved on this device.');jobs=next;for(const listener of listeners)listener();}
 export function subscribeSavedPrompts(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function savedPrompts(){return jobs;}
@@ -240,6 +242,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
   let inputValues:AutomationInputValues={};
   try{
     inputValues=(retry?.manual??manual)?resolveInputValues(job.manualInputs||[],retry?.inputValues||manualInputValues||{}):{};
+    const executionRuntime:ScriptRuntime|undefined=job.kind==='shell'?(job.scriptRuntime&&['auto','default'].includes(job.scriptRuntime.preset)?resolveScriptRuntime(job.prompt,job.scriptRuntime,await api.scriptRuntimeSettings()):job.scriptRuntime||{preset:'bash'}):undefined;
     change(id,{state:'running',lastResult:'Running automation…'});
     if(job.kind!=='git'&&job.kind!=='shell'&&job.kind!=='notification'&&job.target!=='new')throw new Error('Existing-conversation delivery was retired. Create a new in-app automation from this prompt.');
     const useLiveRepositories=job.includeFutureRepositories||(manual&&job.trigger==='manual');
@@ -284,7 +287,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       const outgoing:Record<string,string>={};
       const ciContext=ciRun?`GitHub Actions ${ciRun.conclusion==='success'?'passed':'failed'}: ${ciRun.name}. Branch: ${ciRun.headBranch||'unknown'}. Commit: ${ciRun.headSha}. Run: ${ciRun.htmlUrl}.\n\n`:'';
       let stdout='',stderr='',response='',activity='',result='',failure='',agentStarted=false;
-      const retryContext:AutomationRetry={inputValues,job:{...job},manual:retry?.manual??manual,incoming,ciRun,eventBranch,eventSha,matchedConditions};
+      const retryContext:AutomationRetry={inputValues,job:{...job,...(executionRuntime?{scriptRuntime:executionRuntime}:{})},manual:retry?.manual??manual,incoming,ciRun,eventBranch,eventSha,matchedConditions};
       let agentChatId:string|undefined;
       const attachConversation=()=>{const chat=agentChatId?getAgentChat(agentChatId):undefined;if(!chat)return;Object.assign(log,{conversation:{id:chat.id,profile:chat.profile,name:chat.name,session:chat.session,automationContext:chat.automationContext,mode:chat.mode,model:chat.model,reasoningEffort:chat.reasoningEffort,prompt:chat.messages.filter(m=>m.role==='user').at(-1)?.text||job.prompt}});};
       const unsubscribeProgress=subscribeAgentChats(()=>{const chat=agentChatId?getAgentChat(agentChatId):undefined;if(chat&&chat.updatedAt>=createdAt){attachConversation();activity=chat.activity.slice(-2_000_000);response=chat.messages.filter(message=>message.role==='assistant').map(message=>message.text).join('\n\n').slice(-2_000_000);updateAutomationLog(log,{response,activity,conversation:(log as AutomationLog).conversation});}});
@@ -297,7 +300,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
           if(chunk.stream==='stderr')stderr=(stderr+chunk.text).slice(-2_000_000);else stdout=(stdout+chunk.text).slice(-2_000_000);
           updateAutomationLog(log,{stdout,stderr});
           appendAutomationOutput(execution.id,{repositoryId,stream:chunk.stream==='stderr'?'stderr':'stdout',text:chunk.text});
-        },incoming?.repositoryId===repositoryId?incoming.path:undefined,outgoing,{...inputEnvironment(inputValues),CERBERUS_REPOSITORY_ID:repositoryId,CERBERUS_REPOSITORY_NAME:repositoryLabel,CERBERUS_AUTOMATION_ID:id,CERBERUS_AUTOMATION_NAME:job.title,CERBERUS_RUN_ID:runId,CERBERUS_CONDITIONS:(retry?.manual??manual)?'manual':(matchedConditions||automationConditions(job)).join(','),CERBERUS_BRANCH:eventBranch||ciRun?.headBranch||'',CERBERUS_COMMIT_SHA:eventSha||ciRun?.headSha||'',CERBERUS_CI_RUN_URL:ciRun?.htmlUrl||'',CERBERUS_CI_CONCLUSION:ciRun?.conclusion||''});result=shell.result;stdout=shell.stdout||shell.result;stderr=shell.stderr;}
+        },incoming?.repositoryId===repositoryId?incoming.path:undefined,outgoing,{...inputEnvironment(inputValues),CERBERUS_REPOSITORY_ID:repositoryId,CERBERUS_REPOSITORY_NAME:repositoryLabel,CERBERUS_AUTOMATION_ID:id,CERBERUS_AUTOMATION_NAME:job.title,CERBERUS_RUN_ID:runId,CERBERUS_CONDITIONS:(retry?.manual??manual)?'manual':(matchedConditions||automationConditions(job)).join(','),CERBERUS_BRANCH:eventBranch||ciRun?.headBranch||'',CERBERUS_COMMIT_SHA:eventSha||ciRun?.headSha||'',CERBERUS_CI_RUN_URL:ciRun?.htmlUrl||'',CERBERUS_CI_CONCLUSION:ciRun?.conclusion||''},executionRuntime);result=shell.result;stdout=shell.stdout||shell.result;stderr=shell.stderr;}
         else if(job.kind==='git'){
           if(!job.gitAction)throw new Error('Choose a Git action.');
           incomingStarted=true;

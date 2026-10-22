@@ -57,3 +57,14 @@ is swept independently. Clean temporary branches created or selected by agents
 inside managed worktrees are eligible too, provided another ref preserves their
 commits. Arbitrary branch names (such as `test-rebase`), dirty worktrees, active
 runs, and unique commits are preserved for inspection.
+
+Commit history displays all locally known tags pointing directly at each commit,
+including annotated and lightweight tags. Branch cards show the nearest reachable
+tag (`git describe --tags --abbrev=0`), rather than the highest version number or
+a tag on an unrelated branch. No badge is shown when no tag is reachable. Fetch
+tags first if a remote tag is not yet available locally.
+
+History refreshes on local commit/tag ref changes, when the app regains focus,
+and through a 15-second polling fallback while visible. Refresh history reloads
+commit labels and branch metadata. Background refresh includes loaded history
+pages and ignores responses for a repository or branch that is no longer selected.

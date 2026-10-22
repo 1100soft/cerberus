@@ -2,7 +2,7 @@ import { useAutomationRuns } from '../lib/savedPrompts';
 import { requestTimeout } from '../lib/requestTimeout';
 import { matchesShortcut } from '../lib/shortcuts';
 import { useEffect, useId, useRef, useState } from "react";
-import { GitBranch, GitCommitHorizontal, RefreshCw, Trash2, X, ArrowDownToLine, AlertTriangle, Clock } from "lucide-react";
+import { GitBranch, GitCommitHorizontal, RefreshCw, Trash2, X, ArrowDownToLine, AlertTriangle, Clock, Tag } from "lucide-react";
 import { api, inTauri, type BranchListEntry, type BranchSyncStatus, type BranchRemovalPlan } from "../lib/api";
 import { listen } from "@tauri-apps/api/event";
 import type { Commit, Repository } from "../types";
@@ -62,6 +62,29 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     }
     return () => { generation.current++; };
   }, [repository?.id, branch, revision]);
+
+  const visibleCommitCount=useRef(0);visibleCommitCount.current=commits.length;
+  useEffect(()=>{
+    if(!repository)return;
+    let active=true,inFlight=false;
+    const refresh=async()=>{
+      if(document.hidden||inFlight)return;
+      inFlight=true;const request=generation.current;
+      try{
+        const count=Math.max(50,visibleCommitCount.current);
+        const pages=await Promise.all(Array.from({length:Math.ceil(count/50)},(_,index)=>requestTimeout(api.history(repository.id,branch||undefined,index*50),'Commit refresh')));
+        if(!active||request!==generation.current)return;
+        const items=pages.flat();
+        setCommits(current=>JSON.stringify(current)===JSON.stringify(items)?current:items);
+        setHasMore(pages.at(-1)?.length===50);setError('');
+      }catch(reason){if(active&&request===generation.current)setError(String(reason));}
+      finally{inFlight=false;}
+    };
+    const onVisible=()=>void refresh();
+    window.addEventListener('focus',onVisible);document.addEventListener('visibilitychange',onVisible);
+    const timer=window.setInterval(onVisible,15000);
+    return()=>{active=false;window.clearInterval(timer);window.removeEventListener('focus',onVisible);document.removeEventListener('visibilitychange',onVisible);};
+  },[repository?.id,branch]);
 
   useEffect(() => {
     if (!repository) return;
@@ -152,7 +175,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
 
   async function loadMore() {
     if (!repository || loading) return;
-    const request = generation.current;
+    const request = ++generation.current;
     setLoading(true); setError("");
     try {
       const items = await requestTimeout(api.history(repository.id, branch || undefined, commits.length),'Commit loading');
@@ -171,7 +194,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
           event.preventDefault();
           const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
           setBranch(tabs[next]);document.getElementById(`${panelId}-tab-${next}`)?.focus();
-        }}><GitBranch size={13} /><span className="branch-tab-name">{name || "Detached HEAD"}</span>{group.kind==='retained'&&<small className="branch-cleanup-time" title={detail?.cleanupAt?`Delete after ${new Date(detail.cleanupAt).toLocaleString()}. ${detail.cleanupNote||''}`:detail?.cleanupNote||'No automatic deletion scheduled for this branch.'}><Trash2 size={10}/><Clock size={10}/>{detail?.cleanupAt&&<time dateTime={new Date(detail.cleanupAt).toISOString()}>{new Date(detail.cleanupAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})}</time>}</small>}</button>;})}</div></div>)}
+        }}><GitBranch size={13} /><span className="branch-tab-name">{name || "Detached HEAD"}</span>{detail?.latestTag&&<span className="branch-tag" title={`Latest reachable tag: ${detail.latestTag}`}><Tag size={10}/>{detail.latestTag}</span>}{group.kind==='retained'&&<small className="branch-cleanup-time" title={detail?.cleanupAt?`Delete after ${new Date(detail.cleanupAt).toLocaleString()}. ${detail.cleanupNote||''}`:detail?.cleanupNote||'No automatic deletion scheduled for this branch.'}><Trash2 size={10}/><Clock size={10}/>{detail?.cleanupAt&&<time dateTime={new Date(detail.cleanupAt).toISOString()}>{new Date(detail.cleanupAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false})}</time>}</small>}</button>;})}</div></div>)}
       </div>
       <div className="branch-sync-status"><button type="button" aria-label="Fast-forward selected branch" title={sync?.reason||syncError||'Checking upstream status…'} disabled={!sync?.safe||syncBusy||removalExecuting} onClick={()=>void fastForward()}>{syncBusy?<RefreshCw size={15} className="spin"/>:<ArrowDownToLine size={15}/>}</button><span>{sync?`${sync.upstream?.replace(/^refs\/remotes\//,'').replace(/^refs\/heads\//,'')||'No upstream'} · ${sync.ahead} ahead · ${sync.behind} behind`:syncError?'Upstream status unavailable':branch?'Checking upstream…':'Detached HEAD · no branch to advance'}</span>{sync&&!sync.safe&&<span className="branch-sync-reason">{sync.behind>0&&<AlertTriangle size={14}/>} {sync.reason}</span>}</div>
       {syncError&&<p className="config-error" role="status">{syncError}</p>}
@@ -183,7 +206,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     {error && <p className="config-error" role="alert">{error}</p>}
     {loading && <p className="panel-copy" role="status">Loading commits…</p>}
     {repository && !loading && !error && !commits.length && <p className="panel-copy">No commits on this branch yet.</p>}
-    <ol className="commit-history">{commits.map((commit, index) => <li key={`${commit.hash}-${index}`} className={selectedCommit === index ? "selected-commit" : ""}><GitCommitHorizontal size={17} /><button type="button" className="commit-entry" data-commit-index={index} aria-current={selectedCommit === index ? "true" : undefined} onFocus={() => setSelectedCommit(index)} onClick={() => setSelectedCommit(index)}><h3>{commit.summary}</h3><p title={commit.email}>{commit.author}</p><div className="commit-meta"><code title={commit.hash}>{commit.hash.slice(0, 7)}</code><time dateTime={commit.committedAt} title={new Date(commit.committedAt).toLocaleString()}>{new Date(commit.committedAt).toLocaleString()}</time></div></button></li>)}</ol>
+    <ol className="commit-history">{commits.map((commit, index) => <li key={`${commit.hash}-${index}`} className={selectedCommit === index ? "selected-commit" : ""}><GitCommitHorizontal size={17} /><button type="button" className="commit-entry" data-commit-index={index} aria-current={selectedCommit === index ? "true" : undefined} onFocus={() => setSelectedCommit(index)} onClick={() => setSelectedCommit(index)}><h3>{commit.summary}</h3><p title={commit.email}>{commit.author}</p><div className="commit-meta">{commit.tags?.map(tag=><span className="commit-tag" key={tag} title={`Tag: ${tag}`}><Tag size={11}/>{tag}</span>)}<code title={commit.hash}>{commit.hash.slice(0, 7)}</code><time dateTime={commit.committedAt} title={new Date(commit.committedAt).toLocaleString()}>{new Date(commit.committedAt).toLocaleString()}</time></div></button></li>)}</ol>
     {hasMore && <button className="history-more" type="button" disabled={loading} onClick={loadMore}>Load older commits</button>}
     </div>
     {removalOpen&&<div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)closeRemoval();}}><section className="automation-dialog branch-removal-dialog" role="dialog" aria-modal="true" aria-label="Remove branch" onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();closeRemoval();}}}><header><h2>Remove branch</h2><button type="button" aria-label="Close branch removal" disabled={removalExecuting} onClick={closeRemoval}><X size={17}/></button></header><div className="automation-dialog-content">

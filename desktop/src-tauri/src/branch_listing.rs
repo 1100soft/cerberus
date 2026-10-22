@@ -9,6 +9,7 @@ use std::{
 #[serde(rename_all = "camelCase")]
 pub struct Branch {
     pub name: String,
+    pub latest_tag: Option<String>,
     pub kind: &'static str,
     pub worktree: Option<PathBuf>,
     pub cleanup_at: Option<u64>,
@@ -81,6 +82,7 @@ pub fn list(root: &Path, repo: &Path, id: &str, names: Vec<String>) -> Result<Ve
             let cleanup_at=if kind=="retained"{worktree.as_deref().filter(|path|path.starts_with(&managed)).and_then(|path|crate::automation_worktrees::cleanup_at(root,path))}else{None};
             let cleanup_note=if kind=="retained"{Some(if cleanup_at.is_some(){"Automatic cleanup after this time, when the app is running. Active or retry-protected runs, dirty worktrees, and unique commits are preserved."}else{"No automatic deletion scheduled: this branch has no app-managed worktree. Remove it manually when no longer needed."}.into())}else{None};
             Branch {
+                latest_tag: crate::git_tags::latest(repo,&name),
                 cleanup_at,cleanup_note,
                 name,
                 kind,

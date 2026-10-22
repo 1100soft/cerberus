@@ -47,6 +47,7 @@ script = r"""
  (await wait(()=>document.querySelector('[aria-label="Automation settings"]'))).click();
  const retentionDialog=await wait(()=>document.querySelector('[role="dialog"][aria-label="Automation settings"]'));
  const retentionInput=await wait(()=>{const input=retentionDialog.querySelector('input');return input&&!input.disabled?input:null;});
+ await document.fonts.ready;await wait(()=>getComputedStyle(retentionDialog.parentElement).alignItems==='start');
  assert(retentionInput.value==='24','Handoff retention does not default to 24 hours');
  for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',String(zoom));await pause();const rect=retentionDialog.getBoundingClientRect();assert(rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight,'Retention dialog overflows at zoom '+zoom+' '+JSON.stringify({left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:innerWidth,height:innerHeight}));}
  document.documentElement.style.setProperty('--ui-zoom','1');await pause();
@@ -75,12 +76,12 @@ script = r"""
  const enterText=(node,value)=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));};
  enterText(document.querySelector('[aria-label="Prompt to save"]'),'agent text');await pause();
  document.querySelector('.automation-type button:nth-child(2)').click();await pause();
- assert(document.querySelector('[aria-label="Shell command or script"]').value==='','Shell inherited agent text');enterText(document.querySelector('[aria-label="Shell command or script"]'),'shell text');await pause();
- for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);document.querySelector('[aria-label="Shell context help"]').click();await pause();const help=document.querySelector('.info-popover'),r=help.getBoundingClientRect();assert(r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1,'Context popover exceeds viewport '+JSON.stringify({zoom,left:r.left,right:r.right,top:r.top,bottom:r.bottom,w:innerWidth,h:innerHeight,bodyZoom:getComputedStyle(document.body).zoom,style:help.getAttribute('style'),position:getComputedStyle(help).position}));assert(help.textContent.includes('CERBERUS_BRANCH'),'Shell context help missing');document.querySelector('[aria-label="Shell context help"]').click();await pause();}
+ assert(document.querySelector('[aria-label="Script content"]').value==='','Shell inherited agent text');enterText(document.querySelector('[aria-label="Script content"]'),'shell text');await pause();
+ for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);document.querySelector('[aria-label="Script context help"]').click();await pause();const help=document.querySelector('.info-popover'),r=help.getBoundingClientRect();assert(r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1,'Context popover exceeds viewport '+JSON.stringify({zoom,left:r.left,right:r.right,top:r.top,bottom:r.bottom,w:innerWidth,h:innerHeight,bodyZoom:getComputedStyle(document.body).zoom,style:help.getAttribute('style'),position:getComputedStyle(help).position}));assert(help.textContent.includes('CERBERUS_BRANCH'),'Script context help missing');document.querySelector('[aria-label="Script context help"]').click();await pause();}
  document.documentElement.style.setProperty('--ui-zoom',1);
  document.querySelector('.automation-type button:nth-child(3)').click();await pause();assert(document.querySelector('[aria-label="Notification message"]').value==='','Notification inherited shell text');enterText(document.querySelector('[aria-label="Notification message"]'),'notice text');await pause();
  document.querySelector('.automation-type button:nth-child(1)').click();await pause();assert(document.querySelector('[aria-label="Prompt to save"]').value==='agent text','Agent text not preserved');
- document.querySelector('.automation-type button:nth-child(2)').click();await pause();assert(document.querySelector('[aria-label="Shell command or script"]').value==='shell text','Shell text not preserved');
+ document.querySelector('.automation-type button:nth-child(2)').click();await pause();assert(document.querySelector('[aria-label="Script content"]').value==='shell text','Shell text not preserved');
  document.querySelector('.automation-type button:nth-child(3)').click();await pause();assert(document.querySelector('[aria-label="Notification message"]').value==='notice text','Notification text not preserved');
  document.querySelector('.automation-type button:nth-child(1)').click();await pause();enterText(document.querySelector('[aria-label="Prompt to save"]'),'');await pause();
  assert(!document.querySelector('.automation-repositories'),'Manual automation asks for repositories before run');
@@ -138,7 +139,7 @@ script = r"""
  const draftBounds=document.querySelector('.automation-draft').getBoundingClientRect(),outputBounds=document.querySelector('.automation-output').getBoundingClientRect();
  assert(draftBounds.width>0&&outputBounds.width>0,'Draft or output field is hidden');
  const nameInput=document.querySelector('.automation-dialog [aria-label="Automation name"]');assert(nameInput,'Automation name missing');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(nameInput,'Fixture autosave');nameInput.dispatchEvent(new Event('input',{bubbles:true}));await pause();
- const textarea=document.querySelector('.automation-dialog textarea[aria-label="Shell command or script"]');
+ const textarea=document.querySelector('.automation-dialog textarea[aria-label="Script content"]');
  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(textarea,'printf "fixture shell"');textarea.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  assert(document.querySelector('.shell-editor-highlight .hljs-string'),'Shell string syntax is not highlighted');
  window.__automationStage='save retry';
@@ -209,7 +210,7 @@ script = r"""
  const originalId=jobs[0].id;const editDraftCalls=[];
  document.querySelector('.saved-prompt-list [aria-label^="Edit "]').click();await wait(()=>document.querySelector('[aria-label="Edit automation"]'));
  assert(document.querySelector('[aria-label="Automation name"]').value==='Fixture autosave','Edit did not prefill name');
- assert(document.querySelector('[aria-label="Shell command or script"]').value==='printf "fixture shell"','Edit did not prefill script');
+ assert(document.querySelector('[aria-label="Script content"]').value==='printf "fixture shell"','Edit did not prefill script');
  assert(document.querySelector('.automation-condition-chip').textContent.includes('Every interval'),'Edit did not prefill condition');
  assert(document.querySelector('.automation-target-summary').textContent==='All','Edit did not prefill future repository scope');
  api.runNewAgentConversation=async(repo,agent,identity,mode,request,sessionId)=>{editDraftCalls.push({repo,agent,request,sessionId});return {text:'printf "revised shell"',sessionId:'edit-draft-session'};};
@@ -217,7 +218,7 @@ script = r"""
  const editInstruction=document.querySelector('textarea[aria-label="Describe automation task"]');
  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(editInstruction,'Add a revised message');editInstruction.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  editInstruction.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));
- await wait(()=>document.querySelector('textarea[aria-label="Shell command or script"]').value==='printf "revised shell"');
+ await wait(()=>document.querySelector('textarea[aria-label="Script content"]').value==='printf "revised shell"');
  assert(editDraftCalls.length===1&&editDraftCalls[0].request.includes('Modify the following existing automation')&&editDraftCalls[0].request.includes('printf "fixture shell"')&&editDraftCalls[0].request.includes('Add a revised message'),'Edit drafting did not modify the saved script');
  document.querySelector('.automation-dialog footer button:last-child').click();await wait(()=>!document.querySelector('.automation-dialog'));
  jobs=JSON.parse(localStorage.getItem('gitcerberus.savedPrompts.v1'));
@@ -248,16 +249,16 @@ script = r"""
  await choose('Draft context repository','');assert(document.querySelector('[aria-label="Draft context repository"]').textContent.includes('backend-api'),'Auto context does not reveal chosen repository');
  const instruction=document.querySelector('textarea[aria-label="Describe automation task"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(instruction,'commit and push to an autosave branch');instruction.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  instruction.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));
- await wait(()=>document.querySelector('textarea[aria-label="Shell command or script"]').value==='printf "generated"');
+ await wait(()=>document.querySelector('textarea[aria-label="Script content"]').value==='printf "generated"');
  assert(draftCalls.length===1&&draftCalls[0].repo===jobs[0].repositoryIds[0]&&draftCalls[0].agent==='copilot'&&draftCalls[0].mode==='analyze'&&draftCalls[0].request.includes('commit and push to an autosave branch'),'Draft did not use selected agent and repository context');
  assert(!draftCalls[0].request.includes('/Users/alex/'),'Draft request unnecessarily includes repository paths');
  assert(document.querySelector('.automation-draft-history').textContent.includes(draftCalls[0].request),'Submitted request was not retained in the drafting conversation');
- const generatedOutput=document.querySelector('textarea[aria-label="Shell command or script"]');
+ const generatedOutput=document.querySelector('textarea[aria-label="Script content"]');
  generatedOutput.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));await pause();assert(generatedOutput.value==='','Output undo failed');
  generatedOutput.dispatchEvent(new KeyboardEvent('keydown',{key:'y',ctrlKey:true,bubbles:true,cancelable:true}));await pause();assert(generatedOutput.value==='printf "generated"','Output redo failed');
  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(instruction,'Make the branch name configurable');instruction.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  instruction.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));
- await wait(()=>document.querySelector('textarea[aria-label="Shell command or script"]').value==='printf "revised"');
+ await wait(()=>document.querySelector('textarea[aria-label="Script content"]').value==='printf "revised"');
  assert(draftCalls.length===2&&draftCalls[1].request==='Make the branch name configurable'&&draftCalls[1].sessionId==='draft-session-1','Follow-up did not resume the drafting conversation with raw user input');
  let rejectPending;let stoppedId;api.runNewAgentConversation=async(repo,agent,identity,mode,request,sessionId,requestId)=>{draftCalls.push({repo,agent,identity,mode,request,sessionId,requestId});return new Promise((resolve,reject)=>{rejectPending=reject;});};
  api.cancelDraft=async(id)=>{stoppedId=id;rejectPending('Draft stopped');};
@@ -265,9 +266,9 @@ script = r"""
  instruction.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));await wait(()=>document.querySelector('.automation-draft-actions button:last-child').textContent.includes('Stop'));
  document.querySelector('.automation-draft-actions button:last-child').click();await wait(()=>[...document.querySelectorAll('.automation-dialog [role="status"]')].some(node=>node.textContent.includes('Draft stopped')));
  assert(stoppedId===draftCalls[2].requestId&&draftCalls[2].sessionId==='draft-session-1','Stop did not cancel the active draft request');
- assert(document.querySelector('textarea[aria-label="Shell command or script"]').value==='printf "revised"','Stopped draft changed the saved output');
+ assert(document.querySelector('textarea[aria-label="Script content"]').value==='printf "revised"','Stopped draft changed the saved output');
  const manualName=document.querySelector('.automation-dialog [aria-label="Automation name"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(manualName,'Manual shell');manualName.dispatchEvent(new Event('input',{bubbles:true}));await pause();
- const manualScript=document.querySelector('textarea[aria-label="Shell command or script"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(manualScript,'printf "manual"');manualScript.dispatchEvent(new Event('input',{bubbles:true}));await pause();
+ const manualScript=document.querySelector('textarea[aria-label="Script content"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(manualScript,'printf "manual"');manualScript.dispatchEvent(new Event('input',{bubbles:true}));await pause();
  assert(!document.querySelector('.automation-dialog footer button:last-child').disabled,'Manual Save disabled: '+document.querySelector('.automation-dialog [role="status"]')?.textContent);
  document.querySelector('.automation-dialog footer button:last-child').click();await pause();
  jobs=JSON.parse(localStorage.getItem('gitcerberus.savedPrompts.v1'));const manualJob=jobs.find(item=>item.trigger==='manual');
@@ -437,7 +438,7 @@ script = r"""
  assert(!outgoingName.placeholder,'Outgoing handoff field has hint text');
  outgoingName.focus();document.execCommand('insertText',false,'correction');await pause();
  assert(outgoingName.value==='correction','Outgoing handoff field rejected a new name');
- document.querySelector('[aria-label="Handoff help"]').click();await pause();assert(document.querySelector('.info-popover').textContent.includes('Handoffs trigger'),'Handoff help popover is missing');assert(document.querySelector('.info-popover').textContent.includes('Agent:')&&document.querySelector('.info-popover').textContent.includes('Shell:')&&document.querySelector('.info-popover').textContent.includes('$CERBERUS_HANDOFF_REVIEW'),'Flag help missing Agent or Shell example');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause();assert(!document.querySelector('.info-popover')&&document.querySelector('.automation-dialog'),'Popover Escape closed the dialog');
+ document.querySelector('[aria-label="Handoff help"]').click();await pause();assert(document.querySelector('.info-popover').textContent.includes('Handoffs trigger'),'Handoff help popover is missing');assert(document.querySelector('.info-popover').textContent.includes('Agent:')&&document.querySelector('.info-popover').textContent.includes('Script:')&&document.querySelector('.info-popover').textContent.includes('CERBERUS_HANDOFF_REVIEW'),'Flag help missing Agent or Script example');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause();assert(!document.querySelector('.info-popover')&&document.querySelector('.automation-dialog'),'Popover Escape closed the dialog');
  assert(document.querySelector('.automation-emits').getBoundingClientRect().top>=document.querySelector('.automation-output textarea').getBoundingClientRect().bottom-2,'Emit field is not below the prompt');
  outgoingName.focus();outgoingName.select();document.execCommand('insertText',false,'(new-handoff)');await pause();
  assert(document.querySelector('[aria-label="Outgoing handoff names"]').value==='(new-handoff)','The field rejected a new handoff name');
