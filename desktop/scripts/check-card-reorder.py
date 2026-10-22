@@ -14,7 +14,7 @@ urllib.request.urlopen('http://127.0.0.1:3000', timeout=5).close()
 script = r"""
 (async()=>{
  const pause=(ms=80)=>new Promise(resolve=>setTimeout(resolve,ms));
- const wait=async(get)=>{for(let i=0;i<100;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for card');};
+ const wait=async(get)=>{for(let i=0;i<100;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for card: '+get.toString());};
  const assert=(ok,message)=>{if(!ok)throw Error(message)};
  await wait(()=>getComputedStyle(document.documentElement).getPropertyValue('--accent-codex-border').trim());
  const rows=await wait(()=>{const nodes=[...document.querySelectorAll('.repo-row.repo-local')];return nodes.length>=2?nodes:null;});
@@ -38,17 +38,19 @@ script = r"""
  api.branches=async()=>branchNames;
  api.history=async(_,branch)=>{historyBranch=branch||'';return [];};
  document.querySelector('.repo-row.repo-local:not([data-repository-id="'+sourceId+'"])').click();await pause();
- const nativeSetInterval=window.setInterval;let pollBranches;
- window.setInterval=(callback,delay,...args)=>{if(delay===15000)pollBranches=callback;return nativeSetInterval(callback,delay,...args);};
+ const nativeSetInterval=window.setInterval;const repositoryPollers=[];
+ window.setInterval=(callback,delay,...args)=>{if(delay===15000)repositoryPollers.push(callback);return nativeSetInterval(callback,delay,...args);};
  document.querySelector('.repo-row.repo-local[data-repository-id="'+sourceId+'"]').click();
  await wait(()=>document.querySelector('.history-tabs [role="tab"]')?.textContent.includes('main'));
+ // Keep the repository pollers: selecting a branch replaces the history timer.
+ const pollBranches=repositoryPollers.slice();
+ window.setInterval=nativeSetInterval;
  branchNames=['main','private/agent-work'];window.dispatchEvent(new Event('focus'));
  const privateBranch=await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].find(tab=>tab.getAttribute('aria-label')==='private/agent-work'));
  privateBranch.click();await wait(()=>historyBranch==='private/agent-work');
- assert(pollBranches,'Branch list has no independent polling fallback');
- branchNames=['main','private/agent-work','private/second-worktree'];pollBranches();
+ assert(pollBranches.length,'Branch list has no independent polling fallback');
+ branchNames=['main','private/agent-work','private/second-worktree'];pollBranches.forEach(callback=>callback());
  await wait(()=>[...document.querySelectorAll('.history-tabs [role="tab"]')].some(tab=>tab.getAttribute('aria-label')==='private/second-worktree'));
- window.setInterval=nativeSetInterval;
  const originalPlan=api.branchRemovalPlan,originalRemove=api.removeBranch;
  const plan={branch:'private/agent-work',head:'a'.repeat(40),merged:true,worktrees:['/tmp/linked tree'],remote:'origin',remoteHead:'a'.repeat(40)};
  let removalCalls=0;
