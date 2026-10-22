@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import ts from 'typescript';
+const source=await readFile(new URL('../src/lib/scriptRuntime.ts',import.meta.url),'utf8');
+const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {detectScriptRuntime,resolveScriptRuntime,availableRuntimeOptions}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+for(const [script,expected] of [['#!/usr/bin/env python3\nprint(1)','python'],['import os\nprint(os.getcwd())','python'],['print("hello")','python'],['console.log(process.env.X)','node'],['$env:CERBERUS_BRANCH','powershell'],['puts "hello"','ruby'],['set -Eeuo pipefail','bash'],['#!/bin/bash\npython3 - <<PY\nimport os\nPY','bash'],["python3 - <<'PY'\nimport os\nPY",'bash'],['x=1',undefined],['',undefined],['import os\nconsole.log(1)',undefined]])assert.equal(detectScriptRuntime(script),expected,script);
+const fallback={preset:'bash',executable:'/custom/bash'};
+assert.deepEqual(resolveScriptRuntime('import os',{preset:'auto'},fallback),{preset:'python'});
+assert.deepEqual(resolveScriptRuntime('x=1',{preset:'auto'},fallback),fallback);
+assert.deepEqual(resolveScriptRuntime('import os',{preset:'bash'},fallback),{preset:'bash'});
+assert.ok(!availableRuntimeOptions('bash',[],'auto').some(item=>item.value==='powershell'));
+assert.ok(availableRuntimeOptions('bash',['powershell'],'auto').some(item=>item.value==='powershell'));
+assert.ok(availableRuntimeOptions('bash',[],'powershell').some(item=>item.value==='powershell'));
+assert.ok(!availableRuntimeOptions('powershell',[],'auto').some(item=>item.value==='bash'));
+assert.ok(availableRuntimeOptions('powershell',['bash'],'auto').some(item=>item.value==='bash'));
+console.log('Script detection, explicit overrides, fallback and platform-aware runtime choices passed');

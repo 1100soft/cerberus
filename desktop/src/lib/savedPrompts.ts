@@ -1,3 +1,4 @@
+import { resolveScriptRuntime } from './scriptRuntime';
 import type { ScriptRuntime } from './scriptRuntime';
 import { createsLocalCommit } from './commitEvents';
 import { ciAccessNotice } from './ciAccessNotice';
@@ -241,7 +242,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
   let inputValues:AutomationInputValues={};
   try{
     inputValues=(retry?.manual??manual)?resolveInputValues(job.manualInputs||[],retry?.inputValues||manualInputValues||{}):{};
-    const executionRuntime:ScriptRuntime|undefined=job.kind==='shell'?(job.scriptRuntime?.preset==='default'?await api.scriptRuntimeSettings():job.scriptRuntime||{preset:'bash'}):undefined;
+    const executionRuntime:ScriptRuntime|undefined=job.kind==='shell'?(job.scriptRuntime&&['auto','default'].includes(job.scriptRuntime.preset)?resolveScriptRuntime(job.prompt,job.scriptRuntime,await api.scriptRuntimeSettings()):job.scriptRuntime||{preset:'bash'}):undefined;
     change(id,{state:'running',lastResult:'Running automation…'});
     if(job.kind!=='git'&&job.kind!=='shell'&&job.kind!=='notification'&&job.target!=='new')throw new Error('Existing-conversation delivery was retired. Create a new in-app automation from this prompt.');
     const useLiveRepositories=job.includeFutureRepositories||(manual&&job.trigger==='manual');

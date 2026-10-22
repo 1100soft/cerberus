@@ -24,7 +24,7 @@ pub fn run_stream_with_context(repository:&Path,script:&str,channel:Option<Chann
     run_stream_with_runtime(repository,script,channel,input,outgoing,context,&crate::script_runtime::Runtime{preset:"bash".into(),..Default::default()})
 }
 pub fn run_stream_with_runtime(repository:&Path,script:&str,channel:Option<Channel<ShellChunk>>,input:Option<&str>,outgoing:&std::collections::HashMap<String,String>,context:&std::collections::HashMap<String,String>,runtime:&crate::script_runtime::Runtime)->Result<ShellRun,String>{
-    if script.trim().is_empty()||script.len()>100_000{return Err("Enter a shell command or script of at most 100,000 characters.".into());}
+    if script.trim().is_empty()||script.len()>100_000{return Err("Enter a script of at most 100,000 characters.".into());}
     if !repository.is_dir(){return Err("The repository folder is unavailable.".into());}
     let (executable,args,extension)=crate::script_runtime::resolve(repository,runtime)?;
     let mut file=tempfile::Builder::new().prefix("cerberus-script-").suffix(&format!(".{extension}")).tempfile().map_err(|e|e.to_string())?;
@@ -56,21 +56,21 @@ pub fn run_stream_with_runtime(repository:&Path,script:&str,channel:Option<Chann
     for (name,path) in outgoing {if crate::handoffs::valid_name(name){command.env(format!("CERBERUS_HANDOFF_{}",name.replace('-',"_").to_ascii_uppercase()),path);}}
     #[cfg(unix)] {use std::os::unix::process::CommandExt;command.process_group(0);}
     let mut child=command.spawn().map_err(|error|format!("Could not start script interpreter {}: {error}",executable.display()))?;
-    let stdout=drain(child.stdout.take().ok_or("Shell output unavailable")?,1_900_000,"stdout",channel.clone());
-    let stderr=drain(child.stderr.take().ok_or("Shell error output unavailable")?,1_900_000,"stderr",channel);
+    let stdout=drain(child.stdout.take().ok_or("Script output unavailable")?,1_900_000,"stdout",channel.clone());
+    let stderr=drain(child.stderr.take().ok_or("Script error output unavailable")?,1_900_000,"stderr",channel);
     let mut deadline=crate::awake::ActiveDeadline::new(Duration::from_secs(900));
     let status=loop{
         if let Some(status)=child.try_wait().map_err(|error|error.to_string())?{break status;}
         if deadline.expired(){
             #[cfg(unix)] unsafe{libc::killpg(child.id() as i32,libc::SIGKILL);}
             crate::setup_terminal::stop_process_tree(&mut child);let _=child.wait();let _=stdout.join();let _=stderr.join();
-            return Err("Shell script timed out after 15 minutes.".into());
+            return Err("Script timed out after 15 minutes.".into());
         }
         std::thread::sleep(Duration::from_millis(100));
     };
     let output=stdout.join().unwrap_or_default();let errors=stderr.join().unwrap_or_default();
-    if !status.success(){return Err(format!("Shell exited with {status}. {}",if errors.is_empty(){output.trim()}else{errors.trim()}));}
-    let result=if output.trim().is_empty(){"Shell command completed.".into()}else{output.trim().to_owned()};
+    if !status.success(){return Err(format!("Script exited with {status}. {}",if errors.is_empty(){output.trim()}else{errors.trim()}));}
+    let result=if output.trim().is_empty(){"Script completed.".into()}else{output.trim().to_owned()};
     Ok(ShellRun{result,stdout:output,stderr:errors})
 }
 

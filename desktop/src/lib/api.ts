@@ -1,3 +1,4 @@
+import { resolveScriptRuntime } from './scriptRuntime';
 import type { ScriptRuntime, RuntimeStatus } from './scriptRuntime';
 import type { AgentChat } from './agentChats';
 import type { AutomationRetry } from './savedPrompts';
@@ -81,14 +82,16 @@ export const api = {
     if (!inTauri()) return;
     return invoke('cancel_draft',{requestId});
   },
+  async scriptRuntimePlatform():Promise<string>{return inTauri()?invoke('script_runtime_platform'):(/win/i.test(navigator.platform)?'powershell':'bash');},
   async scriptRuntimeSettings():Promise<ScriptRuntime>{return inTauri()?invoke('script_runtime_settings'):JSON.parse(localStorage.getItem('gitcerberus.scriptRuntime')||'{"preset":"bash"}');},
   async saveScriptRuntime(config:ScriptRuntime){if(inTauri())await invoke('save_script_runtime',{config});else localStorage.setItem('gitcerberus.scriptRuntime',JSON.stringify(config));},
   async scriptRuntimeCandidates(repositoryId?:string):Promise<RuntimeStatus[]>{return inTauri()?invoke('script_runtime_candidates',{repositoryId:repositoryId||null}):[];},
-  async checkScriptRuntime(config:ScriptRuntime,repositoryId?:string):Promise<RuntimeStatus>{return inTauri()?invoke('check_script_runtime',{config,repositoryId:repositoryId||null}):{preset:config.preset,executable:config.executable||config.preset,version:'Demo runtime'};},
+  async checkScriptRuntime(config:ScriptRuntime,repositoryId?:string,script=''):Promise<RuntimeStatus>{if(config.preset==='auto')config=resolveScriptRuntime(script,config,await api.scriptRuntimeSettings());return inTauri()?invoke('check_script_runtime',{config,repositoryId:repositoryId||null}):{preset:config.preset,executable:config.executable||config.preset,version:'Demo runtime'};},
   async runAutomationShell(repositoryId:string,script:string,onOutput?:(chunk:{stream:string;text:string})=>void,handoffInputPath?:string,handoffOutputPaths:Record<string,string>={},context:Record<string,string>={},runtime?:ScriptRuntime):Promise<{result:string;stdout:string;stderr:string}>{
-    if (!inTauri()) throw new Error('Shell automations require the desktop app.');
+    if (!inTauri()) throw new Error('Script automations require the desktop app.');
     const output=new Channel<{stream:string;text:string}>();
     output.onmessage=onOutput||(()=>{});
+    if(runtime?.preset==='auto')runtime=resolveScriptRuntime(script,runtime,await api.scriptRuntimeSettings());
     return invoke('run_automation_shell',{repositoryId,script,output,handoffInputPath:handoffInputPath||null,handoffOutputPaths,context,runtime:runtime||null});
   },
   async watchAutomationRepositories(repositoryIds:string[]):Promise<string[]>{

@@ -20,6 +20,6 @@ export function ShellEditor({value,onChange,onKeyDown,language}:{language?:strin
   const mirror=useRef<HTMLPreElement>(null);
   return <div className="shell-editor">
     <pre ref={mirror} aria-hidden="true" className="shell-editor-highlight"><code dangerouslySetInnerHTML={{__html:highlighted(value,language)+"\n"}}/></pre>
-    <textarea className="automation-script" aria-label="Shell command or script" placeholder="Shell command or script" spellCheck={false} value={value} onChange={event=>onChange(event.target.value)} onKeyDown={onKeyDown} onScroll={event=>{if(mirror.current){mirror.current.scrollTop=event.currentTarget.scrollTop;mirror.current.scrollLeft=event.currentTarget.scrollLeft;}}} rows={8}/>
+    <textarea className="automation-script" aria-label="Script content" placeholder="Write your script" spellCheck={false} value={value} onChange={event=>onChange(event.target.value)} onKeyDown={onKeyDown} onScroll={event=>{if(mirror.current){mirror.current.scrollTop=event.currentTarget.scrollTop;mirror.current.scrollLeft=event.currentTarget.scrollLeft;}}} rows={8}/>
   </div>;
 }

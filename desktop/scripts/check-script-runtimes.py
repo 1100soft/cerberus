@@ -16,6 +16,7 @@ script = r"""
  const pause=()=>new Promise(r=>setTimeout(r,100));const wait=async(get)=>{for(let i=0;i<100;i++){const v=get();if(v)return v;await pause();}throw Error('UI timeout '+get.toString()+' '+document.body.innerText.slice(-900));};const assert=(v,m)=>{if(!v)throw Error(m);};
  const source=await(await fetch('/src/lib/conversationCache.ts')).text();const {api}=await import(source.match(/from "([^"\n]*\/api\.ts[^"\n]*)"/)[1]);
  const panel=await(await fetch('/src/components/SavedPromptsPanel.tsx')).text();const module=await import(panel.match(/from "([^"\n]*\/savedPrompts\.ts[^"\n]*)"/)[1]);
+ api.scriptRuntimePlatform=async()=> 'bash';
  const repo=(await api.repositories())[0].id;for(const job of module.savedPrompts())module.removePrompt(job.id);
  api.scriptRuntimeCandidates=async()=>[{preset:'python',executable:'/fixture/.venv/bin/python'}];api.checkScriptRuntime=async config=>({preset:config.preset,executable:config.executable||'python3',version:'Python 3.12 fixture'});
  module.savePrompt({id:'runtime-fixture',repositoryId:repo,repositoryIds:[repo],title:'Runtime fixture',prompt:'print("works")',kind:'shell',provider:'codex',threadId:'',trigger:'manual',conditions:['manual'],minutes:60,enabled:false,nextAt:0,editor:'vscode',scriptRuntime:{preset:'python',executable:'/fixture/.venv/bin/python',args:['-u']}});
@@ -33,6 +34,7 @@ script = r"""
  const saved=module.savedPrompts().find(job=>job.id==='runtime-fixture');assert(saved.scriptRuntime.executable==='/fixture/runtime with spaces','Executable did not persist');assert(saved.scriptRuntime.args[1]==='argument with spaces','Arguments were shell-split');
  let received;api.runAutomationShell=async(...args)=>{received=args;return {result:'done',stdout:'done',stderr:''};};
  await module.runSavedPrompt(saved.id,true,repo);assert(received[6].preset==='custom'&&received[6].extension==='py','Execution lost runtime configuration');assert(received[5].CERBERUS_REPOSITORY_ID===repo,'Runtime lost context');
+ module.savePrompt({...saved,scriptRuntime:{preset:'auto'},prompt:'import os\nprint(os.getcwd())'});await module.runSavedPrompt(saved.id,true,repo);assert(received[6].preset==='python','Automatic detection did not reach execution');
  for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);await pause();assert(document.body.scrollWidth<=innerWidth+1,'Runtime UI overflow');}
  window.__savedPromptCheck={passed:true,checks:'runtime editing, venv selection, version check, literal arguments, persistence and execution context'};
 })().catch(e=>{window.__savedPromptCheck={passed:false,error:String(e)}});
