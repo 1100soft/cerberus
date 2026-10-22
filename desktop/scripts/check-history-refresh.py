@@ -1,4 +1,4 @@
-"""Exercise readable credential-store notifications and recovery links in WebKitGTK.
+"""Exercise commit/tag history refresh through manual, focus and polling paths in WebKitGTK.
 Requires the existing Vite server on 127.0.0.1:3000.
 """
 import json

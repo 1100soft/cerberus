@@ -1,4 +1,4 @@
-"""Exercise readable credential-store notifications and recovery links in WebKitGTK.
+"""Exercise script runtime selection, detection, persistence and execution context in WebKitGTK.
 Requires the existing Vite server on 127.0.0.1:3000.
 """
 import json
