@@ -267,7 +267,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       setRepositoryWorking(repositoryId,execution.id,true);
       const runId=execution.id,createdAt=execution.startedAt;
       executions.set(executionKey,{...execution,status:'running'});publishExecutions();
-      const log={inputValues,automationId:id,repositoryId,runId,createdAt,branch:execution.branch,commitSha:execution.commitSha,handoffName:execution.handoffName,handoffId:execution.handoffId,kind:job.kind==='shell'?'shell' as const:job.kind==='git'?'git' as const:job.kind==='notification'?'notification' as const:'agent' as const,status:'running' as const,command:job.prompt,stdout:'',stderr:'',response:'',activity:''};
+      const log:AutomationLog={title:job.title,emittedHandoffs:[],inputValues,automationId:id,repositoryId,runId,createdAt,branch:execution.branch,commitSha:execution.commitSha,handoffName:execution.handoffName,handoffId:execution.handoffId,kind:job.kind==='shell'?'shell' as const:job.kind==='git'?'git' as const:job.kind==='notification'?'notification' as const:'agent' as const,status:'running' as const,command:job.prompt,stdout:'',stderr:'',response:'',activity:''};
       if(job.kind==='notification'&&(job.emitsHandoffs||[]).some(value=>!emittedHandoff(value).conditional))log.activity='Notification handoff emission pending.';
       currentLog=log;
       await beginAutomationLog(log);
@@ -275,7 +275,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
         incomingStarted=true;
         addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} · ${repositoryLabel}`,message:job.prompt,status:'message'});
         const emissionId=runId;let emissionError='';
-        for(const {name,conditional} of (job.emitsHandoffs||[]).map(emittedHandoff)){if(conditional)continue;try{if(await api.publishHandoff(repositoryId,name,emissionId,job.prompt))void tick();}catch(error){failures++;emissionError+=` Could not emit ${name}: ${String(error)}`;}}
+        for(const {name,conditional} of (job.emitsHandoffs||[]).map(emittedHandoff)){if(conditional)continue;try{if(await api.publishHandoff(repositoryId,name,emissionId,job.prompt)){log.emittedHandoffs!.push(name);void tick();}}catch(error){failures++;emissionError+=` Could not emit ${name}: ${String(error)}`;}}
         await finishAutomationLog({...log,status:emissionError?'error':'completed',response:job.prompt,stderr:emissionError});
         currentLog=undefined;
         if(emissionError)addAutomationNotice({automationId:id,repositoryId,runId,title:`${job.title} failed`,message:`${repositoryLabel} · ${emissionError}`,status:'failed'});
@@ -327,7 +327,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
         }
       }catch(error){failure=String(error);failures++;if(agentStarted){const recent=agentChatId?getAgentChat(agentChatId):undefined;if(recent&&recent.updatedAt>=createdAt)activity=recent.activity||activity;}}
       attachConversation();unsubscribeProgress();
-      for(const name of Object.keys(outgoing)){try{if(await api.publishHandoff(repositoryId,name,runId))void tick();}catch(error){failure=[failure,`Could not emit ${name}: ${String(error)}`].filter(Boolean).join(' · ');failures++;}}
+      for(const name of Object.keys(outgoing)){try{if(await api.publishHandoff(repositoryId,name,runId)){log.emittedHandoffs!.push(name);void tick();}}catch(error){failure=[failure,`Could not emit ${name}: ${String(error)}`].filter(Boolean).join(' · ');failures++;}}
       try{
         const finalLog:AutomationLog={...log,kind:job.kind==='shell'?'shell':job.kind==='git'?'git':'agent',status:failure?'error':'completed',command:job.prompt,stdout,stderr:failure?[stderr,failure].filter(Boolean).join('\n'):stderr,response,activity,retry:failure?retryContext:undefined};
         if(failure){blockedGeneration++;blockedRuns.set(retryKey(finalLog),finalLog);if(agentChatId)updateAgentChat(agentChatId,{automationRetry:true});}
@@ -349,7 +349,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
     change(id,{state:failures?'error':'completed',lastResult:results.join('\n'),lastAt:Date.now(),nextAt:Date.now()+job.minutes*60_000});
   }catch(error){
     executionFailed=true;
-    const failedLog=currentLog||{inputValues,automationId:id,repositoryId:runtimeRepositoryId||job.repositoryId,runId:execution.id,createdAt:execution.startedAt,branch:execution.branch,commitSha:execution.commitSha,handoffName:execution.handoffName,handoffId:execution.handoffId,kind:job.kind==='shell'?'shell':job.kind==='git'?'git':job.kind==='notification'?'notification':'agent',status:'running',command:job.prompt,stdout:'',stderr:'',response:'',activity:''} as AutomationLog;
+    const failedLog=currentLog||{title:job.title,inputValues,automationId:id,repositoryId:runtimeRepositoryId||job.repositoryId,runId:execution.id,createdAt:execution.startedAt,branch:execution.branch,commitSha:execution.commitSha,handoffName:execution.handoffName,handoffId:execution.handoffId,kind:job.kind==='shell'?'shell':job.kind==='git'?'git':job.kind==='notification'?'notification':'agent',status:'running',command:job.prompt,stdout:'',stderr:'',response:'',activity:''} as AutomationLog;
     const latest=currentAutomationLogs(id).find(item=>item.repositoryId===failedLog.repositoryId&&item.runId===failedLog.runId)||failedLog;
     const blockedLog:AutomationLog={...latest,status:'error',stderr:[latest.stderr,String(error)].filter(Boolean).join('\n'),retry:{inputValues,job:{...job},manual:retry?.manual??manual,incoming,ciRun,eventBranch,eventSha,matchedConditions}};
     blockedGeneration++;blockedRuns.set(retryKey(blockedLog),blockedLog);

@@ -90,7 +90,7 @@ export async function sendAgentMessage(repositoryId: string, profile: AgentProfi
   if (existing && !target && !retry) throw new Error('This conversation has no resumable session. Choose Start new chat.');
   const task = chatPrompt(target ? [] : previous, prompt);
   const id = existing?.id || crypto.randomUUID();
-  const messages = [...previous, {id:crypto.randomUUID(), role:'user', text:prompt}, {id:crypto.randomUUID(), role:'assistant', text:''}];
+  const messages = [...previous, {id:crypto.randomUUID(), role:'user', createdAt:Date.now(), text:prompt}, {id:crypto.randomUUID(), role:'assistant', createdAt:Date.now(), text:''}];
   const record: AgentChat = {automationContext,automationRetry:existing?.automationRetry,mode,model,reasoningEffort,id, repositoryId, profile, name: existing?.name || originName || prompt.slice(0,100), archived:existing?.archived, originKey:startNew ? undefined : existing?.originKey || originKey, session:target, messages, running:true, status:'Working…', activity:'', updatedAt:Date.now()};
   chats = existing ? chats.map(chat => chat.id === id ? record : chat) : [record, ...chats]; persist(id); emit();
   let started = false;
@@ -107,13 +107,13 @@ export async function sendAgentMessage(repositoryId: string, profile: AgentProfi
       const sessionId = event.type === 'thread.started' ? event.thread_id : event.type === 'system' && event.subtype === 'init' ? event.session_id : undefined;
       if (typeof sessionId === 'string' && sessionId) updateAgentChat(id, {session:{sessionId, provider:profile.provider, source:'app'}});
       if (event.type === 'turn.failed' || event.type === 'error' || event.is_error) failure = event.error?.message || event.message || event.result || 'Agent reported a failure';
-      if(event.type==='turn.plan'){const index=steps.findIndex(step=>step.kind==='plan');const step={kind:'plan',title:'Plan',text:(event.plan||[]).map((item:any)=>`${item.status}: ${item.step}`).join('\n')};if(index<0)steps.push(step);else steps[index]=step;}
+      if(event.type==='turn.plan'){const index=steps.findIndex(step=>step.kind==='plan');const step={createdAt:Date.now(),kind:'plan',title:'Plan',text:(event.plan||[]).map((item:any)=>`${item.status}: ${item.step}`).join('\n')};if(index<0)steps.push(step);else steps[index]=step;}
       if(event.type==='item.completed'){
         const item=event.item;
-        if(item?.type==='agent_message' && item.phase==='commentary')steps.push({kind:'commentary',title:'Progress update',text:item.text||''});
+        if(item?.type==='agent_message' && item.phase==='commentary')steps.push({createdAt:Date.now(),kind:'commentary',title:'Progress update',text:item.text||''});
         else if(item?.type==='agent_message')response+=`${item.text||''}\n`;
-        else if(item?.type==='command_execution')steps.push({kind:'command',title:item.command||'Command',text:item.aggregated_output||'',status:String(item.exit_code??item.status??'')});
-        else if(item?.type==='error')steps.push({kind:'error',title:'Provider notice',text:item.message||''});
+        else if(item?.type==='command_execution')steps.push({createdAt:Date.now(),kind:'command',title:item.command||'Command',text:item.aggregated_output||'',status:String(item.exit_code??item.status??'')});
+        else if(item?.type==='error')steps.push({createdAt:Date.now(),kind:'error',title:'Provider notice',text:item.message||''});
       }
       if (event.type === 'assistant') response += (event.message?.content || []).filter((item: {type:string}) => item.type === 'text').map((item: {text:string}) => item.text).join('\n') + '\n';
       if (event.type === 'result' && !response && typeof event.result === 'string') response = event.result;
@@ -145,7 +145,7 @@ export async function runExternalAutomation(repositoryId:string,profile:AgentPro
   automationContext=existing?.automationContext||automationContext;
   if(chats.some(chat=>chat.repositoryId===repositoryId&&chat.running&&chat.automationContext?.runId===automationContext?.runId))throw new Error('A task is already running in this checkout.');
   const id=existing?.id||crypto.randomUUID();
-  const messages:CodexMessage[]=[{id:crypto.randomUUID(),role:'user',text:prompt},{id:crypto.randomUUID(),role:'assistant',text:''}];
+  const messages:CodexMessage[]=[{id:crypto.randomUUID(),role:'user',createdAt:Date.now(),text:prompt},{id:crypto.randomUUID(),role:'assistant',createdAt:Date.now(),text:''}];
   const record:AgentChat={externalAutomation:true,automationContext,id,repositoryId,profile,mode,archived:existing?.archived,session:existing?.session,name:existing?.name||conversationName||prompt.slice(0,100),messages:existing?.session?[...existing.messages,...messages]:messages,status:'Working…',activity:'',running:true,updatedAt:Date.now()};chats=existing?chats.map(chat=>chat.id===id?record:chat):[record,...chats];persist(id);emit();onStarted?.(id);
   try{
     const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt,existing?.session?.sessionId,automationContext?.runId,event=>{const chat=getAgentChat(id);if(chat)updateAgentChat(id,{activity:(chat.activity+'\n'+JSON.stringify(event)).slice(-2_000_000),...externalEventPatch(event,chat)});},automationContext);

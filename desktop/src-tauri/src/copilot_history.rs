@@ -127,11 +127,11 @@ fn messages_from(state: &Value) -> (Vec<Message>, i64) {
         updated = updated.max(request["timestamp"].as_i64().unwrap_or(0)).max(request["responseTimestamp"].as_i64().unwrap_or(0));
         let id = request["requestId"].as_str().unwrap_or("request");
         if let Some(text) = request["message"]["text"].as_str().map(str::trim).filter(|text| !text.is_empty()) {
-            data.push(Message { id: format!("{id}:user"), role: "user".into(), text: text.into(), edits: vec![] });
+            data.push(Message { created_at:crate::codex::message_timestamp(&request["timestamp"]),id: format!("{id}:user"), role: "user".into(), text: text.into(), edits: vec![] });
         }
         let text = assistant_text(&request["response"]);
         if !text.is_empty() {
-            data.push(Message { id: format!("{id}:assistant"), role: "assistant".into(), text, edits: vec![] });
+            data.push(Message { created_at:crate::codex::message_timestamp(&request["responseTimestamp"]),id: format!("{id}:assistant"), role: "assistant".into(), text, edits: vec![] });
         }
     }
     (data, if updated > 10_000_000_000 { updated / 1000 } else { updated })

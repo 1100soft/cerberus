@@ -83,7 +83,7 @@ fn event_messages(result:&Value)->Vec<crate::codex::Message>{
     result["events"].as_array().into_iter().flatten().filter_map(|event|{
         let role=match event["type"].as_str()?{"user.message"=>"user","assistant.message"=>"assistant",_=>return None};
         let text=event["data"]["content"].as_str()?.trim();if text.is_empty(){return None}
-        Some(crate::codex::Message{id:event["id"].as_str().unwrap_or_default().into(),role:role.into(),text:text.into(),edits:vec![]})
+        Some(crate::codex::Message{created_at:crate::codex::message_timestamp(&event["timestamp"]),id:event["id"].as_str().unwrap_or_default().into(),role:role.into(),text:text.into(),edits:vec![]})
     }).collect()
 }
 #[cfg(test)] mod tests {

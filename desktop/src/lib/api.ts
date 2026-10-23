@@ -10,8 +10,9 @@ import { identitiesWithRepositoryAccess } from "./repositories";
 export const inTauri = () => "__TAURI_INTERNALS__" in window;
 export type BranchListEntry={name:string;latestTag?:string;kind:'permanent'|'used'|'retained';worktree?:string;cleanupAt?:number;cleanupNote?:string};
 export type BranchSyncStatus={upstream?:string;ahead:number;behind:number;safe:boolean;reason:string};
-export type AutomationLog={inputValues?:import('./automationInputs').AutomationInputValues;dismissed?:boolean;automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;conversation?:Partial<AgentChat>&{id:string;prompt:string};retry?:AutomationRetry};
-export type AutomationLogSummary=Pick<AutomationLog,'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'>;
+export type AutomationLogEvent={at:number;stream:'stdout'|'stderr'|'response'|'activity'|'status';text:string};
+export type AutomationLog={title?:string;emittedHandoffs?:string[];events?:AutomationLogEvent[];inputValues?:import('./automationInputs').AutomationInputValues;dismissed?:boolean;automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;conversation?:Partial<AgentChat>&{id:string;prompt:string};retry?:AutomationRetry};
+export type AutomationLogSummary=Pick<AutomationLog,'automationId'|'title'|'emittedHandoffs'|'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'> & {conversationId?:string};
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
 const demoAutomationLogs=new Map<string,AutomationLog>();
@@ -169,6 +170,10 @@ export const api = {
   async writeAutomationLog(entry:AutomationLog):Promise<void>{
     if(!inTauri()){demoAutomationLogs.set(`${entry.automationId}:${entry.repositoryId}:${entry.runId}`,entry);return;}
     return invoke('write_automation_log',{entry});
+  },
+  async repositoryAutomationLogs(repositoryId:string):Promise<AutomationLogSummary[]>{
+    if(!inTauri())return [...demoAutomationLogs.values()].filter(item=>item.repositoryId===repositoryId).map(item=>({...item,conversationId:item.conversation?.id}));
+    return invoke('repository_automation_logs',{repositoryId});
   },
   async listAutomationLogs(automationId:string):Promise<AutomationLogSummary[]>{
     if(!inTauri())return [...demoAutomationLogs.values()].filter(item=>item.automationId===automationId).sort((a,b)=>b.createdAt-a.createdAt);

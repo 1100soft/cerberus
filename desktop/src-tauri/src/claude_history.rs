@@ -27,7 +27,7 @@ fn transcript(file: &Path, cwd: &Path) -> Vec<Message> {
             if !matches!(role,"user"|"assistant") || !same_directory(event["cwd"].as_str()?,cwd) {return None}
             let text=content(&event["message"]["content"]);
             if text.trim().is_empty(){return None}
-            Some(Message{id:event["uuid"].as_str().map(str::to_owned).unwrap_or_else(||format!("{index}")),role:role.into(),text,edits:vec![]})
+            Some(Message{created_at:crate::codex::message_timestamp(&event["timestamp"]),id:event["uuid"].as_str().map(str::to_owned).unwrap_or_else(||format!("{index}")),role:role.into(),text,edits:vec![]})
         }).collect()
 }
 fn files() -> Vec<PathBuf> {

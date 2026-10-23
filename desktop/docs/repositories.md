@@ -78,3 +78,29 @@ History refreshes on local commit/tag ref changes, when the app regains focus,
 and through a 15-second polling fallback while visible. Refresh history reloads
 commit labels and branch metadata. Background refresh includes loaded history
 pages and ignores responses for a repository or branch that is no longer selected.
+
+## Agent/Script activity
+
+The Repositories page's **Agent/Script** pane combines agent conversations and
+script automation runs for the selected repository, newest first. Provider
+checkboxes remain opt-in; the independent **Script** checkbox is on by default
+and remembers its setting on this device. Select a script run to read or copy
+its saved log. Running scripts stream output into the same view. Output follows
+the bottom until you scroll up. Refresh reloads saved activity, including logs
+whose automation has since been removed. Archived applies to agent conversations.
+
+Run and message timestamps show **Now** during the first minute, local **HH:mm**
+for the past 24 hours, a month/day for older entries, and the year when different
+from the current year. Hover for the full local date and time. New script output
+chunks retain their arrival times; old logs retain their known run time. Provider
+messages use recorded timestamps when available; **—** means older history did
+not supply a time.
+
+A compact handoff trail shows the source run, handoff name and downstream runs,
+for example **Review → revise → Revision**. Links in the Repositories pane open
+the related script run or agent conversation (enable its filter first). The
+Automation log dialog also shows the relationship overview. Relationships use
+recorded handoff emission/run IDs within the same repository, never matching
+names alone. Emitted handoffs without a recorded consumer are marked **Emitted**;
+removed source logs are shown as unavailable. Conditional handoffs appear as
+emitted only when publication actually succeeded.
