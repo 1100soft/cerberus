@@ -28,18 +28,25 @@ script = r"""
  api.writeAutomationLog=async entry=>{records=records.filter(item=>item.runId!==entry.runId);records.push(entry);};
  api.readAutomationLog=async(a,r,id)=>records.find(run=>run.runId===id);
  const now=Date.now();
- const parent={automationId:'review-job',repositoryId:repo.id,runId:'review-run',title:'Review fixture',createdAt:now-7200000,kind:'agent',status:'completed',command:'Review',stdout:'',stderr:'',response:'Reviewed',activity:'',emittedHandoffs:['revise'],conversation:{id:'review-chat'}};
+ const parent={automationId:'review-job',repositoryId:repo.id,runId:'review-run',title:'Review fixture',createdAt:now-90000000,kind:'agent',status:'completed',command:'Review',stdout:'',stderr:'',response:'Reviewed',activity:'',emittedHandoffs:['revise'],conversation:{id:'review-chat'}};
  await beginAutomationLog(parent);await finishAutomationLog(parent);
- restoreAgentConversation({id:'review-chat',repositoryId:repo.id,profile:{id:'fixture',provider:'codex',label:'Fixture'},name:'Review fixture',messages:[{id:'answer',role:'assistant',text:'Reviewed',createdAt:now-7200000}],status:'Completed',running:false,activity:'',updatedAt:now-7200000,automationContext:{runId:'review-run'}});
+ restoreAgentConversation({id:'review-chat',repositoryId:repo.id,profile:{id:'fixture',provider:'codex',label:'Fixture'},name:'Review fixture',messages:[{id:'answer',role:'assistant',text:'Reviewed',createdAt:now-7200000}],status:'Completed',running:false,activity:'',updatedAt:now,automationContext:{runId:'review-run'}});
  const run={automationId:'script-job',repositoryId:repo.id,runId:'script-run',title:'Revision script fixture',createdAt:now,kind:'shell',status:'running',command:'printf revised',stdout:'',stderr:'',response:'',activity:'',handoffName:'revise',handoffId:'review-run'};
  await beginAutomationLog(run);
  savePrompt({id:'script-job',title:run.title,repositoryId:repo.id,kind:'shell',provider:'codex',threadId:'',prompt:run.command,trigger:'manual',minutes:5,enabled:false,nextAt:0,editor:'vscode',errorUnread:true,state:'error'});
  await wait(()=>document.querySelector('.repo-row'));document.querySelector('.repo-row').click();
  await wait(()=>document.querySelector('.script-run-view'));
- assert(!savedPrompts().find(job=>job.id==='script-job').errorUnread,'Opening script log did not acknowledge automation error');
+ await wait(()=>!savedPrompts().find(job=>job.id==='script-job').errorUnread);
+ await wait(()=>document.querySelector('.script-log-messages .automation-event'));
  assert(document.querySelector('.agent-heading').textContent.includes('Agent/Script'),'Heading missing');
  assert(document.querySelector('.handoff-trail').textContent.includes('Review fixture'),'Missing source relationship');
  assert(document.querySelector('.handoff-trail').textContent.includes('revise'),'Missing handoff');
+ const oldRunButton=[...document.querySelectorAll('.codex-thread-list > button')].find(button=>button.textContent.includes('Review fixture'));
+ assert(oldRunButton&&!oldRunButton.querySelector('time').textContent.includes(':'),'Old run incorrectly uses recent metadata timestamp');
+ const scriptIcon=document.querySelector('.codex-thread-list > button.provider-script .conversation-provider-mark svg');
+ const agentIcon=document.querySelector('.codex-thread-list > button.provider-codex .conversation-provider-mark > *');
+ assert(scriptIcon&&agentIcon&&scriptIcon.getBoundingClientRect().width===agentIcon.getBoundingClientRect().width&&scriptIcon.getBoundingClientRect().height===agentIcon.getBoundingClientRect().height,'Script icon size differs');
+
  updateAutomationLog(run,{stdout:'First live output\n'});
  await wait(()=>document.querySelector('.script-log-messages')?.textContent.includes('First live output'));
  assert(document.querySelector('.script-log-messages time').textContent==='Now','New output time');
@@ -66,6 +73,10 @@ script = r"""
  scriptLabel.click();await wait(()=>[...document.querySelectorAll('.codex-thread-list > button')].some(button=>button.textContent.includes('Revision script fixture')));
  const button=[...document.querySelectorAll('.codex-thread-list > button')].find(button=>button.textContent.includes('Revision script fixture'));button.click();await wait(()=>document.querySelector('.script-run-view'));
  for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);await pause();const node=document.querySelector('.codex-panel'),rect=node.getBoundingClientRect();assert(rect.bottom<=innerHeight+2,'Pane overflow '+zoom);assert(node.scrollWidth<=node.clientWidth+2,'Horizontal overflow '+zoom);}
+ const originalNow=Date.now;
+ Date.now=()=>now+90000000;window.dispatchEvent(new Event('focus'));
+ await wait(()=>{const label=document.querySelector('.script-log-messages time')?.textContent;return label&&label!=='Now'&&!label.includes(':');});
+ Date.now=originalNow;window.dispatchEvent(new Event('focus'));
  window.__savedPromptCheck={passed:true,checks:'mixed activity, Script filter/persistence, live timestamped output, follow-scroll/manual scroll preservation, exact handoff links in both directions, zoom 100/140/150'};
 })().catch(e=>{window.__savedPromptCheck={passed:false,error:String(e),pane:document.querySelector('.chat-message-column')?.textContent}});
 """

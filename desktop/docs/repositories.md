@@ -89,7 +89,9 @@ its saved log. Running scripts stream output into the same view. Output follows
 the bottom until you scroll up. Refresh reloads saved activity, including logs
 whose automation has since been removed. Archived applies to agent conversations.
 
-Run and message timestamps show **Now** during the first minute, local **HH:mm**
+Automation rows use their recorded run time, even if provider metadata is later
+updated; the clock refreshes immediately on focus and visibility changes after
+sleep. Run and message timestamps show **Now** during the first minute, local **HH:mm**
 for the past 24 hours, a month/day for older entries, and the year when different
 from the current year. Hover for the full local date and time. New script output
 chunks retain their arrival times; old logs retain their known run time. Provider
