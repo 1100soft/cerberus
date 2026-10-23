@@ -31,6 +31,16 @@ fetches that branch’s configured remote and rechecks before advancing, uses th
 linked worktree when checked out, and never merges, rebases, stashes, or forces.
 Branches without an upstream must be configured first. Refresh history to recheck.
 
+Automatic fast-forwarding is enabled by default. Turn off **Auto fast-forward**
+at the bottom of the sidebar to opt out on this device. On repository updates,
+app focus, and every 15 seconds, Cerberus checks all local branches against their
+already-fetched upstream references, including linked worktrees. It advances
+only clean, strictly-behind branches with no unfinished Git operation, while no
+app jobs or detected local agents are active. App job startup is coordinated with
+these updates. Unsafe branches remain unchanged; select one to inspect its reason.
+Automatic updates do not fetch over the network, merge divergent history, or
+trigger commit automations. Fetch normally to discover remote changes.
+
 Branch tabs are grouped into Permanent, Temporary in use, and Temporary retained
 for reruns, with distinct borders and labels. Temporary namespaces are `private/`,
 `correction/`, `integration/`, `revision/`, `temp/`, and `tmp/`; other names remain

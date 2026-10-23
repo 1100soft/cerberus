@@ -1180,3 +1180,6 @@ input[type="number"] { text-align: right; }
 .script-runtime-controls label {display:flex;flex-wrap:wrap;gap:6px;min-width:0;}
 .script-runtime-controls input,.script-runtime-controls textarea {min-width:0;max-width:100%;flex:1;}
 .script-runtime-controls small {white-space:normal;overflow-wrap:anywhere;}
+
+.auto-fast-forward-setting { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; cursor: pointer; }
+.auto-fast-forward-setting input { flex: 0 0 auto; }

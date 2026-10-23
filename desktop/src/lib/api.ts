@@ -251,6 +251,7 @@ export const api = {
   },
   async branchListing(repositoryId:string):Promise<BranchListEntry[]>{if(!inTauri())return (await api.branches(repositoryId)).map(name=>({name,kind:/^(private|correction|integration|revision|temp|tmp)\//.test(name)?'retained':'permanent'}));return invoke('branch_listing',{repositoryId});},
   async branchSyncStatus(repositoryId:string,branch:string):Promise<BranchSyncStatus>{if(!inTauri())return {upstream:'origin/'+branch,ahead:0,behind:2,safe:true,reason:'Fast-forward from upstream (fetches and rechecks first).'};return invoke('branch_sync_status',{repositoryId,branch});},
+  async autoFastForward(repositoryId:string):Promise<string[]>{return inTauri()?invoke('auto_fast_forward',{repositoryId}):[];},
   async fastForwardBranch(repositoryId:string,branch:string):Promise<BranchSyncStatus>{if(!inTauri())return {upstream:'origin/'+branch,ahead:0,behind:0,safe:false,reason:'Branch is up to date.'};return invoke('fast_forward_branch',{repositoryId,branch});},
   async branchRemovalPlan(repositoryId:string,branch:string):Promise<BranchRemovalPlan>{
     if(!inTauri())throw new Error('Branch removal requires the desktop app.');

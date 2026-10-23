@@ -46,17 +46,64 @@ fn sender() -> &'static Sender<Event> {
         tx
     })
 }
+// Coordinate app job startup with automatic Git updates. Never hold this mutex
+// during Git commands; the exclusive flag makes new jobs wait until they finish.
+#[derive(Default)]
+struct Activity {
+    jobs: usize,
+    syncing: bool,
+    presence: Option<Instant>,
+}
+fn activity() -> &'static (std::sync::Mutex<Activity>, std::sync::Condvar) {
+    static STATE: OnceLock<(std::sync::Mutex<Activity>, std::sync::Condvar)> = OnceLock::new();
+    STATE.get_or_init(Default::default)
+}
+pub struct SyncGuard;
+pub fn try_sync() -> Option<SyncGuard> {
+    let mut state = activity().0.lock().ok()?;
+    if state.syncing
+        || state.jobs > 0
+        || state
+            .presence
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(90))
+    {
+        return None;
+    }
+    state.syncing = true;
+    Some(SyncGuard)
+}
+impl Drop for SyncGuard {
+    fn drop(&mut self) {
+        if let Ok(mut state) = activity().0.lock() {
+            state.syncing = false;
+            activity().1.notify_all();
+        }
+    }
+}
 pub struct Guard;
 pub fn acquire() -> Guard {
+    let (lock, changed) = activity();
+    let mut state = lock.lock().unwrap_or_else(|e| e.into_inner());
+    while state.syncing {
+        state = changed.wait(state).unwrap_or_else(|e| e.into_inner());
+    }
+    state.jobs += 1;
+    drop(state);
     let _ = sender().send(Event::Job(true));
     Guard
 }
 impl Drop for Guard {
     fn drop(&mut self) {
+        if let Ok(mut state) = activity().0.lock() {
+            state.jobs = state.jobs.saturating_sub(1);
+        }
         let _ = sender().send(Event::Job(false));
     }
 }
 pub fn presence(active: bool) {
+    if let Ok(mut state) = activity().0.lock() {
+        state.presence = active.then(Instant::now);
+    }
     let _ = sender().send(Event::Presence(active));
 }
 #[cfg(target_os = "linux")]
