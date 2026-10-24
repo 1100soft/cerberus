@@ -385,10 +385,13 @@ pub fn repository_commits(root: &Path, repository_id: &str) -> HashMap<String, V
 mod tests {
     use super::*;
     fn git(repo: &Path, args: &[&str], env: Option<&HashMap<String, String>>) -> String {
-        let mut command = Command::new("git");
+        // Unit tests exercise hooks directly; the executable proxy is covered by
+        // tests/commit_tracking.rs, since current_exe here is the libtest harness.
+        let real = env.and_then(|env| env.get("CERBERUS_TRACK_GIT"));
+        let mut command = Command::new(real.map(String::as_str).unwrap_or("git"));
         command.arg("-C").arg(repo).args(args);
         if let Some(env) = env {
-            command.envs(env.iter().filter(|(key, _)| key.as_str() != "PATH"));
+            command.envs(env);
         }
         let out = command.output().unwrap();
         assert!(
@@ -411,11 +414,13 @@ mod tests {
             &["config", "user.email", "test@example.invalid"],
             None,
         );
-        let mut env = environment(root.path(), &repo, "repo", "initial").unwrap();
-        env.remove("PATH");
+        let env = environment(root.path(), &repo, "repo", "initial").unwrap();
         let mut command = Command::new("sh");
         command
-            .args(["-c", "git commit --allow-empty -qm initial"])
+            .args([
+                "-c",
+                "\"$CERBERUS_TRACK_GIT\" commit --allow-empty -qm initial",
+            ])
             .current_dir(&repo);
         configure(&mut command, &env, false);
         assert!(command.status().unwrap().success());

@@ -1,7 +1,7 @@
 #!/bin/sh
 # All paths/data are supplied as environment values; never interpolated as code.
 hook=${0##*/}
-original_git() { GIT_CONFIG_COUNT="$CERBERUS_TRACK_CONFIG_COUNT" git "$@"; }
+original_git() { GIT_CONFIG_COUNT="$CERBERUS_TRACK_CONFIG_COUNT" "$CERBERUS_TRACK_GIT" "$@"; }
 original=$(original_git rev-parse --git-path "hooks/$hook" 2>/dev/null)
 record() {
     case "$1" in *[!0-9a-fA-F]*|'') return;; esac

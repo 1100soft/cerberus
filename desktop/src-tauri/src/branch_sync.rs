@@ -210,8 +210,12 @@ pub fn advance_behind(repo: &Path) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Production deliberately skips automatic updates when another update holds
+    // the global lock. Keep independent repository fixtures from competing.
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test]
     fn automatic_updates_wait_for_idle_and_skip_unsafe_branches() {
+        let _test = TEST_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
         let repo = root.path();
         git(repo, &["init", "-b", "source"]).unwrap();
@@ -265,6 +269,7 @@ mod tests {
     }
     #[test]
     fn advances_clean_linked_worktree_and_refuses_dirty_and_diverged() {
+        let _test = TEST_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
         let repo = root.path().join("repo");
         std::fs::create_dir(&repo).unwrap();
@@ -294,6 +299,7 @@ mod tests {
     }
     #[test]
     fn fetch_rechecks_remote_and_never_moves_diverged_branch() {
+        let _test = TEST_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
         let upstream = root.path().join("source");
         let bare = root.path().join("remote.git");
@@ -337,6 +343,7 @@ mod tests {
     }
     #[test]
     fn unchecked_branch_advances_and_missing_upstream_is_visible() {
+        let _test = TEST_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
         let repo = root.path();
         git(repo, &["init", "-b", "main"]).unwrap();
