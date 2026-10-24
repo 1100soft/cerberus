@@ -1,5 +1,5 @@
 """Exercise mixed agent/script activity, live logs, timestamps and handoff navigation in WebKitGTK.
-Requires the existing Vite server on 127.0.0.1:3000.
+Also verifies automatic commit-SHA relationships. Requires the existing Vite server on 127.0.0.1:3000.
 """
 import json
 import sys
@@ -25,6 +25,7 @@ script = r"""
  localStorage.setItem('gitcerberus.providers',JSON.stringify({codex:true,cursor:false,copilot:false,claude:false}));configurationChanged();
  const repo=(await api.repositories())[0];let records=[];
  api.repositoryAutomationLogs=async id=>records.filter(run=>run.repositoryId===id).map(run=>({...run,conversationId:run.conversation?.id}));
+ api.repositoryCommitOrigins=async()=>({'script-run':['a'.repeat(40)]});
  api.writeAutomationLog=async entry=>{records=records.filter(item=>item.runId!==entry.runId);records.push(entry);};
  api.readAutomationLog=async(a,r,id)=>records.find(run=>run.runId===id);
  const now=Date.now();
@@ -77,7 +78,25 @@ script = r"""
  Date.now=()=>now+90000000;window.dispatchEvent(new Event('focus'));
  await wait(()=>{const label=document.querySelector('.script-log-messages time')?.textContent;return label&&label!=='Now'&&!label.includes(':');});
  Date.now=originalNow;window.dispatchEvent(new Event('focus'));
- window.__savedPromptCheck={passed:true,checks:'mixed activity, Script filter/persistence, live timestamped output, follow-scroll/manual scroll preservation, exact handoff links in both directions, zoom 100/140/150'};
+ const review={...parent,automationId:'commit-review-job',runId:'commit-review-run',title:'Commit review fixture',createdAt:Date.now(),commitTriggered:true,commitSha:'a'.repeat(40),handoffId:undefined,handoffName:undefined,conversation:{id:'commit-review-chat'}};
+ await beginAutomationLog(review);await finishAutomationLog(review);
+ restoreAgentConversation({id:'commit-review-chat',repositoryId:repo.id,profile:{id:'fixture',provider:'codex',label:'Fixture'},name:review.title,messages:[{id:'commit-answer',role:'assistant',text:'Commit reviewed',createdAt:Date.now()}],status:'Completed',running:false,activity:'',updatedAt:Date.now(),automationContext:{runId:review.runId}});
+ document.querySelector('[aria-label="Refresh conversations"]').click();
+ await wait(()=>[...document.querySelectorAll('.handoff-trail code')].some(node=>node.title==='Commit '+'a'.repeat(40)));
+ const reviewLink=await wait(()=>[...document.querySelectorAll('.handoff-trail button')].find(button=>button.textContent==='Commit review fixture'));reviewLink.click();
+ await wait(()=>document.querySelector('.conversation-markdown')?.textContent.includes('Commit reviewed'));
+ assert(document.querySelector('.handoff-trail').textContent.includes('Revision script fixture'),'Missing source script for commit-triggered review');
+ const sourceLink=[...document.querySelectorAll('.handoff-trail button')].find(button=>button.textContent==='Revision script fixture');sourceLink.click();await wait(()=>document.querySelector('.script-run-view'));
+ const notification={...review,automationId:'notice-job',runId:'notice-run',kind:'notification',title:'Commit notification fixture',conversation:undefined,response:'Commit notification delivered',emittedHandoffs:[]};
+ await beginAutomationLog(notification);await finishAutomationLog(notification);
+ document.querySelector('[aria-label="Refresh conversations"]').click();
+ const noticeLink=await wait(()=>[...document.querySelectorAll('.handoff-trail button')].find(button=>button.textContent==='Commit notification fixture'));noticeLink.click();
+ await wait(()=>document.querySelector('[role="dialog"][aria-label="Details for Commit notification fixture"]'));
+ await wait(()=>document.querySelector('.automation-log-lines')?.textContent.includes('Commit notification delivered'));
+ document.querySelector('[aria-label="Close automation details"]').click();
+
+
+ window.__savedPromptCheck={passed:true,checks:'mixed activity, Script filter/persistence, live timestamped output, follow-scroll/manual scroll preservation, exact handoff/commit links in both directions and local log fallback, zoom 100/140/150'};
 })().catch(e=>{window.__savedPromptCheck={passed:false,error:String(e),pane:document.querySelector('.chat-message-column')?.textContent}});
 """
 

@@ -4,6 +4,7 @@ use std::{fs,path::{Path,PathBuf}};
 #[derive(Clone,Default,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct Context {
+    #[serde(default)] pub commit_triggered:bool,
     #[serde(default,skip_serializing_if="Option::is_none")] pub branch:Option<String>,
     #[serde(default,skip_serializing_if="Option::is_none")] pub commit_sha:Option<String>,
     #[serde(default,skip_serializing_if="Option::is_none")] pub handoff_name:Option<String>,
@@ -111,7 +112,10 @@ pub fn delete(root:&Path,automation_id:&str,repository_id:&str,run_id:&str)->Res
     if !path.exists(){return Ok(());}
     let entry=read(root,automation_id,repository_id,run_id)?;
     if entry.status=="running"{return Err("An active run cannot be deleted.".into());}
-    fs::remove_file(path).map_err(|e|e.to_string())
+    fs::remove_file(path).map_err(|e|e.to_string())?;
+    let records=root.join("automation-commits").join(repository_id).join(run_id);
+    if records.exists(){fs::remove_dir_all(records).map_err(|e|e.to_string())?;}
+    Ok(())
 }
 
 #[cfg(test)]mod tests{

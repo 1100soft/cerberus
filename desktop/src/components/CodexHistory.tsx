@@ -3,7 +3,7 @@ import {ScriptRun} from './ScriptRun';
 import {HandoffTrail} from './HandoffTrail';
 import {activityKey,useRepositoryActivity} from '../lib/repositoryActivity';
 import type {AutomationLogSummary} from '../lib/api';
-import { canRetryConversation, retryConversationAction, refreshBlockedAutomations, subscribeSavedPrompts } from '../lib/savedPrompts';
+import { canRetryConversation, retryConversationAction, refreshBlockedAutomations, subscribeSavedPrompts, savedPrompts, type SavedPrompt } from '../lib/savedPrompts';
 import { CopyButton } from './CopyButton';
 import { IdentitySignIn } from './IdentitySignIn';
 import { VSCodeIcon, CursorIcon, ClaudeIcon } from './Icons';
@@ -21,13 +21,15 @@ import { ConversationContextMenu } from './ConversationContextMenu';
 import { matchingHistoryThread } from '../lib/conversationIdentity';
 import { api } from '../lib/api';
 import { useAgentChats, renameAgentChat, archiveAgentChat, type AgentChat } from '../lib/agentChats';
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { cursorDisplayText } from "../lib/conversationText";
 import { loadOlderMessages, loadOlderThreads, peekList, peekMessages, refreshMessages, refreshThreadList, subscribe, warmRepository, listKey, messageKey, providerName, updatedMillis, type Thread } from "../lib/conversationCache";
 import { MessageSquare, SquareTerminal, RefreshCw, Pencil, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
 import { useProviderPreferences } from "../lib/providerPreferences";
 import type { CodexMessage, FileEdit, Repository } from "../types";
+
+const RelatedAutomationLogDialog=lazy(()=>import('./AutomationLogDialog').then(module=>({default:module.AutomationLogDialog})));
 
 export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConversation }: { repository?: Repository; unlinkedName?: string; onSetup: (provider: import("./ProviderSetup").Provider) => void; onCursorConversation?: (repositoryId: string, conversationId?: string) => void }) {
   const [settings, setEnabled] = useProviderPreferences();
@@ -72,6 +74,7 @@ function ConversationBrowser({ repository, revision, enabled, scripts, onCursorC
   const enabledKey = enabled.join(",");
   const [contextMenu,setContextMenu]=useState<{x:number;y:number;chat?:AgentChat;thread?:Thread}>();
   const [menuError,setMenuError]=useState("");
+  const [relatedLog,setRelatedLog]=useState<{job:SavedPrompt;run:AutomationLogSummary}>();
   const [cursorNames,setCursorNames]=useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem('gitcerberus.cursorConversationNames')||'{}')}catch{return {}}});
   const list = peekList(listKey(repository.id, archived, enabled));
   const [threads, setThreads] = useState<Thread[]>(() => list?.threads ?? []);
@@ -95,7 +98,8 @@ function ConversationBrowser({ repository, revision, enabled, scripts, onCursorC
   ].sort((a,b)=>b.time-a.time || a.key.localeCompare(b.key));
   const [selected, setSelected] = useState<string>();
   const [selectionExplicit, setSelectionExplicit] = useState(false);
-  const chooseConversation = (key:string) => { setSelectionExplicit(true); setSelected(key); };
+  const [selectedRunContext,setSelectedRunContext]=useState<string>();
+  const chooseConversation = (key:string,run?:AutomationLogSummary) => { setSelectionExplicit(true); setSelected(key);setSelectedRunContext(run?activityKey(run):undefined); };
   const copyConversationText=async()=>{
     const target=contextMenu;if(!target)throw new Error('No conversation selected.');
     const available=target.thread?(await completeMessages(repository.id,target.thread,()=>false)).messages:undefined;
@@ -349,11 +353,17 @@ function ConversationBrowser({ repository, revision, enabled, scripts, onCursorC
     finally { setLoading(false); }
   }
 
-  const relatedRun=selectedScript||(appChat&&activity.runs.find(run=>run.conversationId===appChat?.id||!!appChat?.automationContext&&run.runId===appChat.automationContext.runId));
+  const relatedRun=selectedScript||(appChat&&(activity.runs.find(run=>activityKey(run)===selectedRunContext&&(run.conversationId===appChat.id||run.runId===appChat.automationContext?.runId))||activity.runs.find(run=>run.conversationId===appChat.id||!!appChat.automationContext&&run.runId===appChat.automationContext.runId)));
   const selectRun=(run:AutomationLogSummary)=>{
     if(run.kind==='shell'){if(!scripts){setMenuError('Enable Script to open this run.');return;}setArchived(false);chooseConversation(activityKey(run));return;}
     const chat=chats.find(chat=>chat.id===run.conversationId||chat.automationContext?.runId===run.runId);
-    if(chat&&enabled.includes(chat.profile.provider as Provider)){setArchived(!!chat.archived);chooseConversation(chat.originKey||`app:${chat.id}`);}else setMenuError('Enable the related agent provider to open its conversation. Its saved log is also available in Automation.');
+    if(chat&&enabled.includes(chat.profile.provider as Provider)){setArchived(!!chat.archived);chooseConversation(chat.originKey||`app:${chat.id}`,run);}
+    else if(run.automationId==='conversation')setMenuError('Enable the related agent provider to open its conversation.');
+    else void api.readAutomationLog(run.automationId,run.repositoryId,run.runId).then(log=>{
+      const known=savedPrompts().find(job=>job.id===run.automationId);
+      const job:SavedPrompt={id:run.automationId,repositoryId:run.repositoryId,provider:'codex',threadId:'',title:run.title||'Automation run',prompt:log.command,trigger:'manual',minutes:5,enabled:false,nextAt:0,editor:'vscode',kind:run.kind==='agent'?'prompt':run.kind,...known};
+      setRelatedLog({job:{...job,prompt:log.command,title:run.title||job.title},run});setMenuError('');
+    }).catch(error=>setMenuError(String(error)));
   };
   return <>
     {activity.error&&<p className="config-error" role="status">Automation history unavailable: {activity.error}</p>}
@@ -381,6 +391,7 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
       </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></>}</div>
     </div>
     {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canRetry={!!contextMenu.chat&&canRetryConversation(contextMenu.chat.id)} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} getCopyText={copyConversationText} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
+    {relatedLog&&<Suspense fallback={null}><RelatedAutomationLogDialog job={relatedLog.job} repositories={[repository]} initialRun={relatedLog.run} onClose={()=>setRelatedLog(undefined)}/></Suspense>}
     {reviewEdits && <EditReview edits={reviewEdits} onClose={()=>setReviewEdits(undefined)} />}
   </>;
 }

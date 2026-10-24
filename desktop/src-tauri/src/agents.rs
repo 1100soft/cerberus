@@ -122,6 +122,7 @@ impl Agents {
     pub fn run(
         &self,
         root: &Path,
+        tracking_run: Option<&str>,
         profile_id: &str,
         repo: &Repository,
         prompt: &str,
@@ -191,6 +192,7 @@ impl Agents {
             if profile.provider == "codex" && !profile.subscription {
                 if let Some(model) = resume.and_then(|target| crate::agent_sessions::recorded_model(&home, &target.session_id)) { command.args(["--model", &model]); }
             }
+            if let Some(run_id)=tracking_run {let env=crate::commit_provenance::environment(&root,&path,&repo.id,run_id)?;crate::commit_provenance::configure(&mut command,&env,profile.provider=="codex");}
             let root = root.to_path_buf();
             let template = crate::agent_sessions::SessionRecord {session_id:String::new(), provider:profile.provider.clone(), profile_id:profile.id.clone(), repository:path.clone(), home:if resume.is_some() {source_home.clone()} else {home.clone()}};
             let expected = resume.map(|target| target.session_id.clone());

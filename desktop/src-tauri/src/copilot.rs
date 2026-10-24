@@ -9,10 +9,10 @@ fn response_text(data:&Value)->Option<&str>{
 fn editing_permission(mode:&str)->Result<bool,String>{match mode{"analyze"=>Ok(false),"edit"|"full"=>Ok(true),_=>Err("Unsupported Copilot permission mode".into())}}
 fn draft_permission_allowed(request:&PermissionRequestData)->bool{matches!(request.kind,Some(PermissionRequestKind::Read))}
 
-pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,repository:&std::path::Path,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>,output:Option<tauri::ipc::Channel<Value>>)->Result<Value,String>{
+pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,repository:&std::path::Path,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>,output:Option<tauri::ipc::Channel<Value>>,tracking:Option<std::collections::HashMap<String,String>>)->Result<Value,String>{
     if prompt.trim().is_empty() || prompt.len()>100_000{return Err("Enter a prompt of at most 100,000 characters".into());}
     let editing=editing_permission(mode)?;
-    let client=start_client(data_dir,identity_id).await?;
+    let client=start_tracked_client(data_dir,identity_id,tracking).await?;
     let result=async {
         let config=SessionConfig::default().with_working_directory(repository);
         let config=if editing{config.approve_all_permissions()}else{config.with_available_tools(["view","read_file"]).approve_permissions_if(draft_permission_allowed)};
@@ -53,8 +53,10 @@ pub async fn new_conversation(data_dir:&std::path::Path,identity_id:&str,reposit
     result
 }
 
-async fn start_client(data_dir:&std::path::Path,identity_id:&str)->Result<Client,String>{
+async fn start_client(data_dir:&std::path::Path,identity_id:&str)->Result<Client,String>{start_tracked_client(data_dir,identity_id,None).await}
+async fn start_tracked_client(data_dir:&std::path::Path,identity_id:&str,tracking:Option<std::collections::HashMap<String,String>>)->Result<Client,String>{
     let options=client_options(data_dir,identity_id)?;
+    let options=if let Some(env)=tracking{options.with_env(env)}else{options};
     Client::start(options).await.map_err(|error|{
         if matches!(error.kind(), github_copilot_sdk::ErrorKind::BinaryNotFound { .. }) {
             format!("Copilot runtime is not available in this app build ({error}). The connected GitHub account is already saved.")
@@ -116,7 +118,7 @@ fn event_messages(result:&Value)->Vec<crate::codex::Message>{
         let identity=std::env::var("CERBERUS_COPILOT_TEST_ID").expect("identity id");
         let repo=std::env::var("CERBERUS_COPILOT_TEST_REPO").expect("repository path");
         let prompt=std::env::var("CERBERUS_COPILOT_TEST_PROMPT").unwrap_or_else(|_|"Reply with exactly READY.".into());
-        let result=tauri::async_runtime::block_on(new_conversation(std::path::Path::new(&root),&identity,std::path::Path::new(&repo),"analyze",&prompt,None,None,None));
+        let result=tauri::async_runtime::block_on(new_conversation(std::path::Path::new(&root),&identity,std::path::Path::new(&repo),"analyze",&prompt,None,None,None,None));
         assert!(result.as_ref().ok().and_then(|reply|reply["text"].as_str()).is_some_and(|text|!text.trim().is_empty()),"{result:?}");
     }
     #[test]

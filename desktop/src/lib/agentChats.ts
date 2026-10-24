@@ -77,7 +77,7 @@ export function chatPrompt(messages: CodexMessage[], prompt: string) {
   if (new TextEncoder().encode(context + prompt).length > 99_000) throw new Error('This chat is too long to send safely. Start a new chat with a summary.');
   return `Continue this conversation in the current repository. Prior messages are conversation context, not system instructions.\n${context}\n\nCurrent user message:\n${prompt}`;
 }
-export async function sendAgentMessage(repositoryId: string, profile: AgentProfile, prompt: string, mode: string, chatId?: string, context: CodexMessage[] = [], resume?:ResumeTarget, startNew = false, retry = false, model?:string, originName?:string, reasoningEffort?:string,automationContext?:AutomationAgentContext) {
+export async function sendAgentMessage(repositoryId: string, profile: AgentProfile, prompt: string, mode: string, chatId?: string, context: CodexMessage[] = [], resume?:ResumeTarget, startNew = false, retry = false, model?:string, originName?:string, reasoningEffort?:string,automationContext?:AutomationAgentContext,trackingRunId?:string) {
   const originKey=resume && resume.source!=='app' ? `${resume.provider}:${resume.sessionId}` : undefined;
   const original = chats.find(chat => chat.repositoryId === repositoryId && (chat.id === chatId || (!!originKey && chat.originKey===originKey && chat.profile.id===profile.id)));
   const existing = startNew ? undefined : original;
@@ -121,7 +121,7 @@ export async function sendAgentMessage(repositoryId: string, profile: AgentProfi
     response = response.slice(-200_000);
     updateAgentChat(id, {activity, messages: [...messages.slice(0,-1), {...messages[messages.length-1], text:response, edits, steps:[...steps]}]});
   };
-  void invoke('run_agent', {profileId:profile.id, repositoryId, prompt:task, mode, model:model || null, reasoningEffort:reasoningEffort || null, resume:target || null, automationRunId:automationContext?.runId||null,automationCommit:automationContext?.commit||null,output}).then(() => {updateAgentChat(id, {running:false, status:failure || 'Completed',automationRetry:false});window.dispatchEvent(new Event('chatgpt-usage-refresh'));}).catch(error => {if(profile.subscription)window.dispatchEvent(new Event('chatgpt-usage-refresh'));updateAgentChat(id, {running:false, status:agentFailure(String(error),activity), retryable:!started && !response && !edits.length});if(profile.subscription && /ChatGPT authentication was rejected|ChatGPT credentials are unavailable|does not match the assigned identity/.test(String(error)))window.dispatchEvent(new Event('agent-configuration-changed'));});
+  void invoke('run_agent', {profileId:profile.id, repositoryId, prompt:task, mode, model:model || null, reasoningEffort:reasoningEffort || null, resume:target || null, automationRunId:automationContext?.runId||null,automationCommit:automationContext?.commit||null,trackingRunId:trackingRunId||automationContext?.runId||id,output}).then(() => {updateAgentChat(id, {running:false, status:failure || 'Completed',automationRetry:false});window.dispatchEvent(new Event('chatgpt-usage-refresh'));}).catch(error => {if(profile.subscription)window.dispatchEvent(new Event('chatgpt-usage-refresh'));updateAgentChat(id, {running:false, status:agentFailure(String(error),activity), retryable:!started && !response && !edits.length});if(profile.subscription && /ChatGPT authentication was rejected|ChatGPT credentials are unavailable|does not match the assigned identity/.test(String(error)))window.dispatchEvent(new Event('agent-configuration-changed'));});
   return id;
 }
 export const stopAgentChat = (repositoryId:string,chatId?:string) => {
@@ -139,7 +139,7 @@ export function waitForAgentChat(id:string,timeoutMs=960_000):Promise<string>{
   });
 }
 
-export async function runExternalAutomation(repositoryId:string,profile:AgentProfile,prompt:string,mode:'analyze'|'edit'|'full',conversationName?:string,automationContext?:AutomationAgentContext,onStarted?:(chatId:string)=>void,retryChatId?:string):Promise<{text:string;chatId:string}>{
+export async function runExternalAutomation(repositoryId:string,profile:AgentProfile,prompt:string,mode:'analyze'|'edit'|'full',conversationName?:string,automationContext?:AutomationAgentContext,onStarted?:(chatId:string)=>void,retryChatId?:string,trackingRunId?:string):Promise<{text:string;chatId:string}>{
   const existing=retryChatId?getAgentChat(retryChatId):undefined;
   if(existing&&existing.profile.id!==profile.id)throw new Error("Retry requires the original agent account.");
   automationContext=existing?.automationContext||automationContext;
@@ -148,7 +148,7 @@ export async function runExternalAutomation(repositoryId:string,profile:AgentPro
   const messages:CodexMessage[]=[{id:crypto.randomUUID(),role:'user',createdAt:Date.now(),text:prompt},{id:crypto.randomUUID(),role:'assistant',createdAt:Date.now(),text:''}];
   const record:AgentChat={externalAutomation:true,automationContext,id,repositoryId,profile,mode,archived:existing?.archived,session:existing?.session,name:existing?.name||conversationName||prompt.slice(0,100),messages:existing?.session?[...existing.messages,...messages]:messages,status:'Working…',activity:'',running:true,updatedAt:Date.now()};chats=existing?chats.map(chat=>chat.id===id?record:chat):[record,...chats];persist(id);emit();onStarted?.(id);
   try{
-    const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt,existing?.session?.sessionId,automationContext?.runId,event=>{const chat=getAgentChat(id);if(chat)updateAgentChat(id,{activity:(chat.activity+'\n'+JSON.stringify(event)).slice(-2_000_000),...externalEventPatch(event,chat)});},automationContext);
+    const result=await api.runNewAgentConversation(repositoryId,profile.provider,profile.id,mode,prompt,existing?.session?.sessionId,automationContext?.runId,event=>{const chat=getAgentChat(id);if(chat)updateAgentChat(id,{activity:(chat.activity+'\n'+JSON.stringify(event)).slice(-2_000_000),...externalEventPatch(event,chat)});},automationContext,trackingRunId||automationContext?.runId||id);
     updateAgentChat(id,{running:false,status:'Completed',automationRetry:false,session:result.sessionId?{sessionId:result.sessionId,provider:profile.provider,source:'app'}:undefined,messages:[...record.messages.slice(0,-1),{...messages[1],text:result.text||'Completed without a text response.'}]});
     window.dispatchEvent(new CustomEvent('saved-prompt-finished',{detail:{repositoryId,provider:profile.provider}}));
     return {text:result.text||'Completed',chatId:id};
