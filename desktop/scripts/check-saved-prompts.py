@@ -158,13 +158,15 @@ script = r"""
  assert(!document.querySelector('.saved-prompt-list article').textContent.includes('printf'), 'Automation content leaked onto card');
  const actionButtons=[...document.querySelectorAll('.saved-prompt-list article .saved-prompt-actions > button')];assert(actionButtons.length>=3&&Math.max(...actionButtons.map(button=>button.getBoundingClientRect().top))-Math.min(...actionButtons.map(button=>button.getBoundingClientRect().top))<2,'Automation actions are stacked vertically');
  const oldLogList=api.listAutomationLogs,oldLogRead=api.readAutomationLog;
- api.listAutomationLogs=async()=>[{repositoryId:jobs[0].repositoryId,runId:'copy-fixture',createdAt:new Date().toISOString(),status:'completed'}];
- api.readAutomationLog=async()=>({repositoryId:jobs[0].repositoryId,runId:'copy-fixture',createdAt:new Date().toISOString(),stdout:'fixture stdout',stderr:'fixture stderr',response:'fixture response',activity:'fixture activity'});
+ const copyFixtureTime=Date.now();
+ api.listAutomationLogs=async()=>[{repositoryId:jobs[0].repositoryId,runId:'copy-fixture',createdAt:copyFixtureTime,status:'completed'}];
+ api.readAutomationLog=async()=>({repositoryId:jobs[0].repositoryId,runId:'copy-fixture',createdAt:copyFixtureTime,stdout:'fixture stdout',stderr:'fixture stderr',response:'fixture response',activity:'fixture activity'});
  let copiedLog='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{copiedLog=text;}}});
  document.querySelector('.saved-prompt-list article').click();await wait(()=>document.querySelector('.automation-log-dialog'));
  await wait(()=>document.querySelector('.automation-log-lines')?.textContent.includes('fixture activity'));
  document.querySelector('[aria-label="Copy automation log"]').click();await pause();
  assert(['fixture stdout','fixture stderr','fixture response','fixture activity'].every(value=>copiedLog.includes(value)),'Copy log omitted saved output sections');
+ assert(copiedLog.includes(new Date(copyFixtureTime).toLocaleString()),'Copied log omitted the run timestamp');
  assert(document.querySelector('[aria-label="Copy automation log"]').classList.contains('copied'),'Copy corner badge missing');
  assert(document.querySelector('[aria-label="Copy automation log"]').textContent==='','Copy button should be icon-only');
  let externalClipboard='different clipboard';navigator.clipboard.readText=async()=>externalClipboard;

@@ -59,7 +59,7 @@ export function AutomationLogDialog({job,repositories,onClose,initialRun}:{job:S
   },[job.id,selected,liveEntry,summaries]);
   const repositoryName=(id:string)=>repositories.find(repo=>repo.id===id)?.displayName||job.repositoryLabels?.[id]||id;
   const logText=[
-    entry?[`${repositoryName(entry.repositoryId)} · $<ActivityTime timestamp={entry.createdAt}/>`,entry.inputValues&&Object.keys(entry.inputValues).length?`Manual inputs: ${JSON.stringify(entry.inputValues)}`:'',entry.stdout,entry.stderr,entry.response,entry.activity].filter(Boolean).join('\n\n'):'',
+    entry?[`${repositoryName(entry.repositoryId)} · ${new Date(entry.createdAt).toLocaleString()}`,entry.inputValues&&Object.keys(entry.inputValues).length?`Manual inputs: ${JSON.stringify(entry.inputValues)}`:'',entry.stdout,entry.stderr,entry.response,entry.activity].filter(Boolean).join('\n\n'):'',
     error,
     !entry&&!error&&logs.length>0&&job.state!=='running'?job.lastResult:'',
   ].filter(Boolean).join('\n\n');
