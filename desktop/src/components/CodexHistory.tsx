@@ -1,4 +1,9 @@
-import { canRetryConversation, retryConversationAction, refreshBlockedAutomations, subscribeSavedPrompts } from '../lib/savedPrompts';
+import {ActivityTime} from './ActivityTime';
+import {ScriptRun} from './ScriptRun';
+import {HandoffTrail} from './HandoffTrail';
+import {activityKey,useRepositoryActivity} from '../lib/repositoryActivity';
+import type {AutomationLogSummary} from '../lib/api';
+import { canRetryConversation, retryConversationAction, refreshBlockedAutomations, subscribeSavedPrompts, savedPrompts, type SavedPrompt } from '../lib/savedPrompts';
 import { CopyButton } from './CopyButton';
 import { IdentitySignIn } from './IdentitySignIn';
 import { VSCodeIcon, CursorIcon, ClaudeIcon } from './Icons';
@@ -16,34 +21,38 @@ import { ConversationContextMenu } from './ConversationContextMenu';
 import { matchingHistoryThread } from '../lib/conversationIdentity';
 import { api } from '../lib/api';
 import { useAgentChats, renameAgentChat, archiveAgentChat, type AgentChat } from '../lib/agentChats';
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import { cursorDisplayText } from "../lib/conversationText";
 import { loadOlderMessages, loadOlderThreads, peekList, peekMessages, refreshMessages, refreshThreadList, subscribe, warmRepository, listKey, messageKey, providerName, updatedMillis, type Thread } from "../lib/conversationCache";
-import { MessageSquare, RefreshCw, Pencil, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
+import { MessageSquare, SquareTerminal, RefreshCw, Pencil, Settings2, ArrowUpToLine, ArrowDownToLine, ChevronUp, ChevronDown, LoaderCircle, BookmarkPlus } from "lucide-react";
 import { useProviderPreferences } from "../lib/providerPreferences";
 import type { CodexMessage, FileEdit, Repository } from "../types";
 
+const RelatedAutomationLogDialog=lazy(()=>import('./AutomationLogDialog').then(module=>({default:module.AutomationLogDialog})));
+
 export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConversation }: { repository?: Repository; unlinkedName?: string; onSetup: (provider: import("./ProviderSetup").Provider) => void; onCursorConversation?: (repositoryId: string, conversationId?: string) => void }) {
   const [settings, setEnabled] = useProviderPreferences();
+  const [scripts,setScripts]=useState(()=>localStorage.getItem('gitcerberus.showScripts')!=='false');
+  const changeScripts=(value:boolean)=>{setScripts(value);localStorage.setItem('gitcerberus.showScripts',String(value));};
   const enabled = providers.filter(provider => settings[provider] === true);
   const [revision, setRevision] = useState(0);
   useEffect(()=>{const finished=()=>setRevision(value=>value+1);window.addEventListener('saved-prompt-finished',finished);return()=>window.removeEventListener('saved-prompt-finished',finished);},[]);
   const [cursorConversationId, setCursorConversationId] = useState<string>();
   const [editCheckpoint,setEditCheckpoint]=useState(false);
   const reportCursorConversation = useCallback((id?: string) => { setCursorConversationId(id); if (repository) onCursorConversation?.(repository.id, id); }, [repository?.id, onCursorConversation]);
-  return <section className="codex-panel" aria-label="Agent conversations">
-    <header><div className="agent-heading"><h2><MessageSquare size={18} />Agent</h2></div><div className="codex-actions">
+  return <section className="codex-panel" aria-label="Agent/Script activity">
+    <header><div className="agent-heading"><h2><MessageSquare size={18} />Agent/Script</h2></div><div className="codex-actions">
       {repository && <><button type="button" aria-label="Open in VS Code" title="Continue in VS Code" onClick={() => void api.openEditor(repository.id)}><VSCodeIcon/></button><button type="button" aria-label="Open in Cursor" title={cursorConversationId ? "Open this conversation in the Cursor Agents window" : "Open this repository in the Cursor Agents window"} onClick={() => void api.openCursor(repository.id, cursorConversationId)}><CursorIcon/></button></>}
       {repository&&<CopyButton label="Copy checkpoint commit prompt" value={readCheckpointCommitPrompt()}/>}
       {repository&&<button type="button" aria-label="Edit checkpoint commit prompt" title="Edit checkpoint commit prompt" onClick={()=>setEditCheckpoint(true)}><Pencil size={16}/></button>}
       <IdentitySignIn />
       <button type="button" aria-label="Refresh conversations" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button>
     </div></header>
-    <div className="provider-controls" aria-label="Conversation providers">{providers.map(provider => <div className="provider-control" key={provider}><label className={`provider-name provider-${provider}`} title={`Show ${providerName(provider)} conversations`}><input type="checkbox" checked={settings[provider] === true} onChange={event => setEnabled(provider, event.target.checked)} />{providerIcon[provider]}<span>{providerName(provider)}</span></label><button type="button" className={`provider-name provider-${provider}`} aria-label={`Set up ${providerName(provider)}`} title={`Set up ${providerName(provider)}`} onClick={() => onSetup(provider)}><Settings2 size={14} /></button></div>)}</div>
+    <div className="provider-controls" aria-label="Conversation providers">{providers.map(provider => <div className="provider-control" key={provider}><label className={`provider-name provider-${provider}`} title={`Show ${providerName(provider)} conversations`}><input type="checkbox" checked={settings[provider] === true} onChange={event => setEnabled(provider, event.target.checked)} />{providerIcon[provider]}<span>{providerName(provider)}</span></label><button type="button" className={`provider-name provider-${provider}`} aria-label={`Set up ${providerName(provider)}`} title={`Set up ${providerName(provider)}`} onClick={() => onSetup(provider)}><Settings2 size={14} /></button></div>)}<label className="provider-name provider-script"><input type="checkbox" checked={scripts} onChange={event=>changeScripts(event.target.checked)}/><SquareTerminal size={14}/><span>Script</span></label></div>
     <div className="codex-body">
-    {repository && <ConversationBrowser key={repository.id} repository={repository} revision={revision} enabled={enabled} onCursorConversation={reportCursorConversation} />}
-    {!repository && <p className="panel-copy">{unlinkedName ? "Link an existing local checkout, or clone a new one, to see its conversations." : "Select a repository to see its conversations."}</p>}
+    {repository && <ConversationBrowser key={repository.id} repository={repository} revision={revision} scripts={scripts} enabled={enabled} onCursorConversation={reportCursorConversation} />}
+    {!repository && <p className="panel-copy">{unlinkedName ? "Link an existing local checkout, or clone a new one, to see its agent and script activity." : "Select a repository to see its agent and script activity."}</p>}
     </div>
     {editCheckpoint&&<CheckpointPromptDialog onClose={()=>setEditCheckpoint(false)}/>}
   </section>;
@@ -54,15 +63,18 @@ const providerIcon = {codex:<OpenAILogo/>,cursor:<CursorIcon/>,copilot:<Github/>
 const providers: Provider[] = ["codex", "cursor", "copilot", "claude"];
 
 
-function ConversationBrowser({ repository, revision, enabled, onCursorConversation }: { repository: Repository; revision: number; enabled: Provider[]; onCursorConversation: (id?: string) => void }) {
+function ConversationBrowser({ repository, revision, enabled, scripts, onCursorConversation }: { repository: Repository; revision: number; enabled: Provider[];scripts:boolean; onCursorConversation: (id?: string) => void }) {
   const [archived, setArchived] = useState(false);
   const [,setRetryRevision]=useState(0);
   useEffect(()=>{void refreshBlockedAutomations();return subscribeSavedPrompts(()=>setRetryRevision(value=>value+1));},[]);
   const chats = useAgentChats().filter(chat => chat.repositoryId === repository.id);
-  const listedChats = chats.filter(chat => !chat.originKey && !!chat.archived === archived);
+  const listedChats = chats.filter(chat => enabled.includes(chat.profile.provider as Provider) && !chat.originKey && !!chat.archived === archived);
+  const activity=useRepositoryActivity(repository.id,revision);
+  const scriptRuns=scripts&&!archived?activity.runs.filter(run=>run.kind==='shell'):[];
   const enabledKey = enabled.join(",");
   const [contextMenu,setContextMenu]=useState<{x:number;y:number;chat?:AgentChat;thread?:Thread}>();
   const [menuError,setMenuError]=useState("");
+  const [relatedLog,setRelatedLog]=useState<{job:SavedPrompt;run:AutomationLogSummary}>();
   const [cursorNames,setCursorNames]=useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem('gitcerberus.cursorConversationNames')||'{}')}catch{return {}}});
   const list = peekList(listKey(repository.id, archived, enabled));
   const [threads, setThreads] = useState<Thread[]>(() => list?.threads ?? []);
@@ -71,13 +83,23 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
   const [loading, setLoading] = useState(!list);
   const visible = threads.filter((thread) => enabled.includes(thread.provider)).map(thread=>thread.provider==='cursor' && cursorNames[thread.id]?{...thread,name:cursorNames[thread.id]}:thread);
   const matchingThread=(chat:AgentChat)=>matchingHistoryThread(chat,visible);
-  const entries = [
-    ...listedChats.map(chat=>({key:`app:${chat.id}`,time:Math.max(updatedMillis(chat.updatedAt),updatedMillis(matchingThread(chat)?.updatedAt||0)),chat,thread:undefined as Thread|undefined})),
-    ...visible.filter(thread=>!listedChats.some(chat=>matchingThread(chat)?.key===thread.key)).map(thread=>({key:thread.key,time:Math.max(updatedMillis(thread.updatedAt),...chats.filter(chat=>chat.originKey===thread.key).map(chat=>updatedMillis(chat.updatedAt))),chat:undefined as AgentChat|undefined,thread})),
+  // Automation rows describe runs, not later provider metadata rewrites.
+  const runTime=(chat:AgentChat)=>activity.runs.find(run=>run.conversationId===chat.id||!!chat.automationContext&&run.runId===chat.automationContext.runId)?.createdAt;
+  const threadRunTimes=new Map<string,number>();
+  for(const chat of chats){
+    const time=runTime(chat),key=chat.originKey||matchingThread(chat)?.key;
+    if(time&&key)threadRunTimes.set(key,Math.max(time,threadRunTimes.get(key)||0));
+  }
+
+  const entries: {key:string;time:number;chat?:AgentChat;thread?:Thread;script?:AutomationLogSummary}[] = [
+    ...scriptRuns.map(script=>({key:activityKey(script),time:script.createdAt,script})),
+    ...listedChats.map(chat=>({key:`app:${chat.id}`,time:runTime(chat)??Math.max(updatedMillis(chat.updatedAt),updatedMillis(matchingThread(chat)?.updatedAt||0)),chat,thread:undefined as Thread|undefined})),
+    ...visible.filter(thread=>!listedChats.some(chat=>matchingThread(chat)?.key===thread.key)).map(thread=>({key:thread.key,time:threadRunTimes.get(thread.key)??Math.max(updatedMillis(thread.updatedAt),...chats.filter(chat=>chat.originKey===thread.key).map(chat=>updatedMillis(chat.updatedAt))),chat:undefined as AgentChat|undefined,thread})),
   ].sort((a,b)=>b.time-a.time || a.key.localeCompare(b.key));
   const [selected, setSelected] = useState<string>();
   const [selectionExplicit, setSelectionExplicit] = useState(false);
-  const chooseConversation = (key:string) => { setSelectionExplicit(true); setSelected(key); };
+  const [selectedRunContext,setSelectedRunContext]=useState<string>();
+  const chooseConversation = (key:string,run?:AutomationLogSummary) => { setSelectionExplicit(true); setSelected(key);setSelectedRunContext(run?activityKey(run):undefined); };
   const copyConversationText=async()=>{
     const target=contextMenu;if(!target)throw new Error('No conversation selected.');
     const available=target.thread?(await completeMessages(repository.id,target.thread,()=>false)).messages:undefined;
@@ -96,8 +118,10 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
     }catch(error){setMenuError(String(error));}
   };
   const latestKey = entries[0]?.key;
-  const directAppChat = chats.find(chat => `app:${chat.id}` === selected);
-  const selectedThread = selected === "new" ? undefined : directAppChat ? matchingThread(directAppChat) : visible.find((thread) => thread.key === selected) ?? visible[0];
+  useEffect(()=>{if(selected&&selected!=='new'&&!entries.some(entry=>entry.key===selected)){setSelected(entries[0]?.key);}},[scripts,archived,enabledKey,activity.runs.map(run=>activityKey(run)).join(',')]);
+  const selectedScript=scriptRuns.find(run=>activityKey(run)===selected);
+  const directAppChat = listedChats.find(chat => `app:${chat.id}` === selected);
+  const selectedThread = selected === "new" || selectedScript ? undefined : directAppChat ? matchingThread(directAppChat) : visible.find((thread) => thread.key === selected) ?? visible[0];
   const selectedKey = selectedThread?.key;
   const saveMessagePrompt=(message:CodexMessage)=>window.dispatchEvent(new CustomEvent('new-automation-from-prompt',{detail:{repositoryId:repository.id,provider:(appChat?.profile.provider||selectedThread?.provider||'codex') as Provider,prompt:message.text}}));
   const cursorConversationId = selected === "new" ? undefined : selectedThread?.provider === "cursor" ? selectedThread.id : directAppChat?.profile.provider === "cursor" ? directAppChat.session?.sessionId : undefined;
@@ -191,7 +215,7 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
     setSeenScope(scope);
     lastRepo.current = repository.id;
     const next = peekList(listKey(repository.id, archived, enabled));
-    const first = selected === 'new' || selected?.startsWith('app:') ? selected : next?.threads.find(thread => thread.key === selected)?.key || next?.threads[0]?.key;
+    const first = selected === 'new' || selected?.startsWith('app:') || selected?.startsWith('script:') ? selected : next?.threads.find(thread => thread.key === selected)?.key || next?.threads[0]?.key;
     const cachedNext = first ? peekMessages(messageKey(repository.id, first)) : undefined;
     setThreads(next?.threads ?? []); setCursors(next?.cursors ?? {}); setListError(next?.error ?? ""); setLoading(!next);
     setSelected(first);
@@ -223,7 +247,7 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
     const repoChanged = lastRepo.current !== repository.id;
     lastRepo.current = repository.id;
     setThreads(next?.threads ?? []); setCursors(next?.cursors ?? {}); setListError(next?.error ?? ""); setLoading(!next);
-    const nextSelected = selected === 'new' || selected?.startsWith('app:') ? selected : (repoChanged ? next?.threads[0]?.key : selectedKey) ?? next?.threads[0]?.key;
+    const nextSelected = selected === 'new' || selected?.startsWith('app:') || selected?.startsWith('script:') ? selected : (repoChanged ? next?.threads[0]?.key : selectedKey) ?? next?.threads[0]?.key;
     if (nextSelected !== selected) setSelected(nextSelected);
     if (nextSelected && showCached(nextSelected, "latest")) { /* cached paint */ }
     else {
@@ -329,19 +353,32 @@ function ConversationBrowser({ repository, revision, enabled, onCursorConversati
     finally { setLoading(false); }
   }
 
+  const relatedRun=selectedScript||(appChat&&(activity.runs.find(run=>activityKey(run)===selectedRunContext&&(run.conversationId===appChat.id||run.runId===appChat.automationContext?.runId))||activity.runs.find(run=>run.conversationId===appChat.id||!!appChat.automationContext&&run.runId===appChat.automationContext.runId)));
+  const selectRun=(run:AutomationLogSummary)=>{
+    if(run.kind==='shell'){if(!scripts){setMenuError('Enable Script to open this run.');return;}setArchived(false);chooseConversation(activityKey(run));return;}
+    const chat=chats.find(chat=>chat.id===run.conversationId||chat.automationContext?.runId===run.runId);
+    if(chat&&enabled.includes(chat.profile.provider as Provider)){setArchived(!!chat.archived);chooseConversation(chat.originKey||`app:${chat.id}`,run);}
+    else if(run.automationId==='conversation')setMenuError('Enable the related agent provider to open its conversation.');
+    else void api.readAutomationLog(run.automationId,run.repositoryId,run.runId).then(log=>{
+      const known=savedPrompts().find(job=>job.id===run.automationId);
+      const job:SavedPrompt={id:run.automationId,repositoryId:run.repositoryId,provider:'codex',threadId:'',title:run.title||'Automation run',prompt:log.command,trigger:'manual',minutes:5,enabled:false,nextAt:0,editor:'vscode',kind:run.kind==='agent'?'prompt':run.kind,...known};
+      setRelatedLog({job:{...job,prompt:log.command,title:run.title||job.title},run});setMenuError('');
+    }).catch(error=>setMenuError(String(error)));
+  };
   return <>
+    {activity.error&&<p className="config-error" role="status">Automation history unavailable: {activity.error}</p>}
     {listError && <details className="config-error provider-errors"><summary>A configured provider is unavailable · retry or adjust its setup</summary><p role="alert">{listError}</p></details>}
     {menuError && <p className="config-error" role="alert">{menuError}</p>}
     <div className="codex-conversations">
       <div className="codex-thread-list" aria-label="Conversations" aria-busy={loading}><ConversationSearch repositoryId={repository.id} enabled={enabled} chats={chats} onResults={receiveRepoHits} onNavigate={navigateRepoMatch} />
         <div className="conversation-list-tools">{appChat&&canRetryConversation(appChat.id)&&<button type="button" onClick={()=>{void retryConversationAction(appChat.id).catch(error=>setMenuError(String(error)));}}>Retry blocked action</button>}<label className="codex-archive"><input type="checkbox" checked={archived} onChange={event => setArchived(event.target.checked)} />Archived</label></div>
-        {entries.map(entry=>entry.chat ? <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.chat.profile.provider} ${appChat?.id === entry.chat.id ? 'active' : ''}`} aria-pressed={appChat?.id === entry.chat.id} title={`${entry.chat.profile.provider} · ${entry.chat.profile.label} · ${new Date(entry.time).toLocaleString()} · ${entry.chat.status}`} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,chat:entry.chat});}}><span className="conversation-provider-mark">{providerIcon[entry.chat.profile.provider as Provider] || <MessageSquare/>}</span><b>{entry.chat.name}</b>{(entry.chat.running || matchingThread(entry.chat)?.working) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button> : entry.thread && <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.thread.provider} ${selectedKey === entry.key ? 'active' : ''}`} aria-pressed={selectedKey === entry.key} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,thread:entry.thread});}}><span className="conversation-provider-mark">{providerIcon[entry.thread.provider]}</span><b title={`${providerName(entry.thread.provider)} · ${new Date(updatedMillis(entry.thread.updatedAt)).toLocaleString()}${entry.thread.gitInfo?.branch ? ` · ${entry.thread.gitInfo.branch}` : ''}${entry.thread.provider === "copilot" || entry.thread.provider === "claude" ? " · Live activity unavailable" : ""}
-${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.thread.preview || "Untitled conversation"}</b>{(entry.thread.working || chats.some(chat=>chat.originKey===entry.key && chat.running)) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button>)}
+        {entries.map(entry=>entry.script ? <button type="button" key={entry.key} className={`provider-script ${selected===entry.key?'active':''}`} aria-pressed={selected===entry.key} onClick={()=>chooseConversation(entry.key)}><span className="conversation-provider-mark"><SquareTerminal size={14}/></span><b>{entry.script.title||'Script automation'}{entry.script.branch?' · '+entry.script.branch:entry.script.commitSha?' · '+entry.script.commitSha.slice(0,8):''}</b><ActivityTime timestamp={entry.time}/>{entry.script.status==='running'&&<LoaderCircle className="conversation-working" size={13} aria-label="Script running"/>}</button> : entry.chat ? <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.chat.profile.provider} ${appChat?.id === entry.chat.id ? 'active' : ''}`} aria-pressed={appChat?.id === entry.chat.id} title={`${entry.chat.profile.provider} · ${entry.chat.profile.label} · ${new Date(entry.time).toLocaleString()} · ${entry.chat.status}`} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,chat:entry.chat});}}><span className="conversation-provider-mark">{providerIcon[entry.chat.profile.provider as Provider] || <MessageSquare/>}</span><b>{entry.chat.name}</b><ActivityTime timestamp={entry.time}/>{(entry.chat.running || matchingThread(entry.chat)?.working) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button> : entry.thread && <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.thread.provider} ${selectedKey === entry.key ? 'active' : ''}`} aria-pressed={selectedKey === entry.key} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,thread:entry.thread});}}><span className="conversation-provider-mark">{providerIcon[entry.thread.provider]}</span><b title={`${providerName(entry.thread.provider)} · ${new Date(updatedMillis(entry.thread.updatedAt)).toLocaleString()}${entry.thread.gitInfo?.branch ? ` · ${entry.thread.gitInfo.branch}` : ''}${entry.thread.provider === "copilot" || entry.thread.provider === "claude" ? " · Live activity unavailable" : ""}
+${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.thread.preview || "Untitled conversation"}</b><ActivityTime timestamp={entry.time}/>{(entry.thread.working || chats.some(chat=>chat.originKey===entry.key && chat.running)) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button>)}
         {loading && <p className="panel-copy" role="status">Loading conversations…</p>}
-        {!loading && !listError && !visible.length && <p className="panel-copy">No {archived ? "archived " : ""}conversations found for this directory.</p>}
+        {!loading && !listError && !entries.length && <p className="panel-copy">No {archived ? "archived conversations" : "agent or script activity"} found for this directory.</p>}
         {providers.filter((provider) => cursors[provider] && enabled.includes(provider)).map((provider) => <button key={provider} type="button" disabled={loading} onClick={() => more(provider)}>Load older {providerName(provider)} conversations</button>)}
       </div>
-      <div className="chat-message-column"><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}>
+      <div className="chat-message-column">{relatedRun&&<HandoffTrail run={relatedRun} runs={activity.runs} onSelect={selectRun}/>} {selectedScript?<ScriptRun key={activityKey(selectedScript)} run={selectedScript}/>:<><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}>
         {appChat ? <>{readError && <p className="config-error" role="alert">{readError}</p>}{renderedMessages.map((message,index) => <ConversationMessage key={message.id} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={false} finished={!appChat.running || index < renderedMessages.length-1} onSavePrompt={()=>saveMessagePrompt(message)} />)}<p className="chat-status" role="status">{continuedOutside ? 'Continued outside this app · history is available here' : appChat.status}</p></> : selected === 'new' || !selectedThread ? <p className="panel-copy">Select a conversation to read its history. Open this repository in VS Code or Cursor to continue working.</p> : <>
         {messageCursor && <button type="button" disabled={reading} onClick={moreMessages}>Load older messages</button>}
         {reading && <p className="panel-copy" role="status">Loading messages…</p>}
@@ -351,9 +388,10 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         {renderedMessages.map((message, index) => <ConversationMessage key={`${message.id}-${index}`} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={!!selected?.startsWith("cursor:")} finished={!selectedThread.working || index < renderedMessages.length - 1} onSavePrompt={()=>saveMessagePrompt(message)} />)}
         {selectedThread.working && <p className={`chat-status provider-${selectedThread.provider}`} role="status"><LoaderCircle className="conversation-working" size={13} aria-label="Agent working" /> Working</p>}
         </>}
-      </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></div>
+      </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></>}</div>
     </div>
     {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canRetry={!!contextMenu.chat&&canRetryConversation(contextMenu.chat.id)} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} getCopyText={copyConversationText} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
+    {relatedLog&&<Suspense fallback={null}><RelatedAutomationLogDialog job={relatedLog.job} repositories={[repository]} initialRun={relatedLog.run} onClose={()=>setRelatedLog(undefined)}/></Suspense>}
     {reviewEdits && <EditReview edits={reviewEdits} onClose={()=>setReviewEdits(undefined)} />}
   </>;
 }
@@ -375,5 +413,5 @@ const ConversationMessage = memo(function ConversationMessage({ message, formatC
   const cacheKey = text+'\0'+query.trim();
   let markdown = markdownCache.get(cacheKey);
   if (!markdown) { markdown = <Markdown rehypePlugins={query.trim() ? [highlight(query.trim())] : []} components={markdownComponents}>{text}</Markdown>; if(markdownCache.size>40)markdownCache.clear();markdownCache.set(cacheKey, markdown); }
-  return <article data-message-id={message.id} className={`codex-message ${message.role}`}>{message.role === 'assistant' && <AgentActivity steps={message.steps} finished={finished} />}{!!text && <div className="conversation-markdown">{markdown}</div>}{message.role==='user'&&!!text&&<button type="button" className="save-prompt-edge" aria-label="Save this prompt" title="Save this prompt as an automation" onClick={onSavePrompt}><BookmarkPlus size={14}/></button>}{message.edits?.length ? <button className="turn-edits-button" onClick={()=>onReview(message.edits!)}>Review {new Set(message.edits.map(edit=>edit.path)).size} changed file{message.edits.length === 1 ? '' : 's'}</button> : null}</article>;
+  return <article data-message-id={message.id} className={`codex-message ${message.role}`}><ActivityTime timestamp={message.createdAt}/>{message.role === 'assistant' && <AgentActivity steps={message.steps} finished={finished} />}{!!text && <div className="conversation-markdown">{markdown}</div>}{message.role==='user'&&!!text&&<button type="button" className="save-prompt-edge" aria-label="Save this prompt" title="Save this prompt as an automation" onClick={onSavePrompt}><BookmarkPlus size={14}/></button>}{message.edits?.length ? <button className="turn-edits-button" onClick={()=>onReview(message.edits!)}>Review {new Set(message.edits.map(edit=>edit.path)).size} changed file{message.edits.length === 1 ? '' : 's'}</button> : null}</article>;
 });

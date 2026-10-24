@@ -31,6 +31,16 @@ fetches that branch’s configured remote and rechecks before advancing, uses th
 linked worktree when checked out, and never merges, rebases, stashes, or forces.
 Branches without an upstream must be configured first. Refresh history to recheck.
 
+Automatic fast-forwarding is enabled by default. Turn off **Auto fast-forward**
+at the bottom of the sidebar to opt out on this device. On repository updates,
+app focus, and every 15 seconds, Cerberus checks all local branches against their
+already-fetched upstream references, including linked worktrees. It advances
+only clean, strictly-behind branches with no unfinished Git operation, while no
+app jobs or detected local agents are active. App job startup is coordinated with
+these updates. Unsafe branches remain unchanged; select one to inspect its reason.
+Automatic updates do not fetch over the network, merge divergent history, or
+trigger commit automations. Fetch normally to discover remote changes.
+
 Branch tabs are grouped into Permanent, Temporary in use, and Temporary retained
 for reruns, with distinct borders and labels. Temporary namespaces are `private/`,
 `correction/`, `integration/`, `revision/`, `temp/`, and `tmp/`; other names remain
@@ -68,3 +78,63 @@ History refreshes on local commit/tag ref changes, when the app regains focus,
 and through a 15-second polling fallback while visible. Refresh history reloads
 commit labels and branch metadata. Background refresh includes loaded history
 pages and ignores responses for a repository or branch that is no longer selected.
+
+## Agent/Script activity
+
+The Repositories page's **Agent/Script** pane combines agent conversations and
+script automation runs for the selected repository, newest first. Provider
+checkboxes remain opt-in; the independent **Script** checkbox is on by default
+and remembers its setting on this device. Select a script run to read or copy
+its saved log. Running scripts stream output into the same view. Output follows
+the bottom until you scroll up. Refresh reloads saved activity, including logs
+whose automation has since been removed. Archived applies to agent conversations.
+
+Automation rows use their recorded run time, even if provider metadata is later
+updated; the clock refreshes immediately on focus and visibility changes after
+sleep. Run and message timestamps show **Now** during the first minute, local **HH:mm**
+for the past 24 hours, a month/day for older entries, and the year when different
+from the current year. Hover for the full local date and time. New script output
+chunks retain their arrival times; old logs retain their known run time. Provider
+messages use recorded timestamps when available; **—** means older history did
+not supply a time.
+
+A compact handoff trail shows the source run, handoff name and downstream runs,
+for example **Review → revise → Revision**. Links in the Repositories pane open
+the related script run or agent conversation (enable its filter first). The
+Automation log dialog also shows the relationship overview. Relationships use
+recorded handoff emission/run IDs within the same repository, never matching
+names alone. Emitted handoffs without a recorded consumer are marked **Emitted**;
+removed source logs are shown as unavailable. Conditional handoffs appear as
+emitted only when publication actually succeeded.
+
+## Automatic commit relationships
+
+Cerberus automatically records commits created by app-started agent conversations
+and script automations. Agents and scripts do not need to announce commits or
+write a handoff. The activity trail can show **Implementation → commit SHA →
+Review**, with navigation to the original conversation or script log and the
+commit-triggered run. Full SHAs and repository identity establish the relationship;
+branch names and timing do not. A commit being an action's input revision does
+not make that action its author. OR trigger sets link commits only when the
+matched set actually included a commit condition.
+
+Tracking applies to the process launched for the run and its children. Git's
+[hook protocol](https://git-scm.com/docs/githooks), including reference-transaction, post-commit and rewrite hooks capture ordinary commits, amendments,
+cherry-picks and rewritten commits, while existing hooks retain their arguments,
+stdin and exit status. A process-local Git proxy also captures `git commit-tree`
+without changing its stdin, stdout or exit status. Repository Git configuration
+and hooks on disk are left unchanged. Temporary clones are associated only when
+they share a configured remote URL with the triggering repository. Unrelated
+repositories, other writers, fetched history and fast-forwards are not attributed
+to a run. Explicitly overriding the tracking hooks/environment, or calling an
+absolute Git binary for hookless plumbing, or using a Git library that bypasses
+the Git executable/hooks, can bypass tracking; Cerberus does not
+guess when evidence is unavailable.
+
+Commit records persist independently of temporary worktrees. New commit-triggered
+logs retain their trigger identity, so relationships remain available after
+completion and app restart while the source conversation/log remains available. Deleting a saved run also
+removes its associated commit records.
+Retries retain the worktree they need but record newly produced commits against
+the new run. Existing runs from before tracking was introduced cannot be
+reliably attributed retroactively.

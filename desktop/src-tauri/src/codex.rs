@@ -354,6 +354,10 @@ fn same_directory(left: &Path, right: &Path) -> bool {
     }
 }
 
+pub fn message_timestamp(value:&Value)->Option<i64>{
+    if let Some(number)=value.as_i64().filter(|n|*n>0){return if number<100_000_000_000{number.checked_mul(1000)}else{Some(number)};}
+    value.as_str().and_then(|s|chrono::DateTime::parse_from_rfc3339(s).ok()).map(|time|time.timestamp_millis())
+}
 fn rollout_messages(file: &Path, id: &str, repository: &Path) -> Result<MessagePage, String> {
     let reader = BufReader::new(std::fs::File::open(file).map_err(|e| format!("Could not read stored Codex conversation: {e}"))?);
     let mut lines = reader.lines();
@@ -376,7 +380,7 @@ fn rollout_messages(file: &Path, id: &str, repository: &Path) -> Result<MessageP
                 _ => None,
             }).collect::<Vec<_>>().join("\n");
         if !text.is_empty() {
-            data.push(Message {id: format!("{}:{}", id, record["ordinal"]), role: role.into(), text, edits: Vec::new()});
+            data.push(Message {created_at:message_timestamp(&record["timestamp"]),id: format!("{}:{}", id, record["ordinal"]), role: role.into(), text, edits: Vec::new()});
         }
     }
     Ok(MessagePage {data, next_cursor: None})
@@ -466,6 +470,7 @@ pub struct FileEdit { pub path: String, pub kind: String, #[serde(skip_serializi
 
 #[derive(Debug, Serialize)]
 pub struct Message {
+    #[serde(rename="createdAt",skip_serializing_if="Option::is_none")] pub created_at:Option<i64>,
     pub id: String,
     pub role: String,
     pub text: String,
@@ -530,6 +535,7 @@ fn messages(thread: &Value) -> Vec<Message> {
             };
             if !text.is_empty() {
                 result.push(Message {
+                    created_at:message_timestamp(&item["createdAt"]),
                     id: item["id"].as_str().unwrap_or_default().to_owned(),
                     role: role.into(),
                     text, edits:Vec::new(),
@@ -538,7 +544,7 @@ fn messages(thread: &Value) -> Vec<Message> {
         }
         if !edits.is_empty() {
             if let Some(message) = result[start..].iter_mut().rev().find(|message| message.role == "assistant") { message.edits = edits; }
-            else { result.push(Message {id:format!("{}:edits", turn["id"].as_str().unwrap_or("turn")),role:"assistant".into(),text:String::new(),edits}); }
+            else { result.push(Message {created_at:None,id:format!("{}:edits", turn["id"].as_str().unwrap_or("turn")),role:"assistant".into(),text:String::new(),edits}); }
         }
     }
     result
@@ -546,6 +552,17 @@ fn messages(thread: &Value) -> Vec<Message> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn message_time_is_normalized_and_exposed_as_camel_case() {
+        assert_eq!(message_timestamp(&json!(1700000000)),Some(1700000000000));
+        assert_eq!(message_timestamp(&json!(1700000000123i64)),Some(1700000000123));
+        assert_eq!(message_timestamp(&json!("2023-11-14T22:13:20Z")),Some(1700000000000));
+        assert_eq!(message_timestamp(&Value::Null),None);
+        let message=Message{created_at:Some(1234),id:"test".into(),role:"user".into(),text:"prompt".into(),edits:vec![]};
+        let value=serde_json::to_value(message).unwrap();
+        assert_eq!(value["createdAt"],1234);
+        assert!(value.get("created_at").is_none());
+    }
     #[test]
     fn storage_errors_are_distinct_from_authentication_errors() {
         for error in ["logout failed: failed to delete auth from keyring", "Couldn't access platform secure storage: SS error: result not returned from SS API", "Secret Service unavailable"] {

@@ -55,7 +55,7 @@ fn response_text(value:&Value)->Option<&str>{
     None
 }
 
-pub fn new_cli_conversation(root:&Path,repo:&Path,repository_key:&str,provider:&str,identity_id:&str,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>,output:Option<tauri::ipc::Channel<Value>>)->Result<Value,String>{
+pub fn new_cli_conversation(root:&Path,repo:&Path,repository_key:&str,provider:&str,identity_id:&str,mode:&str,prompt:&str,session_id:Option<&str>,cancelled:Option<Arc<AtomicBool>>,output:Option<tauri::ipc::Channel<Value>>,tracking:Option<std::collections::HashMap<String,String>>)->Result<Value,String>{
     if !matches!(provider,"cursor"|"claude")||!matches!(mode,"analyze"|"edit"|"full") {return Err("Unsupported provider or permission mode".into());}
     if prompt.trim().is_empty()||prompt.len()>100_000{return Err("Enter a prompt of at most 100,000 characters".into());}
     if session_id.is_some_and(|id|!valid_id(id)){return Err("Invalid session ID".into());}
@@ -74,6 +74,7 @@ pub fn new_cli_conversation(root:&Path,repo:&Path,repository_key:&str,provider:&
         if let Some(id)=session_id{command.args(["--resume",id]);}
     }
     command.arg(prompt);
+    if let Some(env)=tracking{crate::commit_provenance::configure(&mut command,&env,false);}
     let mut child=command.spawn().map_err(|e|format!("Could not start {tool}: {e}"))?;
     let stdout=drain(child.stdout.take().ok_or("Agent output unavailable")?,200_000,output.clone(),"stdout");
     let stderr=drain(child.stderr.take().ok_or("Agent diagnostic stream unavailable")?,2_000,output,"stderr");

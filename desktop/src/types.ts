@@ -63,8 +63,8 @@ export type CodexAccount = { account: { type: string; email?: string; planType?:
 export type CodexThread = { id: string; name?: string; preview: string; cwd: string; updatedAt: number; working?: boolean; gitInfo?: { branch?: string } };
 export type CodexThreadPage = { data: CodexThread[]; nextCursor?: string | null };
 export type FileEdit = {path:string; kind:string; diff?:string; source?:string};
-export type AgentStep={id?:string;kind:string;title:string;text:string;status?:string};
-export type CodexMessage = { id: string; role: string; text: string; edits?:FileEdit[]; steps?:AgentStep[] };
+export type AgentStep={createdAt?:number;id?:string;kind:string;title:string;text:string;status?:string};
+export type CodexMessage = {createdAt?:number; id: string; role: string; text: string; edits?:FileEdit[]; steps?:AgentStep[] };
 
 export type CodexMessagePage = { data: CodexMessage[]; nextCursor?: string | null };
 

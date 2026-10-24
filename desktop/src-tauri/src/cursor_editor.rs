@@ -131,7 +131,7 @@ fn flush_edits(data: &mut Vec<Message>, start: usize, edits: &mut Vec<FileEdit>)
     if edits.is_empty() { return; }
     let edits = std::mem::take(edits);
     if let Some(message) = data[start..].iter_mut().rev().find(|message| message.role == "assistant") { message.edits = edits; }
-    else { data.push(Message {id:format!("edits-{start}"),role:"assistant".into(),text:String::new(),edits}); }
+    else { data.push(Message {created_at:None,id:format!("edits-{start}"),role:"assistant".into(),text:String::new(),edits}); }
 }
 fn bubble_edit(value: &Value) -> Option<FileEdit> {
     let tool = &value["toolFormerData"];
@@ -310,6 +310,7 @@ fn stored_messages(db: &Connection, id: &str) -> Result<Vec<Message>, String> {
                 continue;
             }
             data.push(Message {
+                created_at:crate::codex::message_timestamp(&value["createdAt"]).or_else(||crate::codex::message_timestamp(&header["createdAt"])),
                 id: bubble.into(),
                 role: role.into(),
                 text: text.into(), edits:Vec::new(),
@@ -347,7 +348,7 @@ mod tests {
         let value = serde_json::json!({"toolFormerData":{"name":"edit_file_v2","status":"completed","params":"{\"relativeWorkspacePath\":\"src/a.ts\"}","result":{"beforeContentId":"old","afterContentId":"new"}}});
         let edit = bubble_edit(&value).unwrap(); assert_eq!(edit.path,"src/a.ts"); assert_eq!(edit.kind,"update");
         let mut failed = value; failed["toolFormerData"]["status"] = "error".into(); assert!(bubble_edit(&failed).is_none());
-        let mut data = vec![Message {id:"final".into(),role:"assistant".into(),text:"Done".into(),edits:vec![]}];
+        let mut data = vec![Message {created_at:None,id:"final".into(),role:"assistant".into(),text:"Done".into(),edits:vec![]}];
         flush_edits(&mut data,0,&mut vec![edit]); assert_eq!(data[0].edits.len(),1);
     }
     #[test]

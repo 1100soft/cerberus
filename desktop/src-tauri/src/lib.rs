@@ -1,3 +1,6 @@
+#[doc(hidden)]
+pub mod commit_provenance;
+pub use commit_provenance::git_proxy_main as tracked_git_main;
 mod terminal_text;
 mod provider_paths;
 mod agents;
@@ -238,15 +241,15 @@ fn local_activity_presence(active:bool){awake::presence(active);}
 #[tauri::command]
 async fn cleanup_automation_checkout(repository_id:String,run_id:String,state:State<'_,AppState>)->Result<bool,String>{let repo=state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||automation_worktrees::cleanup(&root,&repo,&repository_id,&run_id)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
-async fn run_agent(profile_id: String, repository_id: String, prompt: String, mode: String, model: Option<String>, reasoning_effort: Option<String>, resume: Option<agent_sessions::ResumeTarget>, automation_run_id:Option<String>, automation_commit:Option<String>, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
+async fn run_agent(profile_id: String, repository_id: String, prompt: String, mode: String, model: Option<String>, reasoning_effort: Option<String>, resume: Option<agent_sessions::ResumeTarget>, automation_run_id:Option<String>, automation_commit:Option<String>, tracking_run_id:Option<String>, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
     let _awake=awake::acquire();
     let _checkout_activity=automation_run_id.as_deref().map(automation_worktrees::activate);
     let mut repo = state.db.list()?.into_iter().find(|r| r.id == repository_id).ok_or("Repository not found")?;
     let agents = state.agents.clone(); let root = state.data_dir.clone();
     let codex = state.codex.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(run_id)=automation_run_id{repo.local_path=automation_worktrees::prepare(&root,Path::new(&repo.local_path),&repository_id,&run_id,automation_commit.as_deref())?.to_string_lossy().into_owned();}
-        agents.run(&root, &profile_id, &repo, &prompt, &mode, model.as_deref(), reasoning_effort.as_deref(), resume.as_ref(), &codex, output)
+        if let Some(ref run_id)=automation_run_id{repo.local_path=automation_worktrees::prepare(&root,Path::new(&repo.local_path),&repository_id,&run_id,automation_commit.as_deref())?.to_string_lossy().into_owned();}
+        agents.run(&root, tracking_run_id.as_deref().or(automation_run_id.as_deref()), &profile_id, &repo, &prompt, &mode, model.as_deref(), reasoning_effort.as_deref(), resume.as_ref(), &codex, output)
     }).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
@@ -277,21 +280,22 @@ async fn submit_saved_prompt(repository_id:String,provider:String,thread_id:Stri
     tauri::async_runtime::spawn_blocking(move||prompt_delivery::submit(&root,&repo,&key,&provider,&thread_id,&prompt,&codex,&cursor)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
-async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,automation_run_id:Option<String>,automation_commit:Option<String>,output:tauri::ipc::Channel<serde_json::Value>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,automation_run_id:Option<String>,automation_commit:Option<String>,tracking_run_id:Option<String>,output:tauri::ipc::Channel<serde_json::Value>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
     let _awake=awake::acquire();
     let _checkout_activity=automation_run_id.as_deref().map(automation_worktrees::activate);
     let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
     let mut repo=state.db.repository_path(&repository_id)?;
     let key=prompt_repository_key(&record);
     let root=state.data_dir.clone();
-    if let Some(run_id)=automation_run_id{let worktree_root=root.clone();let path=repo.clone();let id=repository_id.clone();repo=tauri::async_runtime::spawn_blocking(move||automation_worktrees::prepare(&worktree_root,&path,&id,&run_id,automation_commit.as_deref())).await.map_err(|error|error.to_string())??;}
+    if let Some(ref run_id)=automation_run_id{let worktree_root=root.clone();let path=repo.clone();let id=repository_id.clone();let run_id=run_id.clone();repo=tauri::async_runtime::spawn_blocking(move||automation_worktrees::prepare(&worktree_root,&path,&id,&run_id,automation_commit.as_deref())).await.map_err(|error|error.to_string())??;}
+    let tracking=tracking_run_id.as_deref().or(automation_run_id.as_deref()).map(|id|commit_provenance::environment(&root,&repo,&repository_id,id)).transpose()?;
     let registration=request_id.map(|id|state.drafts.register(id)).transpose()?;
     let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
     if provider=="copilot" {
         if record.identity.as_ref().map(|item|item.id.as_str())!=Some(identity_id.as_str()){return Err("Assign the selected GitHub identity to this repository first".into());}
-        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled,Some(output)).await;
+        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled,Some(output),tracking).await;
     }
-    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled,Some(output))).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled,Some(output),tracking)).await.map_err(|e|e.to_string())?
 }
 #[tauri::command]
 fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
@@ -314,7 +318,8 @@ async fn run_automation_shell(repository_id:String,script:String,runtime:Option<
     let _awake=awake::acquire();
     let repository=state.db.repository_path(&repository_id)?;
     let runtime=match runtime{Some(config) if config.preset=="default"=>script_runtime::settings(&state.data_dir)?,Some(config)=>config,None=>script_runtime::Runtime{preset:"bash".into(),..Default::default()}};
-    tauri::async_runtime::spawn_blocking(move||shell_automation::run_stream_with_runtime(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context.unwrap_or_default(),&runtime)).await.map_err(|error|error.to_string())?
+    let root=state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move||{let mut context=context.unwrap_or_default();if let Some(id)=context.get("CERBERUS_RUN_ID").cloned(){context.extend(commit_provenance::environment(&root,&repository,&repository_id,&id)?);}shell_automation::run_stream_with_runtime(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context,&runtime)}).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
 async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
@@ -706,6 +711,19 @@ fn list_branches(repository_id: String, state: State<AppState>) -> Result<Vec<St
 #[tauri::command]
 async fn branch_listing(repository_id:String,state:State<'_,AppState>)->Result<Vec<branch_listing::Branch>,String>{let path=state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();let git=state.git.clone();tauri::async_runtime::spawn_blocking(move||{let names=git.branches(&path).map_err(|e|e.to_string())?;branch_listing::list(&root,&path,&repository_id,names)}).await.map_err(|e|e.to_string())?}
 #[tauri::command]
+async fn auto_fast_forward(repository_id:String,app:tauri::AppHandle,state:State<'_,AppState>)->Result<Vec<String>,String>{
+ let path=state.db.repository_path(&repository_id)?;
+ let updated=tauri::async_runtime::spawn_blocking(move||branch_sync::advance_behind(&path)).await.map_err(|e|e.to_string())??;
+ if !updated.is_empty(){let _=app.emit("automation-git-change",serde_json::json!({"repositoryId":repository_id}));}
+ Ok(updated)
+}
+#[tauri::command]
+async fn repository_commit_origins(repository_id:String,state:State<'_,AppState>)->Result<std::collections::HashMap<String,Vec<String>>,String>{let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||commit_provenance::repository_commits(&root,&repository_id)).await.map_err(|e|e.to_string())}
+#[tauri::command]
+async fn repository_automation_logs(repository_id:String,state:State<'_,AppState>)->Result<Vec<automation_logs::Summary>,String>{
+ let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||automation_logs::list_repository(&root,&repository_id)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
 async fn branch_sync_status(repository_id:String,branch:String,state:State<'_,AppState>)->Result<branch_sync::Status,String>{let path=state.db.repository_path(&repository_id)?;tauri::async_runtime::spawn_blocking(move||branch_sync::status(&path,&branch)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
 async fn fast_forward_branch(repository_id:String,branch:String,app:tauri::AppHandle,state:State<'_,AppState>)->Result<branch_sync::Status,String>{let path=state.db.repository_path(&repository_id)?;let result=tauri::async_runtime::spawn_blocking(move||branch_sync::advance(&path,&branch)).await.map_err(|e|e.to_string())?;let _=app.emit("automation-git-change",serde_json::json!({"repositoryId":repository_id}));result}
@@ -893,6 +911,7 @@ fn show_dashboard(app: &tauri::AppHandle) {
 }
 
 pub fn run() {
+    commit_provenance::detach_inherited_tracking();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -959,7 +978,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_platform, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_platform, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, repository_automation_logs, repository_commit_origins, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,
@@ -981,7 +1000,7 @@ pub fn run() {
             link_repository_folder,
             clone_github_repository,
             open_in_cursor,
-            list_branches, branch_listing, branch_sync_status, fast_forward_branch, branch_removal_plan, remove_branch,
+            list_branches, branch_listing, auto_fast_forward, branch_sync_status, fast_forward_branch, branch_removal_plan, remove_branch,
             commit_history,
             list_identities,
             disconnect_github_identity,

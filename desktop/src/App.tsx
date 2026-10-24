@@ -46,6 +46,8 @@ export function App() {
   useZoomTooltips();
   useEffect(() => watchCursorCompletion(), []);
   useEffect(() => startSavedPromptScheduler(), []);
+  const [autoFastForward,setAutoFastForward]=useState(()=>localStorage.getItem('gitcerberus.autoFastForward')!=='false');
+  useEffect(()=>{localStorage.setItem('gitcerberus.autoFastForward',String(autoFastForward));},[autoFastForward]);
   const [paneSplit, setPaneSplit] = useState(() => Number(localStorage.getItem("gitcerberus.paneSplit")) || 50);
   const [localRepositories, setRepositories] = useState<Repository[]>([]);
   const [query, setQuery] = useState("");
@@ -217,6 +219,26 @@ export function App() {
     };
   }, []);
 
+  useEffect(()=>{
+    if(!autoFastForward)return;
+    let stopped=false, running=false;
+    const check=async()=>{
+      if(running||stopped)return;
+      running=true;
+      try {
+        for(const repo of localRepositories.filter(isLocal)) {
+          if(stopped)break;
+          try {
+            const updated=await api.autoFastForward(repo.id);
+            if(updated.length&&!stopped){const fresh=await api.refresh(repo.id);setRepositories(current=>current.map(item=>item.id===fresh.id?fresh:item));}
+          }catch(error){console.warn(`Automatic fast-forward for ${repo.displayName}:`,error);}
+        }
+      }catch(error){console.warn('Automatic fast-forward:',error);}finally{running=false;}
+    };
+    void check();const timer=window.setInterval(()=>void check(),15000);
+    window.addEventListener('focus',check);
+    return()=>{stopped=true;window.clearInterval(timer);window.removeEventListener('focus',check);};
+  },[autoFastForward,localRepositories]);
   const owners = [...new Set(repositories.map(repositoryOwner))].sort((a, b) => a.localeCompare(b));
   const ownerOptions = [...new Set([...owners, ...listFilters.owners])].sort((a, b) => a.localeCompare(b));
   const selectedOwners = listFilters.ownersExplicit || listFilters.owners.length ? listFilters.owners : ownerOptions;
@@ -416,7 +438,7 @@ export function App() {
         <button className={showAgents ? "active" : ""} onClick={() => { setShowAgents(true); setShowIdentities(false); setShowAutomation(false); }}><Bell /><span className="nav-label">Agents</span></button>
         <button className={showAutomation ? "active" : ""} onClick={() => { setAutomationDraft(undefined); setShowAutomation(true); setShowAgents(false); setShowIdentities(false); }}><Clock3 /><span className="nav-label">Automation</span></button>
       </nav>
-      <div className="aside-bottom">{conversationStorageError&&<p className="config-error" role="alert">{conversationStorageError}</p>}<button onClick={() => { setShowShortcuts(open => !open); }}><Settings />Keyboard shortcuts</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
+      <div className="aside-bottom"><label className="auto-fast-forward-setting" title="Fast-forward branches from their configured upstream when no agents are active and worktrees are clean. Diverged branches are left unchanged."><input type="checkbox" checked={autoFastForward} onChange={event=>setAutoFastForward(event.target.checked)}/>Auto fast-forward</label>{conversationStorageError&&<p className="config-error" role="alert">{conversationStorageError}</p>}<button onClick={() => { setShowShortcuts(open => !open); }}><Settings />Keyboard shortcuts</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
     </aside>
 
     <main style={{ "--pane-top": `${paneSplit}fr`, "--pane-bottom": `${100 - paneSplit}fr` } as React.CSSProperties}>

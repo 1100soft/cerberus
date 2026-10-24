@@ -222,6 +222,7 @@ fn messages(value: &Value) -> Vec<Message> {
                 .filter(|s| !s.is_empty())
             {
                 output.push(Message {
+                    created_at:crate::codex::message_timestamp(&item["timestamp"]),
                     id: format!("{}:user", string(&item["uuid"])),
                     role: "user".into(),
                     text: text.into(), edits:Vec::new(),
@@ -240,6 +241,7 @@ fn messages(value: &Value) -> Vec<Message> {
                     .filter(|s| !s.is_empty())
                 {
                     output.push(Message {
+                    created_at:crate::codex::message_timestamp(&item["timestamp"]),
                         id: format!("{}:assistant:{index}", string(&item["uuid"])),
                         role: "assistant".into(),
                         text: text.into(), edits:Vec::new(),
@@ -267,6 +269,7 @@ fn messages(value: &Value) -> Vec<Message> {
         };
         if !text.is_empty() {
             output.push(Message {
+                    created_at:crate::codex::message_timestamp(&item["timestamp"]),
                 id: string(&item["uuid"]),
                 role: role.into(),
                 text, edits:Vec::new(),
