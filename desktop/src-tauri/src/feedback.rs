@@ -896,18 +896,45 @@ fn poll(
     events.truncate(50);
     Ok(serde_json::json!(events))
 }
+fn available_folders(s: &mut Session) -> Result<Vec<String>, String> {
+    let names = s
+        .list(None, Some("*"))
+        .map_err(|_| "Cannot list mail folders")?;
+    Ok(names
+        .iter()
+        .filter(|name| {
+            !name
+                .attributes()
+                .contains(&imap::types::NameAttribute::NoSelect)
+        })
+        .map(|name| display_folder(name.name()))
+        .collect())
+}
 fn mailbox_status(s: &mut Session, inbox: &str) -> Result<serde_json::Value, String> {
     folder(inbox)?;
-    let mailbox = s.examine(wire_folder(inbox)).map_err(|_| {
-        "Cannot access the feedback folder. Check its name and mailbox permissions."
-    })?;
+    let mailbox = match s.examine(wire_folder(inbox)) {
+        Ok(mailbox) => mailbox,
+        Err(_) => {
+            if let Ok(names) = available_folders(s) {
+                if !names.iter().any(|name| name == inbox) {
+                    let proton = format!("Folders/{inbox}");
+                    if names.contains(&proton) {
+                        return Err(format!("Folder “{inbox}” is exposed by the server as “{proton}”. Select that folder in mailbox settings and save."));
+                    }
+                    return Err(format!("Folder “{inbox}” was not found. Select its full IMAP name in mailbox settings. Available folders: {}", names.iter().take(12).cloned().collect::<Vec<_>>().join(", ")));
+                }
+            }
+            return Err(format!("Cannot open feedback folder “{inbox}”. The connection succeeded; check this folder’s access permissions."));
+        }
+    };
     Ok(serde_json::json!({"connected":true,"count":mailbox.exists}))
 }
+
 pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json::Value, String> {
     let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
     request.scope = id.into();
     let mut c = config(root, id)?
-        .filter(|c| c.enabled || request.action == "test")
+        .filter(|c| c.enabled || matches!(request.action.as_str(), "test" | "folders"))
         .ok_or("No enabled feedback mailbox. Configure Feedback for this repository.")?;
     let lock_path = path(root, id)?.with_extension("lock");
     let process_lock = fs::OpenOptions::new()
@@ -933,18 +960,7 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
         };
         match request.action.as_str() {
             "test" | "status" => mailbox_status(&mut s, &c.inbox),
-            "folders" => {
-                let names = s
-                    .list(None, Some("*"))
-                    .map_err(|_| "Cannot list mail folders")?;
-                Ok(serde_json::json!(names
-                    .iter()
-                    .filter(|n| !n
-                        .attributes()
-                        .contains(&imap::types::NameAttribute::NoSelect))
-                    .map(|n| display_folder(n.name()))
-                    .collect::<Vec<_>>()))
-            }
+            "folders" => Ok(serde_json::json!(available_folders(&mut s)?)),
             "create" => {
                 folder(&request.destination)?;
                 ensure(&mut s, &request.destination)?;
@@ -1313,7 +1329,7 @@ mod wire_tests {
                 let mut line = String::new();
                 io.read_line(&mut line).unwrap();
                 assert!(
-                    line.contains(needle),
+                    line.contains(needle.trim_end_matches("_FAIL")),
                     "Expected {needle}; got command {}",
                     line.split_whitespace()
                         .take(3)
@@ -1339,7 +1355,17 @@ mod wire_tests {
                     io.read_line(&mut ending).unwrap();
                 }
                 io.get_mut()
-                    .write_all(format!("{response}{tag} OK done\r\n").as_bytes())
+                    .write_all(
+                        format!(
+                            "{response}{tag} {}\r\n",
+                            if needle.ends_with("_FAIL") {
+                                "NO missing folder"
+                            } else {
+                                "OK done"
+                            }
+                        )
+                        .as_bytes(),
+                    )
                     .unwrap();
                 io.get_mut().flush().unwrap();
             }
@@ -1430,6 +1456,21 @@ mod wire_tests {
             .unwrap()
             .certificate_path
             .is_empty());
+    }
+    #[test]
+    fn missing_folder_reports_actual_server_namespace() {
+        let folders = "* LIST (\\Noselect) \"/\" \"Folders\"\r\n* LIST () \"/\" \"INBOX\"\r\n* LIST () \"/\" \"Folders/Reports\"\r\n";
+        let (root, port, server) = fixture(vec![
+            ("EXAMINE_FAIL", String::new()),
+            ("LIST", folders.into()),
+        ]);
+        let c = config_for(root.path(), port);
+        let mut session = connect(&c, "fixture-secret").unwrap();
+        let error = mailbox_status(&mut session, "Reports").unwrap_err();
+        assert!(error.contains("Folders/Reports"), "{error}");
+        assert!(!error.contains("permissions"), "{error}");
+        session.logout().unwrap();
+        server.join().unwrap();
     }
     #[test]
     fn mailbox_health_counts_all_remaining_mail_without_reading_it() {

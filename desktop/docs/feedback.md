@@ -37,12 +37,12 @@ immediately because their settings can vary. Only the selected provider's help a
 official setup links appear. For an unlisted provider, request IMAP/SMTP settings
 from its administrator or documentation. Importing a public PEM certificate can trust a
 Bridge/custom server without disabling hostname/certificate checks.
-Use **Import certificate** (or **Replace certificate**) to choose the public PEM
+Use **Import** beside Certificate to choose or replace the public PEM
 certificate. Clicking **Save** copies it into Cerberus's app data, separately for
 this repository; you can then move or delete the original export. Existing external
 certificate paths are also imported on save. The selected certificate is applied
 only when saving; canceling leaves the previous configuration unchanged.
-**Remove certificate** stops using it after Save. Private keys and files containing
+The trash icon removes the selected certificate after Save. Private keys and files containing
 private keys are rejected, and only the public certificate is copied. For Proton,
 use Bridge's Settings → Advanced settings → Export TLS certificates and select the
 certificate rather than the private key. Replace it if Bridge regenerates it.
@@ -67,8 +67,13 @@ ask agents to copy private correspondence into responses, files or handoffs.
 Use folders such as `Feedback/New`, `Feedback/Needs information`,
 `Feedback/Ready`, `Feedback/In progress` and `Feedback/Resolved`. Cerberus lists
 existing selectable folders and can create folders. Folder names support Unicode.
-Folder hierarchy separators are server-defined; enter paths as your mail client
-shows them. Folder state applies to individual messages in this first version;
+Folder hierarchy separators are server-defined. **Save and test** discovers the
+server's selectable IMAP folders and offers a Default feedback folder selector.
+Proton custom folders use full names such as `Folders/Reports`, while labels use
+`Labels/Reports`. For Proton, setup corrects a short custom-folder name only when
+that exact `Folders/` path is confirmed by the server; it preserves an exact
+existing name and never substitutes a label. Missing-folder errors include the
+actual server name when available. Folder state applies to individual messages in this first version;
 there is no automatic conversation-wide move or reopening rule yet. New customer
 replies can trigger through the inbox independently of their earlier messages.
 
