@@ -1195,3 +1195,21 @@ input[type="number"] { text-align: right; }
 .handoff-trail, .handoff-edge { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
 .handoff-trail { flex: 0 0 auto; padding: 5px 10px; font-size: 11px; border-bottom: 1px solid var(--color-34303e); max-height: 25%; overflow: auto; overflow-wrap: anywhere; }
 .handoff-trail button { font-size: inherit; padding: 2px 4px; }
+
+.feedback-page { grid-row: 1 / -1; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: 12px; gap: 8px; }
+.feedback-page > header, .feedback-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.feedback-page h2 { display: flex; align-items: center; gap: 8px; margin: 0; }
+.feedback-workspace { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr); flex: 1; min-height: 0; min-width: 0; gap: 10px; }
+.feedback-list, .feedback-reader { min-height: 0; min-width: 0; overflow: auto; overflow-wrap: anywhere; }
+.feedback-list > button { display: flex; flex-direction: column; align-items: stretch; width: 100%; text-align: left; white-space: normal; gap: 4px; margin-bottom: 5px; }
+.feedback-list > button[aria-pressed="true"] { background: var(--color-34303e); }
+.feedback-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.feedback-reader textarea { width: 100%; min-height: 90px; resize: vertical; }
+.feedback-settings { width: min(760px, calc(100vw - 24px)); }
+.feedback-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 8px; margin: 8px 0; }
+.feedback-fields label, .feedback-fields fieldset { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+.feedback-fields input { width: 100%; min-width: 0; }
+@container (max-width: 520px) { .feedback-workspace { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(80px,1fr) minmax(0,2fr); } }
+.feedback-page { container-type: inline-size; }
+.shell > main:has(.feedback-page) { height: 100%; margin: 0; padding: 60px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
+.feedback-page { flex: 1; height: 100%; padding: 0; }

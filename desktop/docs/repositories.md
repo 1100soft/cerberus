@@ -138,3 +138,13 @@ removes its associated commit records.
 Retries retain the worktree they need but record newly produced commits against
 the new run. Existing runs from before tracking was introduced cannot be
 reliably attributed retroactively.
+
+## Feedback mailboxes
+
+Each linked repository can have its own IMAP/SMTP mailbox. Open **Feedback** and
+choose the repository, or use **Configure feedback mailbox** in repository
+settings. Read and organize emails, save server-side reply drafts and internal
+notes, and optionally enable sending. **On feedback email** automations watch a
+folder and receive tools plus the original message reference. No hosted feedback
+service or local mail archive is required. See [Feedback](feedback.md) for setup,
+server-side receipts, privacy limits and agent/script examples.

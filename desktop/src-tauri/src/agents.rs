@@ -136,6 +136,8 @@ impl Agents {
         if prompt.trim().is_empty() || prompt.len() > 100_000 {
             return Err("Enter a task of at most 100,000 bytes".into());
         }
+        let enriched;
+        let prompt=if crate::feedback::config(root,&repo.id)?.is_some_and(|c|c.enabled){enriched=format!("{prompt}{}",crate::feedback::instructions());enriched.as_str()}else{prompt};
         let mut profile = self
             .profiles(root)?
             .into_iter()
@@ -193,6 +195,7 @@ impl Agents {
                 if let Some(model) = resume.and_then(|target| crate::agent_sessions::recorded_model(&home, &target.session_id)) { command.args(["--model", &model]); }
             }
             if let Some(run_id)=tracking_run {let env=crate::commit_provenance::environment(&root,&path,&repo.id,run_id)?;crate::commit_provenance::configure(&mut command,&env,profile.provider=="codex");}
+            let mail_env=crate::feedback::environment(root,&repo.id,mode=="analyze")?;crate::commit_provenance::configure(&mut command,&mail_env,profile.provider=="codex");
             let root = root.to_path_buf();
             let template = crate::agent_sessions::SessionRecord {session_id:String::new(), provider:profile.provider.clone(), profile_id:profile.id.clone(), repository:path.clone(), home:if resume.is_some() {source_home.clone()} else {home.clone()}};
             let expected = resume.map(|target| target.session_id.clone());

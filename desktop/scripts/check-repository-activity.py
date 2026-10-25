@@ -2,6 +2,8 @@
 Also verifies automatic commit-SHA relationships. Requires the existing Vite server on 127.0.0.1:3000.
 """
 import json
+import re
+from pathlib import Path
 import sys
 import urllib.request
 import gi
@@ -13,6 +15,8 @@ from gi.repository import Gtk, WebKit2, GLib
 urllib.request.urlopen('http://127.0.0.1:3000', timeout=5).close()
 script = r"""
 (async()=>{
+ for(let i=0;i<50&&getComputedStyle(document.body).margin!=='0px';i++)await new Promise(resolve=>setTimeout(resolve,40));
+ if(getComputedStyle(document.body).margin!=='0px')throw Error('Fixture stylesheet did not apply');
  const pause=()=>new Promise(r=>setTimeout(r,100));const wait=async(get)=>{for(let i=0;i<100;i++){const v=get();if(v)return v;await pause();}throw Error('UI timeout '+get.toString());};const assert=(v,m)=>{if(!v)throw Error(m);};
  const source=await(await fetch('/src/lib/conversationCache.ts')).text();const {api}=await import(source.match(/from "([^"\n]*\/api\.ts[^"\n]*)"/)[1]);
  const componentSource=await(await fetch('/src/components/ScriptRun.tsx')).text();
@@ -104,7 +108,11 @@ window=Gtk.OffscreenWindow()
 # Clipboard behavior is mocked before React mounts; never touch the host clipboard.
 manager=WebKit2.UserContentManager()
 manager.add_script(WebKit2.UserScript.new("let fixtureClipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>fixtureClipboard,writeText:async value=>{fixtureClipboard=value;}}});",WebKit2.UserContentInjectedFrames.TOP_FRAME,WebKit2.UserScriptInjectionTime.START,None,None))
-view=WebKit2.WebView.new_with_user_content_manager(manager)
+# Apply the real stylesheet without waiting for external Google font imports.
+fixture_root=Path(__file__).resolve().parents[1]/"src"
+fixture_css=(fixture_root/"palette.css").read_text()+re.sub(r"""@import\s+(?:url\([^)]*\)|"[^"]*"|'[^']*')\s*;""", "", (fixture_root/"styles.css").read_text())
+script="const fixtureStyle=document.createElement('style');fixtureStyle.textContent="+json.dumps(fixture_css)+";document.head.append(fixtureStyle);\n"+script
+view=WebKit2.WebView(web_context=WebKit2.WebContext.new_ephemeral(),user_content_manager=manager)
 view.set_size_request(*(map(int,sys.argv[1:3]) if len(sys.argv)>2 else (900,620)))
 window.add(view)
 window.show_all()

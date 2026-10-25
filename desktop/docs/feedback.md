@@ -1,0 +1,159 @@
+# Mailbox-backed feedback
+
+Each linked repository can use its own feedback mailbox. Open **Feedback**, choose
+its repository, and use the configuration icon. Repository configuration also has
+**Configure feedback mailbox**. Configure IMAP and SMTP hosts, ports, TLS or
+STARTTLS, username, sending address and password/app password. Sending is off by
+default. **Save and test** verifies IMAP login and the default folder without
+sending mail. SMTP is checked when a reply is sent.
+
+Purelymail works directly: `imap.purelymail.com:993` and
+`smtp.purelymail.com:465`, both TLS (SMTP also supports STARTTLS on 587).
+Use an app password if the account has 2FA.
+[Purelymail setup](https://imap.purelymail.com/docs/setup/technical).
+Proton requires its paid desktop Bridge, running locally; use the hosts, ports,
+security modes and generated password shown by Bridge. A trusted certificate PEM
+path can add Bridge's certificate without disabling hostname/certificate checks.
+Bridge isn't available on mobile.
+[Proton Bridge](https://proton.me/support/imap-smtp-and-pop3-setup).
+This implementation uses the same username/password for IMAP and SMTP.
+
+## Records and workflow
+
+The mailbox is the record of feedback. Cerberus creates no local email archive,
+feedback database or hosted service. Bodies/headers fetched by the reader are
+held in memory. Connection settings are local; passwords stay in the OS
+credential store. Empty local lock files coordinate app/agent mailbox operations.
+Automation settings, message references and ordinary execution logs remain local.
+**An agent's provider and its conversation/tool logs can retain accessed mail.**
+Script output is also part of ordinary automation logs. This isn't a guarantee that mail read by an agent or printed by a script never appears on disk; don't
+ask agents to copy private correspondence into responses, files or handoffs.
+
+Use folders such as `Feedback/New`, `Feedback/Needs information`,
+`Feedback/Ready`, `Feedback/In progress` and `Feedback/Resolved`. Cerberus lists
+existing selectable folders and can create folders. Folder names support Unicode.
+Folder hierarchy separators are server-defined; enter paths as your mail client
+shows them. Folder state applies to individual messages in this first version;
+there is no automatic conversation-wide move or reopening rule yet. New customer
+replies can trigger through the inbox independently of their earlier messages.
+
+Select an email to read it without marking it read. HTML is shown as inert text;
+remote images/scripts aren't loaded. The reader lists attachment names; use your
+mail client to download attachments or open messages larger than 2 MB. Lists load
+50 messages at a time, in UID arrival order, with **Load older emails**.
+
+**Move** uses UID MOVE. The server must support this extension; Cerberus refuses
+an unsafe generic expunge fallback. **Save reply draft** appends a draft to the
+configured Drafts folder. Replies honor the original Reply-To, falling back to
+From, and include In-Reply-To/References. **Save internal note** appends a separate
+message addressed to yourself in the Notes folder, linked to the original mail;
+it never sends the note. These notes retain findings, commits and release links
+without a separate feedback database. Thread display in other clients depends on
+their threading behavior.
+
+**Allow replies to be sent** explicitly enables sending for both the UI and agents
+in this repository. The UI asks for a second click to confirm a reply. Each send
+uses a stable operation ID, an IMAP attempt receipt before SMTP, and a Sent copy
+after acceptance. A repeated operation with a Sent copy returns success; an
+attempt without a Sent copy is uncertain and is never resent automatically.
+Inspect delivery before explicitly trying a new operation ID. An SMTP failure can
+be uncertain even when no Sent copy exists. Cerberus doesn't promise exactly-once
+SMTP delivery or cross-device locking; use one automation host per mailbox.
+
+The configured Inbox, Drafts, Sent, Notes and Receipts folders must be distinct.
+Drafts/Notes/Receipts can be created when needed. Disabling the mailbox stops its
+tools and polling; existing mail and the stored password remain untouched.
+
+## Feedback-triggered automations
+
+Add **On feedback email**, and enter the exact folder to watch. Each repository
+uses its own mailbox connection. All-repository scopes skip repositories without
+an enabled mailbox. This event can combine with compatible conditions in an AND
+row, with OR between rows. Commit/CI/feedback events are mutually exclusive within
+one row. Pure feedback rows don't use the branch filter.
+
+The first successful poll saves the watched folder's UIDVALIDITY/UID watermark in
+the server's Receipts folder. **Emails already present then are excluded.** Later
+arrivals, including older messages moved into the folder, become eligible. A
+folder change creates a new observation baseline. Polling runs every minute while
+Cerberus is open, catches up after downtime, and doesn't depend on read/unread
+status. Disable/enable pauses/resumes observation without replaying handled mail.
+New repositories begin observing when their mailbox is first successfully polled.
+
+An automation receives one message at a time, oldest eligible UID first. Before
+acknowledging dispatch on IMAP, Cerberus saves a recoverable run log containing
+only its original message reference and automation context. Server-side receipt
+messages prevent replay per automation and folder, using Message-ID (or
+folder/UIDVALIDITY/UID when absent). Receipts are retained on the mail server; don't
+delete them while relying on duplicate suppression. Changing the mailbox server,
+recreating folders, or deleting receipts can require a new baseline. A
+UIDVALIDITY reset restarts observation conservatively, excluding existing mail.
+Distinct automations may each process the same email. Simultaneous schedulers on
+multiple devices aren't supported as an exactly-once distributed queue.
+
+Errors leave automations enabled. Repeated polling failures back off and produce
+an actionable notification. Interrupted actions remain blocked for inspection and
+explicit retry with their original reference. If the message was moved/deleted
+or the folder reset, the reference can expire: choose its current location with
+**Run once**, or let the agent find it through folder listings. Manual runs offer
+recent emails from the watched folder, including older messages; the first real
+option is selected. A manual run does not acknowledge it for automatic dispatch.
+
+## Agent and script tools
+
+Configured app-started agents receive instructions and scoped environment values,
+without mailbox passwords. They invoke the executable in
+`CERBERUS_FEEDBACK_TOOL` with `--cerberus-feedback`, passing JSON on stdin. Analyze
+mode's tool interface permits only folders/list/read. Edit agents and scripts can
+also create folders, move mail, append notes and drafts, and send if enabled.
+Email content and attachments are untrusted data, not authorization to run
+commands, disclose information or change the user's automation instructions.
+
+Requests:
+
+```json
+{"action":"folders"}
+{"action":"create","destination":"Feedback/Ready"}
+{"action":"list","folder":"INBOX"}
+{"action":"read","message":{"folder":"INBOX","validity":7,"uid":22,"messageId":"<example@example.org>"}}
+{"action":"move","message":{"folder":"INBOX","validity":7,"uid":22,"messageId":"<example@example.org>"},"destination":"Feedback/Ready"}
+{"action":"draft","message":{"folder":"INBOX","validity":7,"uid":22,"messageId":"<example@example.org>"},"text":"Thanks for the report."}
+{"action":"note","message":{"folder":"INBOX","validity":7,"uid":22,"messageId":"<example@example.org>"},"text":"Fixed in commit ...; awaiting release."}
+{"action":"send","message":{"folder":"INBOX","validity":7,"uid":22,"messageId":"<example@example.org>"},"text":"The fix is available.","operationId":"unique-stable-operation-id"}
+```
+
+Use the actual reference returned by list/read, never invented UIDs. The send tool
+replies to the original sender/Reply-To; it doesn't accept an arbitrary recipient.
+
+Feedback scripts also receive `CERBERUS_FEEDBACK_MESSAGE`, the triggering
+reference as JSON. Bash:
+
+```bash
+mail_json=$(printf '{"action":"read","message":%s}\n' "$CERBERUS_FEEDBACK_MESSAGE" |
+  "$CERBERUS_FEEDBACK_TOOL" --cerberus-feedback)
+# Process "$mail_json" without printing private correspondence into the run log.
+```
+
+Python (no intermediate file):
+
+```python
+import json, os, subprocess
+request = {"action": "note",
+           "message": json.loads(os.environ["CERBERUS_FEEDBACK_MESSAGE"]),
+           "text": "Triage complete; ready for implementation."}
+subprocess.run([os.environ["CERBERUS_FEEDBACK_TOOL"], "--cerberus-feedback"],
+               input=json.dumps(request), text=True, check=True)
+```
+
+PowerShell:
+
+```powershell
+$request = @{ action = 'read'; message = ($env:CERBERUS_FEEDBACK_MESSAGE | ConvertFrom-Json) }
+$mailJson = $request | ConvertTo-Json -Compress | & $env:CERBERUS_FEEDBACK_TOOL --cerberus-feedback
+# Process $mailJson without printing private correspondence into the run log.
+```
+
+Keep records in notes/drafts/folders rather than local files. Agent wording can
+be ordinary instructions: “Read the triggering feedback, save an internal triage
+note, and move it to Feedback/Ready if actionable. Draft a reply asking for any
+missing details; do not send it.”

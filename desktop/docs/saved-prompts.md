@@ -296,3 +296,16 @@ leave the path absent to skip emission. Output streaming, logs, failure notices,
 and the 15-minute execution limit apply to every runtime. Native Windows/macOS
 runtime execution requires validation on those platforms; mobile execution is
 not provided by this feature.
+
+## Feedback email condition
+
+**On feedback email** watches a configurable IMAP folder in each repository's own
+mailbox. The first successful observation excludes existing messages; later
+arrivals and messages moved into that folder are eligible once per automation.
+Server-side email receipts track dispatch across restarts. Agent actions receive
+mail tools and an original message reference; scripts also receive
+`CERBERUS_FEEDBACK_MESSAGE`. **Run once** offers recent emails with a real default
+selection. Errors never disable the automation; interrupted feedback actions
+retain their reference for retry. Sending requires explicit mailbox permission;
+drafts and internal notes are always saved on IMAP without sending. See
+[Feedback](feedback.md) for configuration, examples and privacy/delivery limits.

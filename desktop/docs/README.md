@@ -4,6 +4,7 @@
 - [Local operations and verification](agent-operations.md)
 - [Repository creation and GitHub accounts](repositories.md)
 - [Automation](saved-prompts.md)
+- [Feedback mailboxes and email tools](feedback.md)
 - [Current handoff](../../HANDOFF.md)
 - [Desktop UI conventions](../AGENTS.md)
 

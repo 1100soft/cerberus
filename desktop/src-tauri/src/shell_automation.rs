@@ -43,7 +43,7 @@ pub fn run_stream_with_runtime(repository:&Path,script:&str,channel:Option<Chann
             }
         }
     }
-    if context.contains_key("CERBERUS_TRACK_RECORDS") {for (key,value) in context {if key.starts_with("CERBERUS_TRACK_")||key=="PATH"||key=="GIT_CONFIG_COUNT"||key.starts_with("GIT_CONFIG_KEY_")||key.starts_with("GIT_CONFIG_VALUE_"){command.env(key,value);}}}
+    if context.contains_key("CERBERUS_TRACK_RECORDS") {for (key,value) in context {if key.starts_with("CERBERUS_TRACK_")||key.starts_with("CERBERUS_FEEDBACK_")||key=="PATH"||key=="GIT_CONFIG_COUNT"||key.starts_with("GIT_CONFIG_KEY_")||key.starts_with("GIT_CONFIG_VALUE_"){command.env(key,value);}}}
     command.env("CERBERUS_REPOSITORY_PATH",repository);
     if runtime.preset=="python"{
         let mut paths=vec![repository.to_path_buf()];

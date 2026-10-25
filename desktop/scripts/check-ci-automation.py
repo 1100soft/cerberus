@@ -1,5 +1,7 @@
 """Exercise GitHub CI automation dispatch in WebKitGTK. Requires Vite on port 3000."""
 import json
+import re
+from pathlib import Path
 import sys
 import urllib.request
 import gi
@@ -10,6 +12,8 @@ from gi.repository import Gtk, WebKit2, GLib
 urllib.request.urlopen('http://127.0.0.1:3000', timeout=5).close()
 script = r"""
 (async()=>{
+ for(let i=0;i<50&&getComputedStyle(document.body).margin!=='0px';i++)await new Promise(resolve=>setTimeout(resolve,40));
+ if(getComputedStyle(document.body).margin!=='0px')throw Error('Fixture stylesheet did not apply');
  window.__ciStage='mount';
  const pause=(ms=40)=>new Promise(resolve=>setTimeout(resolve,ms));
  const wait=async(get)=>{for(let i=0;i<150;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for CI automation: '+document.querySelector('[aria-label="Add condition"]')?.outerHTML+' / dialogs '+document.querySelectorAll('[role="dialog"]').length);};
@@ -33,7 +37,8 @@ script = r"""
  const source=await (await fetch('/src/lib/conversationCache.ts')).text();
  const apiPath=source.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];
  const {api}=await import(apiPath);
- const automation=await import(apiPath.replace('/lib/api.ts','/lib/savedPrompts.ts'));
+ const panelSource=await(await fetch('/src/components/SavedPromptsPanel.tsx')).text();
+ const automation=await import(panelSource.match(/from ["']([^"'\n]*\/savedPrompts\.ts[^"'\n]*)["']/)[1]);
  for(const job of automation.savedPrompts())automation.removePrompt(job.id);
  const repos=['1','2'].map(id=>({id,displayName:'repo-'+id,localPresent:true,localPath:'/virtual/'+id,canonicalRemote:'https://github.com/example/repo-'+id,identity:{id:'github',providerUsername:'example'}}));
  api.repositories=async()=>repos;
@@ -176,7 +181,12 @@ script = r"""
 })().catch(error=>window.__ciCheck={passed:false,error:String(error),stage:window.__ciStage});
 """
 window = Gtk.OffscreenWindow()
-view = WebKit2.WebView()
+manager = WebKit2.UserContentManager()
+# Apply the real stylesheet without waiting for external Google font imports.
+fixture_root=Path(__file__).resolve().parents[1]/"src"
+fixture_css=(fixture_root/"palette.css").read_text()+re.sub(r"""@import\s+(?:url\([^)]*\)|"[^"]*"|'[^']*')\s*;""", "", (fixture_root/"styles.css").read_text())
+script="const fixtureStyle=document.createElement('style');fixtureStyle.textContent="+json.dumps(fixture_css)+";document.head.append(fixtureStyle);\n"+script
+view = WebKit2.WebView(web_context=WebKit2.WebContext.new_ephemeral(),user_content_manager=manager)
 view.set_size_request(900,620)
 window.add(view)
 window.show_all()
