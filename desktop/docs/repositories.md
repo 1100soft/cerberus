@@ -143,7 +143,9 @@ reliably attributed retroactively.
 
 Each linked repository can have its own IMAP/SMTP mailbox. Open **Feedback** and
 choose the repository, or use **Configure feedback mailbox** in repository
-settings. Read and organize emails, save server-side reply drafts and internal
+settings. Connection details load the server folder tree; select destinations or
+create folders there. Save automatically enables and tests the mailbox. Read and
+organize emails, save server-side reply drafts and internal
 notes, and optionally enable sending. **On feedback email** automations watch a
 folder and receive tools plus the original message reference. No hosted feedback
 service or local mail archive is required. See [Feedback](feedback.md) for setup,

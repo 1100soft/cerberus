@@ -201,10 +201,7 @@ pub fn documentation_url(url: &str) -> bool {
                 .any(|key| provider[*key].as_str() == Some(url))
         })
 }
-fn validate(c: &Config) -> Result<(), String> {
-    if !c.enabled {
-        return Ok(());
-    }
+fn validate_connection(c: &Config) -> Result<(), String> {
     if providers().iter().any(|provider| {
         provider["id"].as_str() == Some(c.provider.as_str()) && provider["auth"] == "oauth"
     }) {
@@ -228,6 +225,13 @@ fn validate(c: &Config) -> Result<(), String> {
             return Err("Both servers require a host, port and TLS or STARTTLS".into());
         }
     }
+    Ok(())
+}
+fn validate(c: &Config) -> Result<(), String> {
+    if !c.enabled {
+        return Ok(());
+    }
+    validate_connection(c)?;
     let folders = [&c.inbox, &c.drafts, &c.sent, &c.notes, &c.metadata];
     for name in folders {
         folder(name)?;
@@ -896,6 +900,104 @@ fn poll(
     events.truncate(50);
     Ok(serde_json::json!(events))
 }
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderNode {
+    pub path: String,
+    pub delimiter: Option<String>,
+    pub selectable: bool,
+}
+fn folder_tree(s: &mut Session) -> Result<Vec<FolderNode>, String> {
+    let names = s
+        .list(None, Some("*"))
+        .map_err(|_| "Cannot list mail folders")?;
+    Ok(names
+        .iter()
+        .map(|name| FolderNode {
+            path: display_folder(name.name()),
+            delimiter: name.delimiter().map(str::to_owned),
+            selectable: !name
+                .attributes()
+                .contains(&imap::types::NameAttribute::NoSelect),
+        })
+        .collect())
+}
+fn create_child(
+    s: &mut Session,
+    nodes: &[FolderNode],
+    parent: &str,
+    name: &str,
+) -> Result<(), String> {
+    folder(name)?;
+    let delimiter = if parent.is_empty() {
+        nodes.iter().find_map(|node| node.delimiter.as_deref())
+    } else {
+        nodes
+            .iter()
+            .find(|node| node.path == parent)
+            .ok_or("Choose an existing parent folder")?
+            .delimiter
+            .as_deref()
+    };
+    if name.trim() != name
+        || name.contains(['/', '\\'])
+        || delimiter.is_some_and(|separator| name.contains(separator))
+    {
+        return Err("Enter a folder name, not a path".into());
+    }
+    let destination = if parent.is_empty() {
+        name.to_owned()
+    } else {
+        format!(
+            "{parent}{}{name}",
+            delimiter.ok_or("This server does not support subfolders here")?
+        )
+    };
+    folder(&destination)?;
+    s.create(wire_folder(&destination))
+        .map_err(|_| "Cannot create folder here. Choose another parent or check permissions.")?;
+    Ok(())
+}
+// Discover/create folders with unsaved credentials; this never saves settings or sends mail.
+pub fn setup(
+    root: &Path,
+    id: &str,
+    c: Config,
+    secret: Option<String>,
+    parent: Option<String>,
+    name: Option<String>,
+) -> Result<Vec<FolderNode>, String> {
+    let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
+    path(root, id)?;
+    validate_connection(&c)?;
+    let secret = match secret.filter(|value| !value.is_empty()) {
+        Some(secret) => secret,
+        None => {
+            let old = config(root, id)?.ok_or("Enter the mailbox password")?;
+            if old.username != c.username
+                || old.imap_host != c.imap_host
+                || old.smtp_host != c.smtp_host
+            {
+                return Err(
+                    "Enter the new mailbox password before changing its account or servers.".into(),
+                );
+            }
+            password(id)?
+        }
+    };
+    let mut session = connect(&c, &secret)?;
+    let result = (|| {
+        let nodes = folder_tree(&mut session)?;
+        if let Some(name) = name {
+            create_child(&mut session, &nodes, parent.as_deref().unwrap_or(""), &name)?;
+            folder_tree(&mut session)
+        } else {
+            Ok(nodes)
+        }
+    })();
+    let _ = session.logout();
+    result
+}
 fn available_folders(s: &mut Session) -> Result<Vec<String>, String> {
     let names = s
         .list(None, Some("*"))
@@ -1224,6 +1326,35 @@ mod tests {
         assert!(!root.path().join("feedback-mailboxes/certificates").exists());
     }
     #[test]
+    fn unsaved_folder_discovery_never_reuses_credentials_for_another_account() {
+        let root = tempfile::tempdir().unwrap();
+        let original = Config {
+            address: "feedback@example.org".into(),
+            username: "old".into(),
+            imap_host: "imap.example.org".into(),
+            imap_port: 993,
+            imap_security: "tls".into(),
+            smtp_host: "smtp.example.org".into(),
+            smtp_port: 465,
+            smtp_security: "tls".into(),
+            ..Default::default()
+        };
+        save(root.path(), "repo", original.clone(), None).unwrap();
+        let changed = Config {
+            username: "new".into(),
+            ..original
+        };
+        let error = match setup(root.path(), "repo", changed, None, None, None) {
+            Err(error) => error,
+            Ok(_) => panic!("changed account accepted old credential"),
+        };
+        assert!(error.contains("new mailbox password"));
+        assert_eq!(
+            config(root.path(), "repo").unwrap().unwrap().username,
+            "old"
+        );
+    }
+    #[test]
     fn config_has_no_password_and_can_be_disabled_without_keyring() {
         let root = tempfile::tempdir().unwrap();
         save(root.path(), "repo", Config::default(), None).unwrap();
@@ -1456,6 +1587,60 @@ mod wire_tests {
             .unwrap()
             .certificate_path
             .is_empty());
+    }
+    #[test]
+    fn unsaved_setup_discovers_and_creates_without_persisting_credentials() {
+        let parent = "* LIST (\\Noselect) \"/\" \"Folders\"\r\n";
+        let child = format!("{parent}* LIST () \"/\" \"Folders/Reports\"\r\n");
+        let (root, port, server) = fixture(vec![
+            ("LIST", parent.into()),
+            ("CREATE \"Folders/Reports\"", String::new()),
+            ("LIST", child),
+        ]);
+        let mut c = config_for(root.path(), port);
+        c.smtp_host = "localhost".into();
+        c.smtp_port = 465;
+        c.smtp_security = "tls".into();
+        // Folder assignments may be unfinished while discovering the server.
+        c.inbox.clear();
+        c.notes.clear();
+        let nodes = setup(
+            root.path(),
+            "new-repo",
+            c,
+            Some("fixture-secret".into()),
+            Some("Folders".into()),
+            Some("Reports".into()),
+        )
+        .unwrap();
+        assert!(nodes
+            .iter()
+            .any(|node| node.path == "Folders/Reports" && node.selectable));
+        assert!(config(root.path(), "new-repo").unwrap().is_none());
+        server.join().unwrap();
+    }
+    #[test]
+    fn folder_tree_preserves_delimiters_containers_and_creates_only_child_names() {
+        let response = "* LIST (\\Noselect) \".\" \"Shared\"\r\n* LIST () \".\" \"Shared.Reports\"\r\n* LIST () NIL \"Flat\"\r\n";
+        let (root, port, server) = fixture(vec![
+            ("LIST", response.into()),
+            ("CREATE \"Shared.Follow up\"", String::new()),
+        ]);
+        let c = config_for(root.path(), port);
+        let mut session = connect(&c, "fixture-secret").unwrap();
+        let nodes = folder_tree(&mut session).unwrap();
+        assert!(!nodes[0].selectable);
+        assert_eq!(nodes[0].delimiter.as_deref(), Some("."));
+        assert!(nodes[1].selectable);
+        assert!(nodes[2].delimiter.is_none());
+        assert!(create_child(&mut session, &nodes, "Missing", "Child").is_err());
+        assert!(create_child(&mut session, &nodes, "Flat", "Child").is_err());
+        for name in ["a/b", "a.b", "a\\b", " trailing "] {
+            assert!(create_child(&mut session, &nodes, "Shared", name).is_err());
+        }
+        create_child(&mut session, &nodes, "Shared", "Follow up").unwrap();
+        session.logout().unwrap();
+        server.join().unwrap();
     }
     #[test]
     fn missing_folder_reports_actual_server_namespace() {

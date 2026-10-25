@@ -299,7 +299,9 @@ not provided by this feature.
 
 ## Feedback email condition
 
-**On feedback email** watches a configurable IMAP folder in each repository's own
+**On feedback email** uses each repository's configured feedback folder by default.
+Choose another folder or create one in the discovered mailbox tree; no folder path
+entry is needed. It watches the selected IMAP folder in each repository's own
 mailbox. The first successful observation excludes existing messages; later
 arrivals and messages moved into that folder are eligible once per automation.
 Server-side email receipts track dispatch across restarts. Agent actions receive

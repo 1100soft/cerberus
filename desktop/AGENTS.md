@@ -51,3 +51,5 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 - Local filesystem path controls must offer an OS browse dialog (file or folder as appropriate). New file-path fields use LocalFilePicker rather than requiring users to type paths. Explain whether selected files are copied into app storage or remain external references.
 
 - Keep button text minimal: use short contextual labels (for example Import) and icons for obvious secondary actions, with accessible labels/tooltips. Avoid explaining ordinary Save/import behavior in the UI.
+
+- Mailbox folder selection must discover the server hierarchy and use a tree, including nonselectable namespace parents and server delimiters. Create folders by selecting a parent and entering a leaf name; never require manual IMAP path entry. Configured mailboxes activate automatically; automation rules control processing. Use one Save action that verifies access and leaves failures visible.

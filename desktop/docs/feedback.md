@@ -4,12 +4,17 @@ Each linked repository can use its own feedback mailbox. Open **Feedback**, choo
 its repository, and use the configuration icon. Repository configuration also has
 **Configure feedback mailbox**. Configure IMAP and SMTP hosts, ports, TLS or
 STARTTLS, username, sending address and password/app password. Sending is off by
-default. **Save and test** verifies IMAP login and the default folder without
-sending mail. It is available before enabling the mailbox and does not enable it.
-SMTP is checked when a reply is sent.
+default. Folder discovery starts as connection details become available. Select
+existing folders in the tree for Feedback, Drafts, Sent, Internal notes and
+Automation receipts. Use a folder's **+** button to create a child, entering only
+its name; the server's hierarchy separator is applied automatically. Namespace
+containers appear in the tree but cannot receive mail. **Save** automatically
+enables the mailbox and tests access. Failures stay visible without disabling it.
+There is no separate mailbox enable toggle or test button; automation rules
+control processing. SMTP is checked when a reply is sent.
 
 The envelope badge in repository cards and configuration shows a checkmark after
-successful IMAP verification, or a warning for disabled, incomplete or failed setup.
+successful IMAP verification, or a warning for incomplete or failed setup.
 Hover for details. The adjacent number counts **all emails remaining in the configured
 feedback folder**, including already-read mail; move handled messages out of that
 folder to reduce the count. This is independent of automation receipts. Status and
@@ -67,15 +72,15 @@ ask agents to copy private correspondence into responses, files or handoffs.
 Use folders such as `Feedback/New`, `Feedback/Needs information`,
 `Feedback/Ready`, `Feedback/In progress` and `Feedback/Resolved`. Cerberus lists
 existing selectable folders and can create folders. Folder names support Unicode.
-Folder hierarchy separators are server-defined. **Save and test** discovers the
-server's selectable IMAP folders and offers a Default feedback folder selector.
-Proton custom folders use full names such as `Folders/Reports`, while labels use
-`Labels/Reports`. For Proton, setup corrects a short custom-folder name only when
-that exact `Folders/` path is confirmed by the server; it preserves an exact
-existing name and never substitutes a label. Missing-folder errors include the
-actual server name when available. Folder state applies to individual messages in this first version;
-there is no automatic conversation-wide move or reopening rule yet. New customer
-replies can trigger through the inbox independently of their earlier messages.
+Folder hierarchy separators are server-defined and read from IMAP LIST. Settings
+show the discovered tree before saving, including nonselectable parent containers.
+Choose a purpose, then its destination in the tree; no mailbox path entry is
+required. Folder creation is also available through the folder browser on the
+Feedback page and in automation trigger setup. Proton custom folders use full
+names such as `Folders/Reports`, while labels use `Labels/Reports`. Existing short
+Proton names are matched only against a confirmed server folder; exact names are
+preserved. A missing name remains unassigned until you select or create a folder.
+
 
 Select an email to read it without marking it read. HTML is shown as inert text;
 remote images/scripts aren't loaded. The reader lists attachment names; use your
@@ -106,9 +111,10 @@ tools and polling; existing mail and the stored password remain untouched.
 
 ## Feedback-triggered automations
 
-Add **On feedback email**, and enter the exact folder to watch. Each repository
-uses its own mailbox connection. All-repository scopes skip repositories without
-an enabled mailbox. This event can combine with compatible conditions in an AND
+Add **On feedback email**. **Repository default** uses each repository's configured
+feedback folder, or choose a specific folder from a mailbox tree. Each repository
+uses its own connection. All-repository scopes skip repositories without a
+configured mailbox. This event can combine with compatible conditions in an AND
 row, with OR between rows. Commit/CI/feedback events are mutually exclusive within
 one row. Pure feedback rows don't use the branch filter.
 

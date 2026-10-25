@@ -1226,3 +1226,24 @@ input[type="number"] { text-align: right; }
 .local-file-picker {min-width:0}
 .local-file-picker input {flex:1;min-width:0;cursor:pointer}
 .local-file-picker button {flex-shrink:0}
+.mail-folder-browser {min-width:0;min-height:0}
+.mail-folder-tree {overflow:auto;max-height:240px;min-height:60px;border:1px solid var(--border-control);border-radius:6px;padding:4px}
+.mail-folder-row {display:flex;align-items:center;gap:3px;min-width:0}
+.mail-folder-row > button {display:inline-flex;align-items:center;gap:5px;padding:4px;border:0;background:transparent}
+.mail-folder-row .mail-folder-name {flex:1;min-width:0;text-align:left}
+.mail-folder-name span {overflow-wrap:anywhere}
+.mail-folder-spacer {width:21px;flex-shrink:0}
+[role=treeitem][aria-selected=true] > .mail-folder-row {background:var(--surface-control);border-radius:4px}
+.mail-folder-create {display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px}
+.mail-folder-create small {width:100%;overflow-wrap:anywhere}
+.mail-folder-create input {flex:1;min-width:0}
+.mailbox-folder-assignments {display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.mailbox-folder-assignments button {flex:1;min-width:100px;text-align:left}
+.mailbox-folder-assignments small {display:block;overflow-wrap:anywhere}
+.mailbox-folder-assignments button[aria-pressed=true] {border-color:var(--status-success)}
+.feedback-folder-browser {flex-basis:100%;min-width:0}
+
+.automation-feedback-parameter {flex-direction:column;align-items:stretch;gap:8px}
+.automation-condition-content:has(.feedback-trigger-folders) {overflow:auto;min-height:0}
+.feedback-trigger-folders {min-width:0;display:flex;flex-direction:column;gap:6px}
+.feedback-trigger-folders > small {overflow-wrap:anywhere}
