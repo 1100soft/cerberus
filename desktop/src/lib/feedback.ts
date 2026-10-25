@@ -1,9 +1,9 @@
 import {invoke} from '@tauri-apps/api/core';
 import {inTauri} from './api';
-export type MailboxConfig={enabled:boolean;address:string;username:string;imapHost:string;imapPort:number;imapSecurity:string;smtpHost:string;smtpPort:number;smtpSecurity:string;inbox:string;drafts:string;sent:string;notes:string;metadata:string;certificatePath:string;allowSend:boolean};
+export type MailboxConfig={provider?:string;enabled:boolean;address:string;username:string;imapHost:string;imapPort:number;imapSecurity:string;smtpHost:string;smtpPort:number;smtpSecurity:string;inbox:string;drafts:string;sent:string;notes:string;metadata:string;certificatePath:string;allowSend:boolean};
 export type MailRef={folder:string;validity:number;uid:number;messageId:string};
 export type FeedbackMail=MailRef&{subject:string;from:string;replyTo:string;date:string;timestamp:number;body:string;attachments:string[]};
-export const defaultMailbox=():MailboxConfig=>({enabled:false,address:'',username:'',imapHost:'imap.purelymail.com',imapPort:993,imapSecurity:'tls',smtpHost:'smtp.purelymail.com',smtpPort:465,smtpSecurity:'tls',inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Cerberus Notes',metadata:'Cerberus Receipts',certificatePath:'',allowSend:false});
+export const defaultMailbox=():MailboxConfig=>({provider:'custom',enabled:false,address:'',username:'',imapHost:'',imapPort:993,imapSecurity:'tls',smtpHost:'',smtpPort:465,smtpSecurity:'tls',inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Cerberus Notes',metadata:'Cerberus Receipts',certificatePath:'',allowSend:false});
 // Preview data stays in memory. Real mail never goes into localStorage or a DB.
 const preview=new Map<string,MailboxConfig>();
 export const feedback={

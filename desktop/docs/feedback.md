@@ -7,16 +7,32 @@ STARTTLS, username, sending address and password/app password. Sending is off by
 default. **Save and test** verifies IMAP login and the default folder without
 sending mail. SMTP is checked when a reply is sent.
 
-Purelymail works directly: `imap.purelymail.com:993` and
-`smtp.purelymail.com:465`, both TLS (SMTP also supports STARTTLS on 587).
-Use an app password if the account has 2FA.
-[Purelymail setup](https://imap.purelymail.com/docs/setup/technical).
-Proton requires its paid desktop Bridge, running locally; use the hosts, ports,
-security modes and generated password shown by Bridge. A trusted certificate PEM
-path can add Bridge's certificate without disabling hostname/certificate checks.
-Bridge isn't available on mobile.
-[Proton Bridge](https://proton.me/support/imap-smtp-and-pop3-setup).
-This implementation uses the same username/password for IMAP and SMTP.
+Choose an **Email provider** to fill connection settings automatically. The default
+is **Other IMAP server**, with empty host fields; no provider is assumed.
+
+| Provider | Connection and account requirements |
+| --- | --- |
+| [Gmail](https://support.google.com/mail/answer/7126229) | Standard Google servers; use a Google app password where permitted by the account's security policy. |
+| [iCloud Mail](https://support.apple.com/102525) | Standard Apple servers and an app-specific password. |
+| [Yahoo Mail](https://help.yahoo.com/kb/SLN4075.html) | Standard Yahoo servers and an app password. |
+| [Fastmail](https://www.fastmail.help/hc/en-us/articles/1500000278342-Server-names-and-ports) | Standard Fastmail servers and an app password; the plan must include IMAP. |
+| [Zoho Mail](https://www.zoho.com/mail/help/imap-access.html) | Separate personal and organization presets. Check the account's server configuration for regional/plan-specific hosts and enable IMAP. |
+| [Purelymail](https://purelymail.com/docs/setup/technical) | Standard Purelymail servers; use an app password when 2FA is enabled. |
+| [Proton Mail Bridge](https://proton.me/support/imap-smtp-and-pop3-setup) | Requires paid desktop Bridge running locally. Confirm the instance's hosts, ports and generated credentials. Bridge is unavailable on mobile. |
+| [Outlook.com](https://support.microsoft.com/en-US/Outlook/pop-imap-and-smtp-settings-for-outlook-com) / [Microsoft 365](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/pop3-and-imap4/pop3-and-imap4) | Server presets are included, but connection is unavailable until Cerberus supports Microsoft OAuth. Password login is deliberately disabled for these presets. |
+
+Standard presets show a compact server summary. **Customize connection settings**
+reveals host, port and security overrides. Proton Bridge and Zoho show these fields
+immediately because their settings can vary. Only the selected provider's help and
+official setup links appear. For an unlisted provider, request IMAP/SMTP settings
+from its administrator or documentation. A trusted certificate PEM path can add a
+Bridge/custom server certificate without disabling hostname/certificate checks.
+
+Existing custom endpoints are preserved when loading settings. Choosing another
+provider explicitly applies its defaults. Changing an existing mailbox's username
+or server requires entering its password again, so the previous saved secret is
+never silently reused with a different account/server. This implementation uses
+the same username/password for IMAP and SMTP. Sending remains opt-in.
 
 ## Records and workflow
 

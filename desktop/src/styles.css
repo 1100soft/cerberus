@@ -1213,3 +1213,5 @@ input[type="number"] { text-align: right; }
 .feedback-page { container-type: inline-size; }
 .shell > main:has(.feedback-page) { height: 100%; margin: 0; padding: 60px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
 .feedback-page { flex: 1; height: 100%; padding: 0; }
+.feedback-connection-summary { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; overflow-wrap: anywhere; margin: 8px 0; }
+.feedback-provider-help a { margin-inline-end: 8px; }

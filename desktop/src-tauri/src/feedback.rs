@@ -25,6 +25,7 @@ type Session = imap::Session<native_tls::TlsStream<TcpStream>>;
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
+    pub provider: String,
     pub enabled: bool,
     pub address: String,
     pub username: String,
@@ -185,9 +186,29 @@ fn credential(id: &str) -> Result<keyring::Entry, String> {
 fn password(id: &str) -> Result<String, String> {
     credential(id)?.get_password().map_err(|e|match e {keyring::Error::NoEntry=>"Feedback mailbox password is missing. Open its settings and save the password again.".into(),_=>"Feedback credential storage is unavailable. Unlock or repair the system credential store before reconnecting.".into()})
 }
+fn providers() -> &'static Vec<serde_json::Value> {
+    static PROVIDERS: std::sync::OnceLock<Vec<serde_json::Value>> = std::sync::OnceLock::new();
+    PROVIDERS.get_or_init(|| {
+        serde_json::from_str(include_str!("../../src/lib/mailProviders.json"))
+            .expect("valid built-in mail provider catalog")
+    })
+}
+pub fn documentation_url(url: &str) -> bool {
+    !url.is_empty()
+        && providers().iter().any(|provider| {
+            ["documentation", "passwordDocumentation"]
+                .iter()
+                .any(|key| provider[*key].as_str() == Some(url))
+        })
+}
 fn validate(c: &Config) -> Result<(), String> {
     if !c.enabled {
         return Ok(());
+    }
+    if providers().iter().any(|provider| {
+        provider["id"].as_str() == Some(c.provider.as_str()) && provider["auth"] == "oauth"
+    }) {
+        return Err("This provider requires OAuth mailbox sign-in, which Cerberus does not support yet. Password login is unavailable.".into());
     }
     c.address
         .parse::<lettre::message::Mailbox>()
@@ -225,6 +246,18 @@ fn validate(c: &Config) -> Result<(), String> {
 pub fn save(root: &Path, id: &str, c: Config, secret: Option<String>) -> Result<(), String> {
     let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
     validate(&c)?;
+    // Never send a previously stored mailbox password to a newly selected server/account.
+    if secret.as_ref().is_none_or(|value| value.is_empty())
+        && config(root, id)?.is_some_and(|old| {
+            old.username != c.username
+                || old.imap_host != c.imap_host
+                || old.smtp_host != c.smtp_host
+        })
+    {
+        return Err(
+            "Enter the new mailbox password before changing its account or servers.".into(),
+        );
+    }
     let p = path(root, id)?;
     if let Some(secret) = secret.filter(|s| !s.is_empty()) {
         let entry = credential(id)?;
@@ -1052,6 +1085,40 @@ mod tests {
         assert_eq!(m.reference.message_id, "<a@b>");
         assert_eq!(m.body, "hello\n");
         assert_eq!(m.timestamp, 12);
+    }
+    #[test]
+    fn provider_documentation_is_exact_and_oauth_cannot_fall_back_to_password() {
+        let oauth = Config {
+            provider: "outlook".into(),
+            enabled: true,
+            ..Default::default()
+        };
+        assert!(validate(&oauth).unwrap_err().contains("requires OAuth"));
+        for provider in providers() {
+            for key in ["documentation", "passwordDocumentation"] {
+                if let Some(url) = provider[key].as_str().filter(|url| !url.is_empty()) {
+                    assert!(documentation_url(url));
+                    assert!(!documentation_url(&format!(
+                        "{url}?redirect=https://example.org"
+                    )));
+                }
+            }
+        }
+        assert!(!documentation_url(""));
+        assert!(!documentation_url("https://example.org"));
+    }
+    #[test]
+    fn switching_servers_never_reuses_the_previous_password() {
+        let root = tempfile::tempdir().unwrap();
+        save(root.path(), "repo", Config::default(), None).unwrap();
+        let updated = Config {
+            imap_host: "another.example.org".into(),
+            ..Default::default()
+        };
+        assert!(save(root.path(), "repo", updated, None)
+            .unwrap_err()
+            .contains("new mailbox password"));
+        assert_eq!(config(root.path(), "repo").unwrap().unwrap().imap_host, "");
     }
     #[test]
     fn config_has_no_password_and_can_be_disabled_without_keyring() {

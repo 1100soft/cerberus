@@ -858,7 +858,7 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 fn permitted_external_url(url:&str)->bool{
-    permitted_github_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
+    permitted_github_url(url) || feedback::documentation_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
 }
 
 #[cfg(test)]
