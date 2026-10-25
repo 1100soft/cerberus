@@ -1215,3 +1215,10 @@ input[type="number"] { text-align: right; }
 .feedback-page { flex: 1; height: 100%; padding: 0; }
 .feedback-connection-summary { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; overflow-wrap: anywhere; margin: 8px 0; }
 .feedback-provider-help a { margin-inline-end: 8px; }
+
+.feedback-mailbox-badge {display:inline-flex;align-items:center;gap:4px;font-size:11px;flex-shrink:0;vertical-align:middle}
+.feedback-mailbox-badge.ready {color:var(--status-success)}
+.feedback-mailbox-badge.warning {color:var(--status-warning)}
+.feedback-mailbox-icon {position:relative;display:inline-flex;width:20px;height:20px;align-items:center}
+.feedback-mailbox-icon > svg:last-child {position:absolute;right:0;bottom:0;background:var(--color-1e1c24);border-radius:2px}
+.feedback-test-help {font-size:12px}

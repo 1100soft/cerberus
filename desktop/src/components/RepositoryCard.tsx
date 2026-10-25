@@ -1,3 +1,4 @@
+import {FeedbackMailboxBadge} from './FeedbackMailboxBadge';
 import { assignedExternalIdentity, externalProviders, useExternalIdentities } from '../lib/externalIdentities';
 import { RepositoryAccounts } from './RepositoryAccounts';
 import { ChatgptAccountBadge } from './ChatgptAccountBadge';
@@ -64,6 +65,7 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
       {assigned && <ChatgptAccountBadge account={chatgptAccount} assignedId={assigned} inherited={!Object.hasOwn(chatgpt.settings.repositories,accountKey)} />}
       {externalProviders.map(({id:provider})=>{const id=assignedExternalIdentity(external.settings,provider,accountKey);const account=external.identities.find(item=>item.id===id);return account?<ProviderIdentityBadge key={provider} provider={provider} id={account.id} label={account.label}/>:null;})}
       <strong className="row-name" title={repo.displayName}>{repo.displayName}</strong>
+      <FeedbackMailboxBadge repositoryId={repo.id}/>
       {agentWorking && <span title="Agent working"><LoaderCircle className="conversation-working repository-working" aria-label="Agent working"/></span>}
       {automationWorking && <span title="Automation running"><Clock3 className="conversation-working automation-working" aria-label="Automation running"/></span>}
     </div>

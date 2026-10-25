@@ -836,11 +836,18 @@ fn poll(
     events.truncate(50);
     Ok(serde_json::json!(events))
 }
+fn mailbox_status(s: &mut Session, inbox: &str) -> Result<serde_json::Value, String> {
+    folder(inbox)?;
+    let mailbox = s.examine(wire_folder(inbox)).map_err(|_| {
+        "Cannot access the feedback folder. Check its name and mailbox permissions."
+    })?;
+    Ok(serde_json::json!({"connected":true,"count":mailbox.exists}))
+}
 pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json::Value, String> {
     let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
     request.scope = id.into();
-    let c = config(root, id)?
-        .filter(|c| c.enabled)
+    let mut c = config(root, id)?
+        .filter(|c| c.enabled || request.action == "test")
         .ok_or("No enabled feedback mailbox. Configure Feedback for this repository.")?;
     let lock_path = path(root, id)?.with_extension("lock");
     let process_lock = fs::OpenOptions::new()
@@ -853,6 +860,8 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
     process_lock
         .lock()
         .map_err(|_| "Cannot lock mailbox operations")?;
+    // Testing is allowed before enabling the mailbox, but validates all settings.
+    c.enabled = true;
     validate(&c)?;
     let secret = password(id)?;
     let mut s = connect(&c, &secret)?;
@@ -863,10 +872,7 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
             request.folder.as_str()
         };
         match request.action.as_str() {
-            "test" => {
-                select(&mut s, &c.inbox, None)?;
-                Ok(serde_json::json!({"connected":true}))
-            }
+            "test" | "status" => mailbox_status(&mut s, &c.inbox),
             "folders" => {
                 let names = s
                     .list(None, Some("*"))
@@ -972,7 +978,7 @@ pub fn cli_main() -> Option<i32> {
         {
             return Err("Analyze mode permits only reading feedback; use an edit automation for mailbox changes.".into());
         }
-        if matches!(request.action.as_str(), "ack" | "poll" | "test") {
+        if matches!(request.action.as_str(), "ack" | "poll" | "test" | "status") {
             return Err("This operation is reserved for the automation scheduler".into());
         }
         execute(Path::new(&root), &id, request)
@@ -1282,6 +1288,18 @@ mod wire_tests {
             uid: 2,
             message_id: "<feedback@example.org>".into(),
         }
+    }
+    #[test]
+    fn mailbox_health_counts_all_remaining_mail_without_reading_it() {
+        let response = SELECT.replace("* 1 EXISTS", "* 63 EXISTS");
+        let (root, port, server) = fixture(vec![("EXAMINE", response)]);
+        let c = config_for(root.path(), port);
+        let mut session = connect(&c, "fixture-secret").unwrap();
+        let result = mailbox_status(&mut session, "INBOX").unwrap();
+        assert_eq!(result["connected"], true);
+        assert_eq!(result["count"], 63);
+        session.logout().unwrap();
+        assert!(server.join().unwrap().is_empty());
     }
     #[test]
     fn tls_imap_reader_and_drafts_preserve_reply_to_and_do_not_mark_read() {

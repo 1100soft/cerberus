@@ -1,3 +1,4 @@
+import {FeedbackMailboxBadge} from './FeedbackMailboxBadge';
 import {FeedbackSettings} from './FeedbackPanel';
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
@@ -63,7 +64,7 @@ export function RepositoryConfigDialog({ repository: repo, identities, catalog, 
       {creating && <p className="panel-copy">GitCerberus will initialize a Git repository at this path, remember it in your workspace, and, for GitHub, create and link a remote repository.</p>}
       <RepositoryFields value={value} identities={assignable} identityRequired={!!remoteCreation} onChange={setValue} browseTitle={creating ? "Choose a folder for the new repository" : "Choose folder"} />
       {value.hostType==='github'&&<section className="github-create-options"><label><input type="checkbox" checked={!!createGithub} onChange={event=>setCreateGithub(event.target.checked)}/>Create remote repository on GitHub</label>{createGithub&&<><Select label="GitHub repository visibility" value={privateGithub?'private':'public'} options={[{value:'private',label:'Private'},{value:'public',label:'Public'}]} onChange={value=>setPrivateGithub(value==='private')}/><p className="panel-copy">{proposedRemote||'Choose a GitHub account to set the destination.'} · Creates an empty remote; files are not pushed. Enter an organization repository URL above to use an organization. Turn this off to link an existing remote.</p></>}</section>}
-      {repo&&<button type="button" onClick={()=>setMailbox(true)}>Configure feedback mailbox</button>}
+      {repo&&<button type="button" onClick={()=>setMailbox(true)}><FeedbackMailboxBadge repositoryId={repo.id} showEmpty/>Configure feedback mailbox</button>}
       {repo && <section className="config-status">
         <h3>Live Git status</h3>
         <dl>

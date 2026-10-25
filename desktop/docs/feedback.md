@@ -5,7 +5,17 @@ its repository, and use the configuration icon. Repository configuration also ha
 **Configure feedback mailbox**. Configure IMAP and SMTP hosts, ports, TLS or
 STARTTLS, username, sending address and password/app password. Sending is off by
 default. **Save and test** verifies IMAP login and the default folder without
-sending mail. SMTP is checked when a reply is sent.
+sending mail. It is available before enabling the mailbox and does not enable it.
+SMTP is checked when a reply is sent.
+
+The envelope badge in repository cards and configuration shows a checkmark after
+successful IMAP verification, or a warning for disabled, incomplete or failed setup.
+Hover for details. The adjacent number counts **all emails remaining in the configured
+feedback folder**, including already-read mail; move handled messages out of that
+folder to reduce the count. This is independent of automation receipts. Status and
+counts refresh on opening repository/configuration views, every two minutes while
+shown, after settings change, and after moving mail. They are held in memory and
+rechecked after restart, rather than treating saved credentials as proof of access.
 
 Choose an **Email provider** to fill connection settings automatically. The default
 is **Other IMAP server**, with empty host fields; no provider is assumed.
