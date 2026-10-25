@@ -1,4 +1,4 @@
-//! Mailbox-backed feedback. Only connection settings live on disk; content and
+//! Mailbox-backed feedback. Connection settings and trusted certificates live on disk; content and
 //! processing receipts stay on IMAP. Passwords never cross read IPC or agent env.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use lettre::{
@@ -243,7 +243,64 @@ fn validate(c: &Config) -> Result<(), String> {
     }
     Ok(())
 }
-pub fn save(root: &Path, id: &str, c: Config, secret: Option<String>) -> Result<(), String> {
+// Import only public certificates; never persist an exported Bridge private key.
+fn import_certificate(root: &Path, id: &str, source: &str) -> Result<String, String> {
+    use std::io::{Read, Write};
+    path(root, id)?;
+    if !fs::metadata(source)
+        .map_err(|_| "Cannot read the selected certificate. Import it again.")?
+        .is_file()
+    {
+        return Err("Choose a regular public certificate file".into());
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(source)
+        .map_err(|_| "Cannot read the selected certificate. Import it again.")?
+        .take(262_145)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Cannot read the selected certificate")?;
+    if bytes.len() > 262_144 {
+        return Err("Certificate must be smaller than 256 KiB".into());
+    }
+    let pem = std::str::from_utf8(&bytes)
+        .map_err(|_| "Choose a public PEM certificate")?
+        .trim();
+    if pem.contains("PRIVATE KEY") {
+        return Err(
+            "Choose the public certificate, not a private key or a file containing one.".into(),
+        );
+    }
+    if !pem.starts_with("-----BEGIN CERTIFICATE-----")
+        || !pem.ends_with("-----END CERTIFICATE-----")
+        || pem.matches("-----BEGIN ").count() != 1
+        || pem.matches("-----END ").count() != 1
+    {
+        return Err("Choose a single public PEM certificate file".into());
+    }
+    native_tls::Certificate::from_pem(pem.as_bytes())
+        .map_err(|_| "Invalid public PEM certificate")?;
+    let directory = root
+        .join("feedback-mailboxes")
+        .join("certificates")
+        .join(id);
+    // A saved app-managed copy remains stable across saves and source-file deletion.
+    let selected = Path::new(source);
+    if selected.is_absolute() && selected.parent() == Some(directory.as_path()) {
+        return Ok(source.into());
+    }
+    fs::create_dir_all(&directory).map_err(|_| "Cannot create certificate storage")?;
+    let destination = directory.join(format!("{}.pem", uuid::Uuid::new_v4()));
+    let mut output =
+        tempfile::NamedTempFile::new_in(&directory).map_err(|_| "Cannot import certificate")?;
+    output
+        .write_all(pem.as_bytes())
+        .map_err(|_| "Cannot save imported certificate")?;
+    output
+        .persist(&destination)
+        .map_err(|_| "Cannot finish certificate import")?;
+    Ok(destination.to_string_lossy().into())
+}
+pub fn save(root: &Path, id: &str, mut c: Config, secret: Option<String>) -> Result<(), String> {
     let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
     validate(&c)?;
     // Never send a previously stored mailbox password to a newly selected server/account.
@@ -259,6 +316,9 @@ pub fn save(root: &Path, id: &str, c: Config, secret: Option<String>) -> Result<
         );
     }
     let p = path(root, id)?;
+    if !c.certificate_path.is_empty() {
+        c.certificate_path = import_certificate(root, id, &c.certificate_path)?;
+    }
     if let Some(secret) = secret.filter(|s| !s.is_empty()) {
         let entry = credential(id)?;
         entry
@@ -1127,6 +1187,27 @@ mod tests {
         assert_eq!(config(root.path(), "repo").unwrap().unwrap().imap_host, "");
     }
     #[test]
+    fn certificate_import_rejects_private_keys_invalid_and_oversized_files() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("export.pem");
+        for content in [
+            "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+            "-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----\n-----BEGIN RSA PRIVATE KEY-----\nsecret\n-----END RSA PRIVATE KEY-----",
+            "not a certificate",
+            "-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----",
+        ] {
+            fs::write(&source, content).unwrap();
+            assert!(import_certificate(root.path(), "repo", source.to_str().unwrap()).is_err());
+        }
+        fs::write(&source, vec![b'x'; 262_145]).unwrap();
+        assert!(
+            import_certificate(root.path(), "repo", source.to_str().unwrap())
+                .unwrap_err()
+                .contains("256 KiB")
+        );
+        assert!(!root.path().join("feedback-mailboxes/certificates").exists());
+    }
+    #[test]
     fn config_has_no_password_and_can_be_disabled_without_keyring() {
         let root = tempfile::tempdir().unwrap();
         save(root.path(), "repo", Config::default(), None).unwrap();
@@ -1288,6 +1369,67 @@ mod wire_tests {
             uid: 2,
             message_id: "<feedback@example.org>".into(),
         }
+    }
+    #[test]
+    fn saved_certificate_is_independent_of_export_and_replacement_is_isolated() {
+        let (root, port, server) = fixture(vec![]);
+        let mut c = config_for(root.path(), port);
+        c.enabled = false;
+        let source = c.certificate_path.clone();
+        let original = fs::read(&source).unwrap();
+        save(root.path(), "repo-a", c, None).unwrap();
+        let stored = config(root.path(), "repo-a").unwrap().unwrap();
+        assert_ne!(stored.certificate_path, source);
+        assert!(Path::new(&stored.certificate_path)
+            .starts_with(root.path().join("feedback-mailboxes/certificates/repo-a")));
+        assert_eq!(
+            fs::read(&stored.certificate_path).unwrap(),
+            original.strip_suffix(b"\n").unwrap_or(&original)
+        );
+        let private = root.path().join("key.pem");
+        let mut invalid = stored.clone();
+        invalid.certificate_path = private.to_string_lossy().into();
+        assert!(save(root.path(), "repo-a", invalid, None)
+            .unwrap_err()
+            .contains("private key"));
+        assert_eq!(
+            config(root.path(), "repo-a")
+                .unwrap()
+                .unwrap()
+                .certificate_path,
+            stored.certificate_path
+        );
+        // Another repository receives its own copy, never a shared mutable trust file.
+        let mut other = stored.clone();
+        other.certificate_path = source.clone();
+        save(root.path(), "repo-b", other, None).unwrap();
+        assert_ne!(
+            config(root.path(), "repo-b")
+                .unwrap()
+                .unwrap()
+                .certificate_path,
+            stored.certificate_path
+        );
+        fs::remove_file(&source).unwrap();
+        save(root.path(), "repo-a", stored.clone(), None).unwrap();
+        assert_eq!(
+            config(root.path(), "repo-a")
+                .unwrap()
+                .unwrap()
+                .certificate_path,
+            stored.certificate_path
+        );
+        let mut session = connect(&stored, "fixture-secret").unwrap();
+        session.logout().unwrap();
+        server.join().unwrap();
+        let mut removed = stored;
+        removed.certificate_path.clear();
+        save(root.path(), "repo-a", removed, None).unwrap();
+        assert!(config(root.path(), "repo-a")
+            .unwrap()
+            .unwrap()
+            .certificate_path
+            .is_empty());
     }
     #[test]
     fn mailbox_health_counts_all_remaining_mail_without_reading_it() {

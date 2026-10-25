@@ -47,3 +47,5 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 - Codex model catalogs are advisory, not proof of inference access. Never restore a model rejected explicitly for ChatGPT account support merely because the runtime executable changed. Keep restrictions account-scoped with a bounded lifetime; keep other runtime-specific errors scoped to their runtime. Regression checks must cover Luna rejection surviving upgrades while Sol remains selectable. Never introduce a permanent model-name blacklist or add models from conversation history.
 
 - Keep branch cards compact: icons stay inline with names; cleanup metadata uses a small top-right icon/time indicator with detailed dates in help text, never a dedicated row. Prefer compact controls and metadata over extra rows throughout the UI.
+
+- Local filesystem path controls must offer an OS browse dialog (file or folder as appropriate). New file-path fields use LocalFilePicker rather than requiring users to type paths. Explain whether selected files are copied into app storage or remain external references.

@@ -35,8 +35,17 @@ Standard presets show a compact server summary. **Customize connection settings*
 reveals host, port and security overrides. Proton Bridge and Zoho show these fields
 immediately because their settings can vary. Only the selected provider's help and
 official setup links appear. For an unlisted provider, request IMAP/SMTP settings
-from its administrator or documentation. A trusted certificate PEM path can add a
-Bridge/custom server certificate without disabling hostname/certificate checks.
+from its administrator or documentation. Importing a public PEM certificate can trust a
+Bridge/custom server without disabling hostname/certificate checks.
+Use **Import certificate** (or **Replace certificate**) to choose the public PEM
+certificate. Clicking **Save** copies it into Cerberus's app data, separately for
+this repository; you can then move or delete the original export. Existing external
+certificate paths are also imported on save. The selected certificate is applied
+only when saving; canceling leaves the previous configuration unchanged.
+**Remove certificate** stops using it after Save. Private keys and files containing
+private keys are rejected, and only the public certificate is copied. For Proton,
+use Bridge's Settings → Advanced settings → Export TLS certificates and select the
+certificate rather than the private key. Replace it if Bridge regenerates it.
 
 Existing custom endpoints are preserved when loading settings. Choosing another
 provider explicitly applies its defaults. Changing an existing mailbox's username

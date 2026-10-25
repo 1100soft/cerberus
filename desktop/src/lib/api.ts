@@ -235,6 +235,11 @@ export const api = {
     return invoke("codex_messages", { repositoryId, threadId, cursor: cursor ?? null });
   },
   async codexUpdateThread(repositoryId:string, threadId:string, action:string, name?:string):Promise<void> { return invoke("codex_update_thread",{repositoryId,threadId,action,name:name??null}); },
+  async selectLocalFile(title:string,extensions?:string[]):Promise<string|null> {
+    if(!inTauri()) return null;
+    const selected=await open({title,directory:false,multiple:false,...(extensions?.length?{filters:[{name:'Certificate files',extensions}]}:{})});
+    return typeof selected==='string'?selected:null;
+  },
   async selectRepositoryDirectory(title = "Choose a folder"): Promise<string | null> {
     if (!inTauri()) return window.prompt("Absolute path to a local Git repository");
     const selected = await open({

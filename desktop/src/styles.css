@@ -1222,3 +1222,7 @@ input[type="number"] { text-align: right; }
 .feedback-mailbox-icon {position:relative;display:inline-flex;width:20px;height:20px;align-items:center}
 .feedback-mailbox-icon > svg:last-child {position:absolute;right:0;bottom:0;background:var(--color-1e1c24);border-radius:2px}
 .feedback-test-help {font-size:12px}
+
+.local-file-picker {min-width:0}
+.local-file-picker input {flex:1;min-width:0;cursor:pointer}
+.local-file-picker button {flex-shrink:0}
