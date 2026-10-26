@@ -75,8 +75,8 @@ existing selectable folders and can create folders. Folder names support Unicode
 Folder hierarchy separators are server-defined and read from IMAP LIST. Settings
 show the discovered tree before saving, including nonselectable parent containers.
 Choose a purpose, then its destination in the tree; no mailbox path entry is
-required. Folder creation is also available through the folder browser on the
-Feedback page and in automation trigger setup. Proton custom folders use full
+required. The Feedback page always shows its configured feedback folder. Folder creation
+is available in mailbox settings and automation trigger setup. Proton custom folders use full
 names such as `Folders/Reports`, while labels use `Labels/Reports`. Existing short
 Proton names are matched only against a confirmed server folder; exact names are
 preserved. A missing name remains unassigned until you select or create a folder.

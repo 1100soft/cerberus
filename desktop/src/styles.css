@@ -1241,7 +1241,7 @@ input[type="number"] { text-align: right; }
 .mailbox-folder-assignments button {flex:1;min-width:100px;text-align:left}
 .mailbox-folder-assignments small {display:block;overflow-wrap:anywhere}
 .mailbox-folder-assignments button[aria-pressed=true] {border-color:var(--status-success)}
-.feedback-folder-browser {flex-basis:100%;min-width:0}
+.feedback-current-folder {min-width:0;overflow-wrap:anywhere}
 
 .automation-feedback-parameter {flex-direction:column;align-items:stretch;gap:8px}
 .automation-condition-content:has(.feedback-trigger-folders) {overflow:auto;min-height:0}
