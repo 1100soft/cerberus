@@ -55,3 +55,6 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 - Mailbox folder selection must discover the server hierarchy and use a tree, including nonselectable namespace parents and server delimiters. Create folders by selecting a parent and entering a leaf name; never require manual IMAP path entry. Configured mailboxes activate automatically; automation rules control processing. Use one Save action that verifies access and leaves failures visible.
 
 - Email automation folders are relative to each selected project's configured email root. Condition UI merges project trees, shows coverage (including unverified configured accounts), ignores unconfigured projects, and never adds a project selector at trigger level. Creating missing folders across projects requires an explicit in-app action.
+
+- Email folder deletion is immediate, with undo/redo instead of confirmation. Keep empty/unassigned/leaf and INBOX protections. Folder history covers actual successful mutations, including partially failed batches; never undo folders that predated a copy. Preserve native text-input undo.
+- Batch mailbox folder mutations in one authenticated session; avoid reconnecting/listing per child. Share status polling per project and keep unrelated projects independent.

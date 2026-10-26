@@ -15,10 +15,25 @@ use std::{
     fs,
     net::{TcpStream, ToSocketAddrs},
     path::Path,
-    sync::Mutex,
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::Duration,
 };
-static MAIL_LOCK: Mutex<()> = Mutex::new(());
+fn mailbox_lock(root: &Path, id: &str) -> Result<Arc<Mutex<()>>, String> {
+    static LOCKS: OnceLock<Mutex<std::collections::HashMap<std::path::PathBuf, Weak<Mutex<()>>>>> =
+        OnceLock::new();
+    let key = path(root, id)?;
+    let mut locks = LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "Mailbox lock unavailable")?;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(key, Arc::downgrade(&lock));
+    Ok(lock)
+}
 const TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_MESSAGE: u32 = 2_000_000;
 type Session = imap::Session<native_tls::TlsStream<TcpStream>>;
@@ -308,7 +323,8 @@ fn import_certificate(root: &Path, id: &str, source: &str) -> Result<String, Str
     Ok(destination.to_string_lossy().into())
 }
 pub fn save(root: &Path, id: &str, mut c: Config, secret: Option<String>) -> Result<(), String> {
-    let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
+    let lock = mailbox_lock(root, id)?;
+    let _guard = lock.lock().map_err(|_| "Mailbox is busy")?;
     validate(&c)?;
     // Never send a previously stored mailbox password to a newly selected server/account.
     if secret.as_ref().is_none_or(|value| value.is_empty())
@@ -969,6 +985,24 @@ pub fn setup(
 ) -> Result<Vec<FolderNode>, String> {
     setup_operation(root, id, c, secret, parent, name, None)
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FolderOperation {
+    pub operation: String,
+    pub parent: String,
+    pub name: Option<String>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct FolderChange {
+    pub forward: FolderOperation,
+    pub inverse: FolderOperation,
+}
+#[derive(Debug, Serialize)]
+pub struct FolderBatch {
+    pub nodes: Vec<FolderNode>,
+    pub changes: Vec<FolderChange>,
+    pub processed: usize,
+    pub error: Option<String>,
+}
 pub fn setup_operation(
     root: &Path,
     id: &str,
@@ -978,10 +1012,201 @@ pub fn setup_operation(
     name: Option<String>,
     operation: Option<String>,
 ) -> Result<Vec<FolderNode>, String> {
-    let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
-    path(root, id)?;
+    let operations = if operation.is_some() || name.is_some() {
+        vec![FolderOperation {
+            operation: operation.unwrap_or_else(|| "create".into()),
+            parent: parent.unwrap_or_default(),
+            name,
+        }]
+    } else {
+        vec![]
+    };
+    let result = setup_batch(root, id, c, secret, operations)?;
+    if let Some(error) = result.error {
+        return Err(error);
+    }
+    Ok(result.nodes)
+}
+fn apply_folder_operation(
+    root: &Path,
+    id: &str,
+    c: &Config,
+    s: &mut Session,
+    nodes: &mut Vec<FolderNode>,
+    op: &FolderOperation,
+) -> Result<Option<FolderChange>, String> {
+    if op.operation == "create" {
+        let name = op.name.as_deref().ok_or("Enter a folder name")?;
+        let delimiter = if op.parent.is_empty() {
+            nodes.iter().find_map(|n| n.delimiter.clone())
+        } else {
+            nodes
+                .iter()
+                .find(|n| n.path == op.parent)
+                .and_then(|n| n.delimiter.clone())
+        };
+        let destination = if op.parent.is_empty() {
+            name.into()
+        } else {
+            format!(
+                "{}{}{name}",
+                op.parent,
+                delimiter
+                    .as_deref()
+                    .ok_or("This server does not support subfolders here")?
+            )
+        };
+        if nodes.iter().any(|n| n.path == destination) {
+            return Ok(None);
+        }
+        create_child(s, nodes, &op.parent, name)?;
+        nodes.push(FolderNode {
+            path: destination.clone(),
+            delimiter,
+            selectable: true,
+        });
+        return Ok(Some(FolderChange {
+            forward: op.clone(),
+            inverse: FolderOperation {
+                operation: "delete".into(),
+                parent: destination,
+                name: None,
+            },
+        }));
+    }
+    let source = Some(op.parent.as_str()).ok_or("Choose a folder")?;
+    let node = nodes
+        .iter()
+        .find(|n| n.path == source)
+        .cloned()
+        .ok_or("Folder no longer exists")?;
+    if source.eq_ignore_ascii_case("INBOX") {
+        return Err("The inbox cannot be renamed or deleted".into());
+    }
+    match op.operation.as_str() {
+        "rename" => {
+            let name = op.name.as_deref().ok_or("Enter a folder name")?;
+            folder(name)?;
+            if name.trim() != name
+                || name.contains(['/', '\\'])
+                || node.delimiter.as_deref().is_some_and(|d| name.contains(d))
+            {
+                return Err("Enter a folder name, not a path".into());
+            }
+            let destination = node
+                .delimiter
+                .as_deref()
+                .and_then(|d| source.rsplit_once(d).map(|(p, _)| format!("{p}{d}{name}")))
+                .unwrap_or_else(|| name.to_owned());
+            folder(&destination)?;
+            if nodes.iter().any(|n| n.path == destination) {
+                return Err("A folder with that name already exists".into());
+            }
+            s.rename(wire_folder(source), wire_folder(&destination))
+                .map_err(|_| "Cannot rename folder. Check mailbox permissions.")?;
+        }
+        "delete" => {
+            let stored = config(root, id)?;
+            if std::iter::once(c).chain(stored.as_ref()).any(|config| {
+                [
+                    &config.inbox,
+                    &config.drafts,
+                    &config.sent,
+                    &config.notes,
+                    &config.metadata,
+                ]
+                .iter()
+                .any(|p| {
+                    p.as_str() == source
+                        || node
+                            .delimiter
+                            .as_deref()
+                            .is_some_and(|d| p.starts_with(&format!("{source}{d}")))
+                })
+            }) {
+                return Err(
+                    "Reassign configured folders and save before deleting this folder".into(),
+                );
+            }
+            if node.delimiter.as_deref().is_some_and(|d| {
+                nodes
+                    .iter()
+                    .any(|n| n.path.starts_with(&format!("{source}{d}")))
+            }) {
+                return Err("Remove child folders first".into());
+            }
+            let status = s
+                .examine(wire_folder(source))
+                .map_err(|_| "Cannot verify that this folder is empty")?;
+            if status.exists > 0 {
+                return Err("Move or remove the emails before deleting this folder".into());
+            }
+            s.delete(wire_folder(source))
+                .map_err(|_| "Cannot delete folder. Check mailbox permissions.")?;
+        }
+        _ => return Err("Unknown folder operation".into()),
+    }
+
+    let inverse = if op.operation == "rename" {
+        let old_name = node
+            .delimiter
+            .as_deref()
+            .and_then(|d| source.rsplit_once(d).map(|(_, n)| n))
+            .unwrap_or(source);
+        let new_name = op.name.as_deref().unwrap();
+        let destination = node
+            .delimiter
+            .as_deref()
+            .and_then(|d| {
+                source
+                    .rsplit_once(d)
+                    .map(|(p, _)| format!("{p}{d}{new_name}"))
+            })
+            .unwrap_or_else(|| new_name.into());
+        for entry in nodes.iter_mut() {
+            if entry.path == source
+                || node
+                    .delimiter
+                    .as_deref()
+                    .is_some_and(|d| entry.path.starts_with(&format!("{source}{d}")))
+            {
+                entry.path = format!("{destination}{}", &entry.path[source.len()..]);
+            }
+        }
+        FolderOperation {
+            operation: "rename".into(),
+            parent: destination,
+            name: Some(old_name.into()),
+        }
+    } else {
+        nodes.retain(|entry| entry.path != source);
+        let (parent, name) = node
+            .delimiter
+            .as_deref()
+            .and_then(|d| source.rsplit_once(d))
+            .unwrap_or(("", source));
+        FolderOperation {
+            operation: "create".into(),
+            parent: parent.into(),
+            name: Some(name.into()),
+        }
+    };
+    Ok(Some(FolderChange {
+        forward: op.clone(),
+        inverse,
+    }))
+}
+pub fn setup_batch(
+    root: &Path,
+    id: &str,
+    c: Config,
+    secret: Option<String>,
+    operations: Vec<FolderOperation>,
+) -> Result<FolderBatch, String> {
+    let lock = mailbox_lock(root, id)?;
+    let _guard = lock.lock().map_err(|_| "Mailbox is busy")?;
     validate_connection(&c)?;
-    let secret = match secret.filter(|value| !value.is_empty()) {
+    let secret = match secret.filter(|s| !s.is_empty()) {
         Some(secret) => secret,
         None => {
             let old = config(root, id)?.ok_or("Enter the mailbox password")?;
@@ -998,89 +1223,42 @@ pub fn setup_operation(
     };
     let mut session = connect(&c, &secret)?;
     let result = (|| {
-        let nodes = folder_tree(&mut session)?;
-        if let Some(operation) = operation {
-            let source = parent.as_deref().ok_or("Choose a folder")?;
-            let node = nodes
-                .iter()
-                .find(|n| n.path == source)
-                .ok_or("Folder no longer exists")?;
-            if source.eq_ignore_ascii_case("INBOX") {
-                return Err("The inbox cannot be renamed or deleted".into());
-            }
-            match operation.as_str() {
-                "rename" => {
-                    let name = name.as_deref().ok_or("Enter a folder name")?;
-                    folder(name)?;
-                    if name.trim() != name
-                        || name.contains(['/', '\\'])
-                        || node.delimiter.as_deref().is_some_and(|d| name.contains(d))
-                    {
-                        return Err("Enter a folder name, not a path".into());
-                    }
-                    let destination = node
-                        .delimiter
-                        .as_deref()
-                        .and_then(|d| source.rsplit_once(d).map(|(p, _)| format!("{p}{d}{name}")))
-                        .unwrap_or_else(|| name.to_owned());
-                    folder(&destination)?;
-                    if nodes.iter().any(|n| n.path == destination) {
-                        return Err("A folder with that name already exists".into());
-                    }
-                    session
-                        .rename(wire_folder(source), wire_folder(&destination))
-                        .map_err(|_| "Cannot rename folder. Check mailbox permissions.")?;
+        let mut nodes = folder_tree(&mut session)?;
+        let mut changes = Vec::new();
+        let mut processed = 0;
+        let mut error = None;
+        for op in operations {
+            match apply_folder_operation(root, id, &c, &mut session, &mut nodes, &op) {
+                Ok(Some(change)) => {
+                    changes.push(change);
+                    processed += 1;
                 }
-                "delete" => {
-                    let stored = config(root, id)?;
-                    if std::iter::once(&c).chain(stored.as_ref()).any(|config| {
-                        [
-                            &config.inbox,
-                            &config.drafts,
-                            &config.sent,
-                            &config.notes,
-                            &config.metadata,
-                        ]
-                        .iter()
-                        .any(|p| {
-                            p.as_str() == source
-                                || node
-                                    .delimiter
-                                    .as_deref()
-                                    .is_some_and(|d| p.starts_with(&format!("{source}{d}")))
-                        })
-                    }) {
-                        return Err(
-                            "Reassign configured folders and save before deleting this folder"
-                                .into(),
-                        );
-                    }
-                    if node.delimiter.as_deref().is_some_and(|d| {
-                        nodes
-                            .iter()
-                            .any(|n| n.path.starts_with(&format!("{source}{d}")))
-                    }) {
-                        return Err("Remove child folders first".into());
-                    }
-                    let status = session
-                        .examine(wire_folder(source))
-                        .map_err(|_| "Cannot verify that this folder is empty")?;
-                    if status.exists > 0 {
-                        return Err("Move or remove the emails before deleting this folder".into());
-                    }
-                    session
-                        .delete(wire_folder(source))
-                        .map_err(|_| "Cannot delete folder. Check mailbox permissions.")?;
+                Ok(None) => {
+                    processed += 1;
                 }
-                _ => return Err("Unknown folder operation".into()),
+                Err(reason) => {
+                    error = Some(reason);
+                    break;
+                }
             }
-            folder_tree(&mut session)
-        } else if let Some(name) = name {
-            create_child(&mut session, &nodes, parent.as_deref().unwrap_or(""), &name)?;
-            folder_tree(&mut session)
-        } else {
-            Ok(nodes)
         }
+        if !changes.is_empty() {
+            match folder_tree(&mut session) {
+                Ok(actual) => nodes = actual,
+                Err(reason) => {
+                    error = Some(format!(
+                        "{} Folder refresh failed: {reason}",
+                        error.unwrap_or_default()
+                    ));
+                }
+            }
+        }
+        Ok(FolderBatch {
+            nodes,
+            changes,
+            processed,
+            error,
+        })
     })();
     let _ = session.logout();
     result
@@ -1120,7 +1298,8 @@ fn mailbox_status(s: &mut Session, inbox: &str) -> Result<serde_json::Value, Str
 }
 
 pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json::Value, String> {
-    let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
+    let lock = mailbox_lock(root, id)?;
+    let _guard = lock.lock().map_err(|_| "Mailbox is busy")?;
     request.scope = id.into();
     let mut c = config(root, id)?
         .filter(|c| c.enabled || matches!(request.action.as_str(), "test" | "folders"))
@@ -1748,6 +1927,73 @@ mod wire_tests {
             .any(|node| node.path == "Folders/Reports" && node.selectable));
         assert!(config(root.path(), "new-repo").unwrap().is_none());
         server.join().unwrap();
+    }
+    #[test]
+    fn folder_batches_use_one_session_and_report_partial_changes_for_undo() {
+        let listing = "* LIST () \"/\" \"INBOX\"\r\n";
+        let updated =
+            format!("{listing}* LIST () \"/\" \"Work\"\r\n* LIST () \"/\" \"Work/Child\"\r\n");
+        let (root, port, server) = fixture(vec![
+            ("LIST", listing.into()),
+            ("CREATE \"Work\"", String::new()),
+            ("CREATE \"Work/Child\"", String::new()),
+            ("LIST", updated),
+        ]);
+        let ops = vec![
+            FolderOperation {
+                operation: "create".into(),
+                parent: "".into(),
+                name: Some("Work".into()),
+            },
+            FolderOperation {
+                operation: "create".into(),
+                parent: "Work".into(),
+                name: Some("Child".into()),
+            },
+        ];
+        let result = setup_batch(
+            root.path(),
+            "new-project",
+            management_config(root.path(), port),
+            Some("fixture-secret".into()),
+            ops.clone(),
+        )
+        .unwrap();
+        assert!(result.error.is_none());
+        assert_eq!(result.processed, 2);
+        assert_eq!(result.changes.len(), 2);
+        assert_eq!(result.changes[1].inverse.parent, "Work/Child");
+        server.join().unwrap();
+        let (root, port, server) = fixture(vec![
+            ("LIST", listing.into()),
+            ("CREATE \"Work\"", String::new()),
+            ("CREATE_FAIL", String::new()),
+            ("LIST", format!("{listing}* LIST () \"/\" \"Work\"\r\n")),
+        ]);
+        let result = setup_batch(
+            root.path(),
+            "new-project",
+            management_config(root.path(), port),
+            Some("fixture-secret".into()),
+            ops,
+        )
+        .unwrap();
+        assert!(result.error.is_some());
+        assert_eq!(result.processed, 1);
+        assert_eq!(result.changes.len(), 1);
+        assert_eq!(result.changes[0].inverse.parent, "Work");
+        server.join().unwrap();
+    }
+    #[test]
+    fn mailbox_locks_serialize_one_project_without_blocking_others() {
+        let root = tempfile::tempdir().unwrap();
+        let first = mailbox_lock(root.path(), "a").unwrap();
+        let same = mailbox_lock(root.path(), "a").unwrap();
+        let other = mailbox_lock(root.path(), "b").unwrap();
+        assert!(Arc::ptr_eq(&first, &same));
+        let _guard = first.lock().unwrap();
+        assert!(same.try_lock().is_err());
+        assert!(other.try_lock().is_ok());
     }
     fn management_config(root: &Path, port: u16) -> Config {
         let mut c = config_for(root, port);

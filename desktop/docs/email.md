@@ -245,7 +245,8 @@ identify the script's project. The previous `--cerberus-feedback`,
 ## Managing folders
 
 In Email settings, right-click a folder or press Shift+F10 for its menu. F2
-renames it, Delete asks for confirmation, and Ctrl/Cmd+Shift+N creates a child.
+renames it, Delete removes an eligible folder immediately, and Ctrl/Cmd+Shift+N
+creates a child.
 Arrow keys move focus (outlined row); Left/Right collapse, expand or move between
 parent and child. Enter assigns the focused folder to the selected purpose; its
 checkmark indicates the assignment, independently of keyboard focus.
@@ -259,3 +260,19 @@ Previously recorded message references and automation folder rules (relative or
 absolute) are not rewritten when folders are renamed. Review affected rules afterward. Deleting requires an empty, unassigned
 leaf folder; INBOX is protected. Reassign configured folders and save before deletion.
 Save success or failure remains visible in the dialog footer.
+
+Folder edits have Undo and Redo buttons in the footer. Ctrl/Cmd+Z undoes, and
+Ctrl/Cmd+Shift+Z or Ctrl+Y redoes, while focus is outside text fields (which keep
+their own text undo). History covers folder creation, rename, empty-folder deletion,
+purpose assignments and project copies. A copy is one history action, including
+only folders it actually created. Failed batches retain their successful changes
+so those can be undone too. New edits clear redo. History is limited to 50 actions
+and ends on Save, closing settings or changing the mailbox connection. An undo
+that would remove a folder now containing mail is refused; move the mail first.
+
+Copying creates all missing destination folders in one authenticated IMAP session,
+with one folder listing before and after the batch. It no longer reconnects and
+lists the entire mailbox for every missing folder. The source is read in its own
+session. Mailbox work is serialized per project rather than across unrelated
+projects. Status badges share one project subscription and cache checks for two
+minutes; project-specific changes invalidate only that project's status.
