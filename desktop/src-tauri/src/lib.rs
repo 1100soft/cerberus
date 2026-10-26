@@ -728,7 +728,7 @@ fn feedback_config(repository_id:String,state:State<AppState>)->Result<Option<fe
 #[tauri::command]
 async fn save_feedback_config(repository_id:String,config:feedback::Config,password:Option<String>,state:State<'_,AppState>)->Result<(),String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::save(&root,&repository_id,config,password)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
-async fn feedback_setup(repository_id:String,config:feedback::Config,password:Option<String>,parent:Option<String>,name:Option<String>,state:State<'_,AppState>)->Result<Vec<feedback::FolderNode>,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::setup(&root,&repository_id,config,password,parent,name)).await.map_err(|e|e.to_string())?}
+async fn feedback_setup(repository_id:String,config:feedback::Config,password:Option<String>,parent:Option<String>,name:Option<String>,operation:Option<String>,state:State<'_,AppState>)->Result<Vec<feedback::FolderNode>,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::setup_operation(&root,&repository_id,config,password,parent,name,operation)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
 async fn feedback_request(repository_id:String,request:feedback::Request,state:State<'_,AppState>)->Result<serde_json::Value,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::execute(&root,&repository_id,request)).await.map_err(|e|e.to_string())?}
 #[tauri::command]

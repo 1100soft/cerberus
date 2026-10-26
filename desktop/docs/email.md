@@ -240,3 +240,22 @@ New scripts use `--cerberus-email`, `CERBERUS_EMAIL_TOOL`,
 root). `CERBERUS_PROJECT_ID`, `CERBERUS_PROJECT_NAME`, and `CERBERUS_PROJECT_PATH`
 identify the script's project. The previous `--cerberus-feedback`,
 `CERBERUS_FEEDBACK_*` and `CERBERUS_REPOSITORY_*` names remain compatible.
+
+
+## Managing folders
+
+In Email settings, right-click a folder or press Shift+F10 for its menu. F2
+renames it, Delete asks for confirmation, and Ctrl/Cmd+Shift+N creates a child.
+Arrow keys move focus (outlined row); Left/Right collapse, expand or move between
+parent and child. Enter assigns the focused folder to the selected purpose; its
+checkmark indicates the assignment, independently of keyboard focus.
+
+The Copy folders button beside Folders copies another project's folder structure
+and purpose assignments, creating only missing folders. It copies neither messages
+nor credentials. Existing destination folders are preserved, and interrupted copies
+can be retried. Save afterward to apply assignments. Folder renames happen on the
+server immediately and update affected assignments in the form; save these changes.
+Previously recorded message references and automation folder rules (relative or
+absolute) are not rewritten when folders are renamed. Review affected rules afterward. Deleting requires an empty, unassigned
+leaf folder; INBOX is protected. Reassign configured folders and save before deletion.
+Save success or failure remains visible in the dialog footer.

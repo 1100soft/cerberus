@@ -36,3 +36,21 @@ await ensureRelativeFolder(b,['Bugs','UI']);assert.equal(created.length,1,'Exist
 await ensureRelativeFolder(b,['New','Nested']);assert.deepEqual(created.slice(1),[{parent:'Inbox',name:'New'},{parent:'Inbox.New',name:'Nested'}]);
 await assert.rejects(()=>ensureRelativeFolder(b,['manual/path']));
 console.log('Root-relative resolution, cross-delimiter coverage, unknown repositories, legacy rules, reserved folders, nested creation and idempotence passed');
+
+const copySource=await readFile(new URL('../src/lib/mailFolderCopy.ts',import.meta.url),'utf8');
+const copyCompiled=ts.transpileModule(copySource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {copyMailFolders}=await import(`data:text/javascript;base64,${Buffer.from(copyCompiled).toString('base64')}`);
+const sourceConfig={inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Notes',metadata:'Receipts'};
+const sourceNodes=['INBOX','INBOX/Bugs','INBOX/Bugs/UI','Drafts','Sent','Notes','Receipts'].map(path=>node(path));
+let target=[node('INBOX','.')],calls=[];
+const create=async(parent,name)=>{calls.push([parent,name]);const path=parent?parent+'.'+name:name;target=[...target,node(path,'.')];return target;};
+let copy=await copyMailFolders(sourceConfig,sourceNodes,target,create);
+assert.ok(copy.nodes.some(node=>node.path==='INBOX.Bugs.UI'));
+assert.deepEqual(copy.assignments,sourceConfig);
+const count=calls.length;await copyMailFolders(sourceConfig,sourceNodes,target,create);assert.equal(calls.length,count);
+await assert.rejects(()=>copyMailFolders({...sourceConfig,notes:'Missing'},sourceNodes,target,create),/incomplete/);
+let partial=[node('INBOX','.')],fail=true;
+const retryCreate=async(parent,name)=>{if(name==='UI'&&fail)throw Error('Denied');partial=[...partial,node(parent?parent+'.'+name:name,'.')];return partial;};
+await assert.rejects(()=>copyMailFolders(sourceConfig,sourceNodes,partial,retryCreate),/Denied/);fail=false;
+copy=await copyMailFolders(sourceConfig,sourceNodes,partial,retryCreate);assert.equal(copy.nodes.filter(node=>node.path==='INBOX.Bugs').length,1);
+console.log('Folder copy maps delimiters, preserves existing folders, validates assignments and resumes partial copies');

@@ -1252,3 +1252,19 @@ input[type="number"] { text-align: right; }
 .feedback-folder-proposal {border:1px solid var(--border-control);padding:8px;border-radius:6px;overflow-wrap:anywhere}
 .feedback-folder-proposal p {margin:4px 0}
 .feedback-folder-proposal button {margin-inline-end:5px}
+
+.mail-folder-row .mail-folder-name {flex:0 1 auto;max-width:calc(100% - 54px)}
+.mail-folder-row:focus-within {outline:2px solid var(--color-b7a7ff);outline-offset:-2px;border-radius:4px;background:var(--surface-control)}
+.mail-folder-name:focus-visible {outline:none;text-decoration:underline;text-underline-offset:3px}
+.mail-folder-menu {display:flex;flex-direction:column;margin:3px 6px 6px 22px;padding:4px;border:1px solid var(--border-control);border-radius:6px;background:var(--surface-control)}
+.mail-folder-menu button {display:flex;align-items:center;gap:7px;text-align:left;padding:6px}
+.mail-folder-menu kbd {margin-inline-start:auto;color:var(--text-secondary);font-size:10px}
+.mail-folder-copy {flex-basis:100%;min-width:0;padding:8px;border:1px solid var(--border-control);border-radius:6px}
+.mail-folder-copy header {display:flex;align-items:center;justify-content:space-between}
+.feedback-settings > footer {align-items:center;flex-shrink:0}
+.mail-settings-result {flex:1;min-width:0;overflow-wrap:anywhere;max-height:120px;overflow:auto}
+.mail-settings-result p {margin:3px 0}
+.mail-folder-row > button {min-height:26px}
+.mail-folder-row > button:not(.mail-folder-name) {min-width:26px;justify-content:center}
+.mail-folder-spacer {width:26px}
+.mail-folder-tree {padding-inline-end:8px}

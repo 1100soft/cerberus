@@ -900,7 +900,7 @@ fn poll(
     events.truncate(50);
     Ok(serde_json::json!(events))
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderNode {
     pub path: String,
@@ -967,6 +967,17 @@ pub fn setup(
     parent: Option<String>,
     name: Option<String>,
 ) -> Result<Vec<FolderNode>, String> {
+    setup_operation(root, id, c, secret, parent, name, None)
+}
+pub fn setup_operation(
+    root: &Path,
+    id: &str,
+    c: Config,
+    secret: Option<String>,
+    parent: Option<String>,
+    name: Option<String>,
+    operation: Option<String>,
+) -> Result<Vec<FolderNode>, String> {
     let _guard = MAIL_LOCK.lock().map_err(|_| "Mailbox is busy")?;
     path(root, id)?;
     validate_connection(&c)?;
@@ -988,7 +999,83 @@ pub fn setup(
     let mut session = connect(&c, &secret)?;
     let result = (|| {
         let nodes = folder_tree(&mut session)?;
-        if let Some(name) = name {
+        if let Some(operation) = operation {
+            let source = parent.as_deref().ok_or("Choose a folder")?;
+            let node = nodes
+                .iter()
+                .find(|n| n.path == source)
+                .ok_or("Folder no longer exists")?;
+            if source.eq_ignore_ascii_case("INBOX") {
+                return Err("The inbox cannot be renamed or deleted".into());
+            }
+            match operation.as_str() {
+                "rename" => {
+                    let name = name.as_deref().ok_or("Enter a folder name")?;
+                    folder(name)?;
+                    if name.trim() != name
+                        || name.contains(['/', '\\'])
+                        || node.delimiter.as_deref().is_some_and(|d| name.contains(d))
+                    {
+                        return Err("Enter a folder name, not a path".into());
+                    }
+                    let destination = node
+                        .delimiter
+                        .as_deref()
+                        .and_then(|d| source.rsplit_once(d).map(|(p, _)| format!("{p}{d}{name}")))
+                        .unwrap_or_else(|| name.to_owned());
+                    folder(&destination)?;
+                    if nodes.iter().any(|n| n.path == destination) {
+                        return Err("A folder with that name already exists".into());
+                    }
+                    session
+                        .rename(wire_folder(source), wire_folder(&destination))
+                        .map_err(|_| "Cannot rename folder. Check mailbox permissions.")?;
+                }
+                "delete" => {
+                    let stored = config(root, id)?;
+                    if std::iter::once(&c).chain(stored.as_ref()).any(|config| {
+                        [
+                            &config.inbox,
+                            &config.drafts,
+                            &config.sent,
+                            &config.notes,
+                            &config.metadata,
+                        ]
+                        .iter()
+                        .any(|p| {
+                            p.as_str() == source
+                                || node
+                                    .delimiter
+                                    .as_deref()
+                                    .is_some_and(|d| p.starts_with(&format!("{source}{d}")))
+                        })
+                    }) {
+                        return Err(
+                            "Reassign configured folders and save before deleting this folder"
+                                .into(),
+                        );
+                    }
+                    if node.delimiter.as_deref().is_some_and(|d| {
+                        nodes
+                            .iter()
+                            .any(|n| n.path.starts_with(&format!("{source}{d}")))
+                    }) {
+                        return Err("Remove child folders first".into());
+                    }
+                    let status = session
+                        .examine(wire_folder(source))
+                        .map_err(|_| "Cannot verify that this folder is empty")?;
+                    if status.exists > 0 {
+                        return Err("Move or remove the emails before deleting this folder".into());
+                    }
+                    session
+                        .delete(wire_folder(source))
+                        .map_err(|_| "Cannot delete folder. Check mailbox permissions.")?;
+                }
+                _ => return Err("Unknown folder operation".into()),
+            }
+            folder_tree(&mut session)
+        } else if let Some(name) = name {
             create_child(&mut session, &nodes, parent.as_deref().unwrap_or(""), &name)?;
             folder_tree(&mut session)
         } else {
@@ -1661,6 +1748,90 @@ mod wire_tests {
             .any(|node| node.path == "Folders/Reports" && node.selectable));
         assert!(config(root.path(), "new-repo").unwrap().is_none());
         server.join().unwrap();
+    }
+    fn management_config(root: &Path, port: u16) -> Config {
+        let mut c = config_for(root, port);
+        c.smtp_host = "localhost".into();
+        c.smtp_port = 465;
+        c.smtp_security = "tls".into();
+        c
+    }
+    #[test]
+    fn folder_management_renames_and_deletes_only_empty_unassigned_leaves() {
+        let listing = "* LIST () \"/\" \"Old\"\r\n";
+        let renamed = "* LIST () \"/\" \"New\"\r\n";
+        let (root, port, server) = fixture(vec![
+            ("LIST", listing.into()),
+            ("RENAME \"Old\" \"New\"", String::new()),
+            ("LIST", renamed.into()),
+        ]);
+        let result = setup_operation(
+            root.path(),
+            "new-project",
+            management_config(root.path(), port),
+            Some("fixture-secret".into()),
+            Some("Old".into()),
+            Some("New".into()),
+            Some("rename".into()),
+        )
+        .unwrap();
+        assert_eq!(result[0].path, "New");
+        server.join().unwrap();
+        let (root, port, server) = fixture(vec![
+            ("LIST", listing.into()),
+            ("EXAMINE", SELECT.replace("* 1 EXISTS", "* 0 EXISTS")),
+            ("DELETE \"Old\"", String::new()),
+            ("LIST", String::new()),
+        ]);
+        assert!(setup_operation(
+            root.path(),
+            "new-project",
+            management_config(root.path(), port),
+            Some("fixture-secret".into()),
+            Some("Old".into()),
+            None,
+            Some("delete".into())
+        )
+        .unwrap()
+        .is_empty());
+        server.join().unwrap();
+        let (root, port, server) =
+            fixture(vec![("LIST", listing.into()), ("EXAMINE", SELECT.into())]);
+        let error = setup_operation(
+            root.path(),
+            "new-project",
+            management_config(root.path(), port),
+            Some("fixture-secret".into()),
+            Some("Old".into()),
+            None,
+            Some("delete".into()),
+        )
+        .unwrap_err();
+        assert!(error.contains("emails"));
+        server.join().unwrap();
+    }
+    #[test]
+    fn folder_management_preserves_assigned_and_parent_folders() {
+        for assigned in [true, false] {
+            let listing = if assigned {
+                "* LIST () \"/\" \"Drafts\"\r\n"
+            } else {
+                "* LIST () \"/\" \"Old\"\r\n* LIST () \"/\" \"Old/Child\"\r\n"
+            };
+            let (root, port, server) = fixture(vec![("LIST", listing.into())]);
+            let error = setup_operation(
+                root.path(),
+                "new-project",
+                management_config(root.path(), port),
+                Some("fixture-secret".into()),
+                Some(if assigned { "Drafts" } else { "Old" }.into()),
+                None,
+                Some("delete".into()),
+            )
+            .unwrap_err();
+            assert!(error.contains(if assigned { "Reassign" } else { "child" }));
+            server.join().unwrap();
+        }
     }
     #[test]
     fn folder_tree_preserves_delimiters_containers_and_creates_only_child_names() {

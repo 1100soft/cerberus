@@ -9,6 +9,7 @@ export const defaultMailbox=():MailboxConfig=>({provider:'custom',enabled:true,a
 const preview=new Map<string,MailboxConfig>();
 export const feedback={
  setup:(repositoryId:string,config:MailboxConfig,password?:string,parent?:string,name?:string):Promise<MailFolder[]>=>inTauri()?invoke('feedback_setup',{repositoryId,config,password:password||null,parent:parent??null,name:name??null}):Promise.resolve(['INBOX','Drafts','Sent','Cerberus Notes','Cerberus Receipts'].map(path=>({path,delimiter:'/',selectable:true}))),
+ manage:(repositoryId:string,config:MailboxConfig,password:string,parent:string,operation:'rename'|'delete',name?:string):Promise<MailFolder[]>=>invoke('feedback_setup',{repositoryId,config,password:password||null,parent,name:name??null,operation}),
  config:(repositoryId:string):Promise<MailboxConfig|null>=>inTauri()?invoke('feedback_config',{repositoryId}):Promise.resolve(preview.get(repositoryId)||null),
  save:async(repositoryId:string,config:MailboxConfig,password?:string):Promise<void>=>{if(inTauri())await invoke('save_feedback_config',{repositoryId,config,password:password||null});else preview.set(repositoryId,config);window.dispatchEvent(new Event('feedback-config-changed'));},
  request:<T,>(repositoryId:string,request:Record<string,unknown>):Promise<T>=>inTauri()?invoke('feedback_request',{repositoryId,request}):Promise.resolve((request.action==='folders'?['INBOX','Email/Ready','Email/Resolved','Drafts','Sent']:request.action==='list'||request.action==='poll'?[]:{}) as T),
