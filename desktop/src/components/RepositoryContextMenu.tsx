@@ -62,13 +62,13 @@ export function RepositoryContextMenu({ repository, x, y, busy, onAction, onClos
 
   return <div ref={menu} className="context-menu" style={{ left: pos.left, top: pos.top }} role="menu">
     <p>{repository.displayName}</p>
-    <button role="menuitem" onClick={() => onAction("configure")} disabled={!local}><Settings2 />Configure repository</button>
+    <button role="menuitem" onClick={() => onAction("configure")} disabled={!local}><Settings2 />Configure project</button>
     <hr />
     {!local && <button role="menuitem" disabled={busy} onClick={() => onAction("locate")}><FolderOpen />Link existing folder</button>}
     {!local && repository.github && <button role="menuitem" disabled={busy} onClick={() => onAction("clone")}><CloudDownload />Clone from GitHub</button>}
     <button role="menuitem" disabled={busy || !local} onClick={() => onAction("editor")}><VSCodeIcon />Open in VS Code</button>
     <button role="menuitem" disabled={busy || !local} onClick={() => onAction("cursor")}><CursorIcon />Open in Cursor</button>
-    <button role="menuitem" disabled={busy || !repository.canonicalRemote} onClick={() => onAction("hosted")}><ExternalLink />Open hosted repository</button>
+    <button role="menuitem" disabled={busy || !repository.canonicalRemote} onClick={() => onAction("hosted")}><ExternalLink />Open hosted project</button>
     <button role="menuitem" disabled={busy || !local} onClick={() => onAction("folder")}><FolderOpen />Open local folder</button>
     <CopyButton role="menuitem" label="Copy local path" value={repository.localPath} disabled={!local}/>
     <hr />

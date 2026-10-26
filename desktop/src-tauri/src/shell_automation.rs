@@ -43,8 +43,10 @@ pub fn run_stream_with_runtime(repository:&Path,script:&str,channel:Option<Chann
             }
         }
     }
-    if context.contains_key("CERBERUS_TRACK_RECORDS") {for (key,value) in context {if key.starts_with("CERBERUS_TRACK_")||key.starts_with("CERBERUS_FEEDBACK_")||key=="PATH"||key=="GIT_CONFIG_COUNT"||key.starts_with("GIT_CONFIG_KEY_")||key.starts_with("GIT_CONFIG_VALUE_"){command.env(key,value);}}}
+    if context.contains_key("CERBERUS_TRACK_RECORDS") {for (key,value) in context {if key.starts_with("CERBERUS_TRACK_")||key.starts_with("CERBERUS_FEEDBACK_")||key.starts_with("CERBERUS_EMAIL_")||key=="PATH"||key=="GIT_CONFIG_COUNT"||key.starts_with("GIT_CONFIG_KEY_")||key.starts_with("GIT_CONFIG_VALUE_"){command.env(key,value);}}}
     command.env("CERBERUS_REPOSITORY_PATH",repository);
+    command.env("CERBERUS_PROJECT_PATH",repository);
+    for (new,old) in [("CERBERUS_PROJECT_ID","CERBERUS_REPOSITORY_ID"),("CERBERUS_PROJECT_NAME","CERBERUS_REPOSITORY_NAME")] {command.env(new,context.get(new).or_else(||context.get(old)).map(String::as_str).unwrap_or(""));}
     if runtime.preset=="python"{
         let mut paths=vec![repository.to_path_buf()];
         if let Some(existing)=std::env::var_os("PYTHONPATH"){paths.extend(std::env::split_paths(&existing));}
@@ -88,6 +90,9 @@ pub fn run_stream_with_runtime(repository:&Path,script:&str,channel:Option<Chann
         let context=std::collections::HashMap::from([("CERBERUS_BRANCH".into(),value.into()),("CERBERUS_COMMIT_SHA".into(),"event-sha".into()),("CERBERUS_REPOSITORY_PATH".into(),"wrong-path".into()),("PATH".into(),"wrong-path".into())]);
         let output=run_stream_with_context(root.path(),"printf '%s|%s|%s' \"$CERBERUS_BRANCH\" \"$CERBERUS_COMMIT_SHA\" \"$CERBERUS_REPOSITORY_PATH\"",None,None,&Default::default(),&context).unwrap();
         assert_eq!(output.stdout,format!("{value}|event-sha|{}",root.path().display()));
+        let project_context=std::collections::HashMap::from([("CERBERUS_REPOSITORY_ID".into(),"project-id".into()),("CERBERUS_REPOSITORY_NAME".into(),"Project name".into()),("CERBERUS_PROJECT_PATH".into(),"wrong-path".into())]);
+        let project=run_stream_with_context(root.path(),"printf '%s|%s|%s' \"$CERBERUS_PROJECT_ID\" \"$CERBERUS_PROJECT_NAME\" \"$CERBERUS_PROJECT_PATH\"",None,None,&Default::default(),&project_context).unwrap();
+        assert_eq!(project.stdout,format!("project-id|Project name|{}",root.path().display()));
         let inputs=std::collections::HashMap::from([("CERBERUS_INPUT_VERSION".into(),"minor".into()),("CERBERUS_INPUT_NOTES".into(),value.into()),("CERBERUS_INPUT_bad-name".into(),"unsafe".into())]);
         let manual=run_stream_with_context(root.path(),"printf '%s|%s|%s' \"$CERBERUS_INPUT_VERSION\" \"$CERBERUS_INPUT_NOTES\" \"${CERBERUS_INPUT_bad-unset}\"",None,None,&Default::default(),&inputs).unwrap();
         assert_eq!(manual.stdout,format!("minor|{value}|unset"));

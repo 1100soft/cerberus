@@ -35,11 +35,11 @@ export function FeedbackTriggerFolders({repositories,path,legacyValue,onChange}:
   setProposal(results.some(value=>value.error)?{parts:selected,fresh:false}:null);setBusy(false);window.dispatchEvent(new Event('feedback-config-changed'));
  };
  return <div className="feedback-trigger-folders" onKeyDown={event=>{if(event.key==='Enter')event.stopPropagation();}}>
-  {legacyValue&&path===undefined&&<small>Existing folder: {legacyValue}. Select a folder below to use repository-relative rules.</small>}
+  {legacyValue&&path===undefined&&<small>Existing folder: {legacyValue}. Select a folder below to use project-relative rules.</small>}
   <div className="feedback-toolbar"><small>{mailboxes.length} configured {mailboxes.length===1?'repository':'repositories'}</small><button type="button" disabled={busy} onClick={()=>setRevision(value=>value+1)}>Refresh</button></div>
-  {busy?<p>Loading folders…</p>:mailboxes.length?<MailFolderTree rooted key={scope} nodes={nodes} value={path===undefined&&legacyValue?'':folderKey(parts)} onSelect={key=>select(folderParts(key))} onCreate={async(parent,name)=>{setProposal({parts:[...folderParts(parent),name],fresh:true});}}/>:<p>Set up email in a selected repository to browse its folders.</p>}
-  {mailboxes.length>1&&<small>Dimmed folders aren’t confirmed in every repository. Hover for details.</small>}
-  {proposal&&<div className="feedback-folder-proposal" role="status"><p>{proposal.fresh?'Create':'Complete'} “{proposal.parts.join(' / ')}” in all {mailboxes.length} configured repositories?</p><button type="button" disabled={busy} onClick={()=>void createAll()}>Create</button><button type="button" disabled={busy} onClick={()=>setProposal(null)}>Later</button></div>}
+  {busy?<p>Loading folders…</p>:mailboxes.length?<MailFolderTree rooted key={scope} nodes={nodes} value={path===undefined&&legacyValue?'':folderKey(parts)} onSelect={key=>select(folderParts(key))} onCreate={async(parent,name)=>{setProposal({parts:[...folderParts(parent),name],fresh:true});}}/>:<p>Set up email in a selected project to browse its folders.</p>}
+  {mailboxes.length>1&&<small>Dimmed folders aren’t confirmed in every project. Hover for details.</small>}
+  {proposal&&<div className="feedback-folder-proposal" role="status"><p>{proposal.fresh?'Create':'Complete'} “{proposal.parts.join(' / ')}” in all {mailboxes.length} configured projects?</p><button type="button" disabled={busy} onClick={()=>void createAll()}>Create</button><button type="button" disabled={busy} onClick={()=>setProposal(null)}>Later</button></div>}
   {errors.map(error=><p role="alert" key={error}>{error}</p>)}
  </div>;
 }

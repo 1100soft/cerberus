@@ -276,7 +276,7 @@ export const api = {
     if (inTauri()) return invoke("commit_history", { repositoryId, branch: branch ?? null, skip });
     const repo = demoRepositories.find((repo) => repo.id === repositoryId);
     if (!repo?.lastCommitSummary || skip) return [];
-    return [repo.lastCommitSummary, `Update ${branch || "main"}`, "Initialize repository"].map((summary, index) => ({
+    return [repo.lastCommitSummary, `Update ${branch || "main"}`, "Initialize project"].map((summary, index) => ({
       hash: `${repositoryId}${index}a4e9c7b`.padEnd(40, "0"), summary, author: "Alex Morgan", email: "alex@example.com",
       committedAt: new Date(Date.now() - (index + 1) * 3600000).toISOString()
     }));
@@ -329,19 +329,19 @@ export const api = {
     const repo = demoRepositories.find((item) => item.id === repositoryId);
     const catalog = (await api.githubRepositories()).repositories;
     if (identityId && repo && !identitiesWithRepositoryAccess(demoIdentities, repo, catalog).some((identity) => identity.id === identityId)) {
-      throw new Error("This account does not have access to that repository.");
+      throw new Error("This account does not have access to that project.");
     }
     const identity = identityId ? demoIdentities.find((item) => item.id === identityId) : undefined;
     demoRepositories = demoRepositories.map((item) => item.id === repositoryId ? { ...item, identity } : item);
   },
   async importRepository(path: string): Promise<ImportResult> {
     if (inTauri()) return invoke("import_repository", { path });
-    throw new Error("Repository import is available in the desktop app.");
+    throw new Error("Project import is available in the desktop app.");
   },
   async createRepository(update: RepositoryUpdate): Promise<ImportResult> {
     if (inTauri()) return invoke("create_repository", { update });
     const identity = update.identityId ? demoIdentities.find((item) => item.id === update.identityId) : undefined;
-    if(update.githubCreate&&(!identity?.providerUsername||!update.canonicalRemote))throw new Error("Choose a GitHub account and repository destination.");
+    if(update.githubCreate&&(!identity?.providerUsername||!update.canonicalRemote))throw new Error("Choose a GitHub account and project destination.");
     const repository: Repository = {
       id: crypto.randomUUID(),
       displayName: update.displayName,

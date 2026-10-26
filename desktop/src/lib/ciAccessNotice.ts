@@ -9,7 +9,7 @@ export function ciAccessNotice(failures:{repository:string;message:string}[]){
   const others=failures.filter(item=>!affected.includes(item));
   return {
     title:'GitHub credential store is not responding',
-    message:`Affected repositories: ${affected.map(item=>item.repository).join(', ')}.\n\nThe app cannot read saved GitHub credentials from this computer’s password store. CI monitoring will retry automatically. This does not mean a CI workflow failed.${others.length?'\n\nOther access issues:\n'+others.map(item=>`${item.repository}: ${item.message}`).join('\n\n'):''}`,
+    message:`Affected projects: ${affected.map(item=>item.repository).join(', ')}.\n\nThe app cannot read saved GitHub credentials from this computer’s password store. CI monitoring will retry automatically. This does not mean a CI workflow failed.${others.length?'\n\nOther access issues:\n'+others.map(item=>`${item.repository}: ${item.message}`).join('\n\n'):''}`,
     steps:[
       'Open your system password manager (Passwords and Keys on GNOME, or KWallet Manager on KDE). Open or unlock the wallet used by GitCerberus if it is locked.',
       'If it is already unlocked, or the manager does not respond, save your work and sign out of your desktop session, then sign back in. This restarts the session services used by the password store.',

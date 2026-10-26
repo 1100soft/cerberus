@@ -1,15 +1,15 @@
 # Desktop architecture
 
-The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-tauri/src/`). `App.tsx` owns repository selection and the Repository, Identity, and Agents views. The Agent pane is `components/CodexHistory.tsx`; it currently reads history and delegates interactive work to VS Code or Cursor. The old composer and local runner code still exists but is not presented in that pane.
+The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-tauri/src/`). `App.tsx` owns project selection and the Project, Identity, and Agents views. The Agent pane is `components/CodexHistory.tsx`; it currently reads history and delegates interactive work to VS Code or Cursor. The old composer and local runner code still exists but is not presented in that pane.
 
 ## Data flow
 
-1. Rust lists local repositories from SQLite and GitHub repositories through the assigned GitHub identity. `lib/repositories.ts` merges these into the visible repository list.
-2. `components/RepositoryCard.tsx` renders repository status, assigned provider badges, and available agent activity. Local app-run status comes from `lib/agentChats.ts`; loaded provider status comes from `lib/conversationCache.ts`.
-3. `components/CodexHistory.tsx` requests only enabled providers. `lib/conversationCache.ts` caches thread lists and messages, deduplicates requests, and refreshes the selected repository on focus and a timer. `lib/conversationDisplay.ts` folds consecutive assistant updates under one final response; `components/AgentActivity.tsx` opens all updates with one disclosure.
+1. Rust lists local projects from SQLite and GitHub repositorys through the assigned GitHub identity. `lib/repositories.ts` merges these into the visible project list.
+2. `components/RepositoryCard.tsx` renders project status, assigned provider badges, and available agent activity. Local app-run status comes from `lib/agentChats.ts`; loaded provider status comes from `lib/conversationCache.ts`.
+3. `components/CodexHistory.tsx` requests only enabled providers. `lib/conversationCache.ts` caches thread lists and messages, deduplicates requests, and refreshes the selected project on focus and a timer. `lib/conversationDisplay.ts` folds consecutive assistant updates under one final response; `components/AgentActivity.tsx` opens all updates with one disclosure.
 4. `components/IdentitiesPanel.tsx` renders GitHub identities and provider identity cards. `components/IdentitySignIn.tsx` is the single sign-in control used there and in the Agent header. Account initials are chosen and persisted by `lib/identityInitials.ts`, with the editor in `components/IdentityCard.tsx`.
 5. UI colors should refer to `src/palette.css`. Dropdowns must use `components/Select.tsx` as specified in `AGENTS.md`.
-6. `lib/savedPrompts.ts` stores automation jobs and checks due triggers while the app is running. Agent jobs start new in-app conversations per selected repository; shell jobs run scripts through `shell_automation.rs`. Older fixed Git jobs remain runnable, and exact-session jobs are disabled migration candidates. See [automation](saved-prompts.md) for recovery behavior.
+6. `lib/savedPrompts.ts` stores automation jobs and checks due triggers while the app is running. Agent jobs start new in-app conversations per selected project; shell jobs run scripts through `shell_automation.rs`. Older fixed Git jobs remain runnable, and exact-session jobs are disabled migration candidates. See [automation](saved-prompts.md) for recovery behavior.
 
 ## Provider capabilities
 
@@ -26,7 +26,7 @@ All four conversation providers are opt-in through the Agent pane. The presence 
 
 - GitHub OAuth/CLI tokens and agent API keys use the OS credential store. Do not print or copy their values into logs, tests, or documentation.
 - GitHub APIs and Copilot share `github_credentials.rs`. On Linux, new GitHub tokens use a persistent Secret Service collection named GitCerberus, rather than relying on the default collection alias. Older tokens remain readable by service/user lookup across collections. Sign-in verifies a fresh credential lookup before reporting success; disconnect removes matching tokens. Storage-access failures and missing tokens have distinct messages. macOS and Windows retain their native credential-store entries.
-- Repository metadata and assignments are in the app-data SQLite database or provider-specific app-data settings.
+- Project metadata and assignments are in the app-data SQLite database or provider-specific app-data settings.
 - ChatGPT subscription identities use account-specific Codex homes and provider-managed credentials.
 - UI preferences, initials, provider checkboxes, selected models, and local chat metadata use localStorage. Provider transcripts remain in their own local storage.
 - The Rust adapters are `codex.rs`, `cursor.rs`, `cursor_editor.rs`, `copilot.rs`, and `claude_history.rs`. Tauri command routing and external URL allowlisting are in `lib.rs`.
@@ -39,4 +39,4 @@ GitHub's [Copilot SDK quota documentation](https://docs.github.com/en/copilot/ho
 
 Conversation order is newest change first. Codex rollout files also move when settings are rewritten; `conversation_updated_at` uses the last message or task boundary so that rewrite does not sort an idle conversation above a later one. Cursor editor times and Codex times may be seconds or milliseconds; `updatedMillis` compares both as milliseconds.
 
-The working spinner uses the provider color in the Agent pane (`--provider-codex`, `--provider-cursor`, `--provider-copilot`, `--provider-claude`) and the app accent (`--accent-codex`) on the repository row. On Linux, `cursor_notifications.rs` watches the session bus for Cursor's completion notification (`Done • …`, `Agent complete`, or `Cloud agent complete`). That event clears the spinner immediately. The composer database can otherwise keep an unfinished checkpoint for up to three minutes after the task ends.
+The working spinner uses the provider color in the Agent pane (`--provider-codex`, `--provider-cursor`, `--provider-copilot`, `--provider-claude`) and the app accent (`--accent-codex`) on the project row. On Linux, `cursor_notifications.rs` watches the session bus for Cursor's completion notification (`Done • …`, `Agent complete`, or `Cloud agent complete`). That event clears the spinner immediately. The composer database can otherwise keep an unfinished checkpoint for up to three minutes after the task ends.

@@ -5,6 +5,8 @@
 | [Project README](../README.md) | First look, project layout, development commands |
 | [Desktop architecture](../desktop/docs/architecture.md) | Finding the React/Rust owner of a feature or understanding provider limits |
 | [Desktop operations](../desktop/docs/agent-operations.md) | Running, checking, and troubleshooting the current app |
+| [Projects and GitHub repositories](../desktop/docs/projects.md) | Linked projects, accounts and Git operations |
+| [Project email](../desktop/docs/email.md) | Mailbox setup, per-project roots and email automation |
 | [Automation handoffs](../desktop/docs/handoffs.md) | Agent/Shell emission, conditional handoffs, and boolean flags |
 | [CI and releases](ci-and-releases.md) | Workflow coverage, installer artifacts, signing, and mobile prerequisites |
 | [Current handoff](../HANDOFF.md) | Continuing the active working tree |

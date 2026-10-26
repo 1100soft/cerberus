@@ -13,7 +13,7 @@ export function NotificationCenter({repositories}:{repositories:Repository[]}){
   const jobs=useSyncExternalStore(subscribeSavedPrompts,savedPrompts);
   const [logNotice,setLogNotice]=useState<AutomationNotice|null>(null);
   const [actionError,setActionError]=useState('');
-  const notices=useAutomationNotices().map(item=>item.automationId==='ci-monitor'&&!item.steps&&/credential storage is unavailable|platform secure storage|DBus error/i.test(item.message)?{...item,...ciAccessNotice(item.message.split('\n').filter(Boolean).map(line=>{const separator=line.indexOf(': ');return {repository:separator>0?line.slice(0,separator):'GitHub repositories',message:separator>0?line.slice(separator+2):line};}))}:item);
+  const notices=useAutomationNotices().map(item=>item.automationId==='ci-monitor'&&!item.steps&&/credential storage is unavailable|platform secure storage|DBus error/i.test(item.message)?{...item,...ciAccessNotice(item.message.split('\n').filter(Boolean).map(line=>{const separator=line.indexOf(': ');return {repository:separator>0?line.slice(0,separator):'GitHub repositorys',message:separator>0?line.slice(separator+2):line};}))}:item);
   const [open,setOpen]=useState(false);
   const [toasts,setToasts]=useState<AutomationNotice[]>([]);
   const seen=useRef(new Set(notices.map(item=>item.id)));

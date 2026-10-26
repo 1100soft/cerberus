@@ -64,8 +64,8 @@ export function repositoryControls(repo: Repository): RepositoryControl[] {
     { id: 'editor', label: 'Open in VS Code', key: repositoryActionKeys.editor },
     { id: 'cursor', label: 'Open in Cursor', key: repositoryActionKeys.cursor },
   ] : [{ id: 'locate', label: 'Link existing folder', key: repositoryActionKeys.locate }, ...(repo.github ? [{ id: 'clone', label: 'Clone from GitHub', key: repositoryActionKeys.clone }] : [])];
-  if (repo.canonicalRemote) controls.push({ id: 'hosted', label: 'Open hosted repository', key: repositoryActionKeys.hosted });
-  if (isLocal(repo)) controls.push({ id: 'configure', label: 'Configure repository', key: repositoryActionKeys.configure });
+  if (repo.canonicalRemote) controls.push({ id: 'hosted', label: 'Open remote repository', key: repositoryActionKeys.hosted });
+  if (isLocal(repo)) controls.push({ id: 'configure', label: 'Configure project', key: repositoryActionKeys.configure });
   return controls;
 }
 export type RepositorySelection = { repositoryId: string; controlIndex: number };

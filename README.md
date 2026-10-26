@@ -1,6 +1,6 @@
 # GitCerberus
 
-GitCerberus is a Tauri desktop workspace for repositories, GitHub identities, and local agent conversation history. The Repository view delegates work to VS Code and Cursor; the Agent pane reads conversations from enabled providers and shows activity where the provider exposes it.
+GitCerberus is a Tauri desktop workspace for projects, GitHub identities, and local agent conversation history. The Project view delegates work to VS Code and Cursor; the Agent pane reads conversations from enabled providers and shows activity where the provider exposes it.
 
 ## Project map
 
@@ -35,11 +35,11 @@ cd desktop/src-tauri
 cargo test
 ```
 
-The browser demo uses fixture repositories and does not run native Git or provider commands. See [desktop verification](desktop/docs/agent-operations.md#verification) for the WebKitGTK UI checks.
+The browser demo uses fixture projects and does not run native Git or provider commands. See [desktop verification](desktop/docs/agent-operations.md#verification) for the WebKitGTK UI checks.
 
 ## Identity and agent boundaries
 
-GitHub tokens and agent API keys are kept in the OS credential store. Repository metadata and identity assignments are kept in the Tauri application-data directory. The UI stores presentation preferences and local chat metadata in localStorage. Provider CLIs and browsers retain their own sessions.
+GitHub tokens and agent API keys are kept in the OS credential store. Project metadata and identity assignments are kept in the Tauri application-data directory. The UI stores presentation preferences and local chat metadata in localStorage. Provider CLIs and browsers retain their own sessions.
 
 Conversation providers are opt-in. Codex, Cursor, Copilot, and Claude adapters expose different kinds of local history; [the provider matrix](desktop/docs/architecture.md#provider-capabilities) describes what each can and cannot report. A signed-in GitHub identity alone does not install or authenticate the Copilot CLI needed by the current local Copilot adapter.
 

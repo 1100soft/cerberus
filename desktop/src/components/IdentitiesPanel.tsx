@@ -114,7 +114,7 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
     setProviderEnabled('copilot', true);
     setMessage(switched
       ? `Signed in as @${identity.providerUsername}. Copilot uses this GitHub account. @${expected.providerUsername} is still disconnected; reconnect that account separately if you still need it.`
-      : `Signed in as @${identity.providerUsername}. Copilot uses this GitHub account.${pendingRepositoryId ? " This repository is now linked to that account." : extra}`);
+      : `Signed in as @${identity.providerUsername}. Copilot uses this GitHub account.${pendingRepositoryId ? " This project is now linked to that account." : extra}`);
     reconnecting.current = undefined;
     setFlow(undefined);
     await onChanged();
@@ -162,7 +162,7 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
 
   async function disconnect(identity: Identity) {
     const name = identity.providerUsername ? `@${identity.providerUsername}` : identity.label;
-    if (!window.confirm(`Disconnect ${name}? GitHub access is removed from this computer. Assigned repositories stay associated until you reconnect.`)) return;
+    if (!window.confirm(`Disconnect ${name}? GitHub access is removed from this computer. Assigned projects stay associated until you reconnect.`)) return;
     setBusyId(identity.id);
     try {
       await api.disconnectGithubIdentity(identity.id);
@@ -185,7 +185,7 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
   useEffect(() => {
     if (!(inferredOwner || startGithubLogin) || !statusReady || autoStarted.current) return;
     autoStarted.current = true;
-    if(inferredOwner)setMessage(`This repository looks like it belongs to GitHub user “${inferredOwner}”. Sign in with that account so commits and the hosted page stay together.`);
+    if(inferredOwner)setMessage(`This project looks like it belongs to GitHub user “${inferredOwner}”. Sign in with that account so commits and the hosted page stay together.`);
     if (status.browserSignIn) void connectBrowser();
   }, [inferredOwner, startGithubLogin, statusReady, status.browserSignIn]);
 
@@ -218,14 +218,14 @@ export function IdentitiesPanel({ identities, inferredOwner, pendingRepositoryId
     <ChatgptSettings/>
     {flow && <GithubDeviceDialog flow={flow} onCancel={() => { authAttempt.current++; reconnecting.current = undefined; setFlow(undefined); setMessage('GitHub sign-in was cancelled.'); }} />}
     {message && <p className="oauth-message" role="status">{message}</p>}
-    {pendingRepositoryId && <button type="button" className="identity-back" onClick={onClose}>Back to repositories</button>}
+    {pendingRepositoryId && <button type="button" className="identity-back" onClick={onClose}>Back to projects</button>}
     {showHelp && <div className="panel-backdrop dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowHelp(false); }}>
       <section ref={helpDialog} className="repo-config" role="dialog" aria-modal="true" aria-labelledby="identity-help-title">
         <header><h2 id="identity-help-title">How identities work</h2><button type="button" autoFocus aria-label="Close help" onClick={() => setShowHelp(false)}><X /></button></header>
         <div className="wizard-cards">
           <article><ShieldCheck /><h3>Keep your accounts together</h3><p>GitHub identities control Git access and authorship. ChatGPT supplies Codex access. Cursor and Claude identities use their local CLI sign-ins for editor delegation.</p></article>
-          <article><Github /><h3>Sign in once per account</h3><p>Choose Add identity, then Sign in with GitHub. Approve GitCerberus in your browser, including repository access to list and clone private repositories. Disconnect an account to remove its token from this computer, or Reconnect if private repositories are missing. Repeat for each account you use. Tokens are stored in this computer’s password manager.</p></article>
-          <article><Link2 /><h3>Match your repositories</h3><p>Open a repository’s action tray to assign its GitHub, ChatGPT, Cursor, and Claude accounts. Copilot usage for a connected GitHub account stays on this page.</p></article>
+          <article><Github /><h3>Sign in once per account</h3><p>Choose Add identity, then Sign in with GitHub. Approve GitCerberus in your browser, including project access to list and clone private projects. Disconnect an account to remove its token from this computer, or Reconnect if private projects are missing. Repeat for each account you use. Tokens are stored in this computer’s password manager.</p></article>
+          <article><Link2 /><h3>Match your projects</h3><p>Open a project’s action tray to assign its GitHub, ChatGPT, Cursor, and Claude accounts. Copilot usage for a connected GitHub account stays on this page.</p></article>
         </div>
       </section>
     </div>}

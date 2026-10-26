@@ -926,7 +926,7 @@ fn show_dashboard(app: &tauri::AppHandle) {
 
 pub fn run() {
     commit_provenance::detach_inherited_tracking();
-    for key in ["CERBERUS_FEEDBACK_ROOT","CERBERUS_FEEDBACK_REPOSITORY","CERBERUS_FEEDBACK_TOOL","CERBERUS_FEEDBACK_READ_ONLY"] {std::env::remove_var(key);}
+    for key in ["CERBERUS_EMAIL_DATA_DIR","CERBERUS_EMAIL_ROOT_FOLDER","CERBERUS_PROJECT_ID","CERBERUS_PROJECT_NAME","CERBERUS_PROJECT_PATH","CERBERUS_EMAIL_PROJECT","CERBERUS_EMAIL_TOOL","CERBERUS_EMAIL_READ_ONLY","CERBERUS_FEEDBACK_ROOT","CERBERUS_FEEDBACK_REPOSITORY","CERBERUS_FEEDBACK_TOOL","CERBERUS_FEEDBACK_READ_ONLY"] {std::env::remove_var(key);}
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

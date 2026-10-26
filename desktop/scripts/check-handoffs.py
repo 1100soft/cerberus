@@ -38,7 +38,7 @@ script = r"""
  const repoList=[{id:'1',displayName:'backend-api',localPresent:true,localPath:'/virtual/1'},{id:'2',displayName:'frontend-ui',localPresent:true,localPath:'/virtual/2'}];
  assert(namesModule.handoffPairWarnings(module.savedPrompts(),repoList).length===0,'Matching handoffs were reported as incomplete');
  const unmatched=[{...base,id:'orphan',title:'Orphan',prompt:'emit',trigger:'manual',includeFutureRepositories:true,emitsHandoffs:['correction']}];
- assert(namesModule.handoffPairWarnings(unmatched,repoList)[0]==='correction must trigger an automation for 2 repositories.','Unmatched emission warning is incorrect');
+ assert(namesModule.handoffPairWarnings(unmatched,repoList)[0]==='correction must trigger an automation for 2 projects.','Unmatched emission warning is incorrect');
  assert(namesModule.handoffPairWarnings([{...base,id:'reader',title:'Reader',prompt:'read',trigger:'handoff',handoffName:'correction'}],repoList)[0]==='correction must be emitted by an automation for backend-api.','Unmatched trigger warning is incorrect');
  assert(module.validEmittedHandoff('(review)')&&!module.validEmittedHandoff('(review')&&!module.validEmittedHandoff('((review))'),'Conditional emission validation incorrect');
  const conditionalPrompt=module.automationPromptWithHandoffs('Emit review only if issues exist',undefined,{review:'/out/review'},['review']);

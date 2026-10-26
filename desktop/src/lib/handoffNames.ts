@@ -30,7 +30,7 @@ export function handoffPairWarnings(jobs:SavedPrompt[],repositories:Repository[]
   }
   return [...grouped].map(([key,ids])=>{
     const [name,direction]=key.split('\u0000');
-    const target=ids.length===1?repositories.find(repo=>repo.id===ids[0])?.displayName||ids[0]:`${ids.length} repositories`;
+    const target=ids.length===1?repositories.find(repo=>repo.id===ids[0])?.displayName||ids[0]:`${ids.length} projects`;
     return `${name} must ${direction==='trigger'?'trigger an automation':'be emitted by an automation'} for ${target}.`;
   });
 }

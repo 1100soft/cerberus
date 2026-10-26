@@ -58,6 +58,6 @@ export async function ensureRelativeFolder(mailbox:MailboxTree,parts:string[]):P
   if(!nodes.some(node=>node.path===child))throw Error(`The server did not return the created folder “${child}”.`);
   parent=child;
  }
- if(!relativeFolder(mailbox.config,nodes,parts))throw Error('This folder cannot receive feedback automation events.');
+ if(!relativeFolder(mailbox.config,nodes,parts))throw Error('This folder cannot receive email automation events.');
  return nodes;
 }

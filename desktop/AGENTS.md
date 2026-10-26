@@ -3,7 +3,7 @@
 - Use `src/components/Select.tsx` for every dropdown that selects a value. Do not introduce native `<select>` or `<datalist>` controls: their OS-rendered options do not reliably follow application zoom.
 - Render menus inside the zoomed document. Portal positioning must account for `--ui-zoom`; do not portal outside the zoomed body or use fixed unscaled option text.
 - Verify new dropdowns at 100%, 140%, and 150% zoom, including keyboard selection, Escape, outside-click dismissal, and placement near viewport edges.
-- Dashboard panes must fill the available window area and scroll internally. Avoid fixed maximum heights on conversation content; preserve the adjustable repository/conversation split and usable narrow-window layouts.
+- Dashboard panes must fill the available window area and scroll internally. Avoid fixed maximum heights on conversation content; preserve the adjustable project/conversation split and usable narrow-window layouts.
 
 `npm run check:dropdowns` runs during every production build and rejects native dropdown elements in the UI source.
 
@@ -15,7 +15,7 @@ All current and future panes must respond to live window resizing, not just the
 default window size. Anchor the dashboard to the window edges; distribute spare
 space with flexible grid/flex tracks. Set `min-width: 0` and `min-height: 0` on
 nested tracks and panes, wrap labels, paths, messages, and controls, and keep
-scrolling inside the pane that owns the content. Never hide repository details
+scrolling inside the pane that owns the content. Never hide project details
 to solve width overflow. Reflow dense cards and stack subpanes when needed.
 Keep practical pane minimums and the native window minimum (900 × 620), while
 allowing all remaining space to grow dynamically. Do not solve layout issues by
@@ -27,9 +27,9 @@ Conversation providers are opt-in. Only query providers the user has configured
 and checked. Persist configuration/filter choices, label configuration separately
 from checkbox visibility, and show setup instructions for one chosen provider.
 
-Repository selection must have one state owner shared by mouse and keyboard.
+Project selection must have one state owner shared by mouse and keyboard.
 Hover styling must never expand an unselected card or mimic selection. Base card
-wrapping on the repository list’s own named container, not an ancestor’s width;
+wrapping on the project list’s own named container, not an ancestor’s width;
 keep the main fields on one row whenever that container has enough room.
 Provider installation must show the command plan and require explicit in-app
 approval before executing. Use fixed provider commands and no privilege elevation.
@@ -54,4 +54,4 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 
 - Mailbox folder selection must discover the server hierarchy and use a tree, including nonselectable namespace parents and server delimiters. Create folders by selecting a parent and entering a leaf name; never require manual IMAP path entry. Configured mailboxes activate automatically; automation rules control processing. Use one Save action that verifies access and leaves failures visible.
 
-- Feedback automation folders are relative to each selected repository's configured email root. Condition UI merges repository trees, shows coverage (including unverified configured accounts), ignores unconfigured repositories, and never adds a repository selector at trigger level. Creating missing folders across repositories requires an explicit in-app action.
+- Email automation folders are relative to each selected project's configured email root. Condition UI merges project trees, shows coverage (including unverified configured accounts), ignores unconfigured projects, and never adds a project selector at trigger level. Creating missing folders across projects requires an explicit in-app action.

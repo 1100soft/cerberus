@@ -46,7 +46,7 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
   const visibility = repositoryVisibility(repo);
   const account = associatedIdentity(repo, identities);
   const assignable = identitiesWithRepositoryAccess(identities, repo, catalog);
-  const visibilityDetail = repo.github ? `${repo.github.private ? "Private" : "Public"} GitHub repository` : repo.hostType === 'github' ? 'Visibility unverified. Connect an account that can access this repository.' : 'Visibility is not verified for this host.';
+  const visibilityDetail = repo.github ? `${repo.github.private ? "Private" : "Public"} GitHub repository` : repo.hostType === 'github' ? 'Visibility unverified. Connect an account that can access this project.' : 'Visibility is not verified for this host.';
   const icons: Record<string, React.ReactNode> = { chat: <MessageSquare />, editor: <VSCodeIcon />, cursor: <CursorIcon />, hosted: <ExternalLink />, configure: <Settings2 />, clone: <CloudDownload />, locate: <FolderOpen /> };
   useEffect(() => { if (!selected) setAssignOpen(false); }, [selected]);
   return <article {...dragItem} {...dragSource} className={`repo-row ${selected ? "selected" : ""} ${local ? "repo-local" : "repo-remote"} ${dragItem?.className||''}`}

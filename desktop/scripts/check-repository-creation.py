@@ -13,12 +13,12 @@ from gi.repository import Gtk, WebKit2, GLib
 urllib.request.urlopen('http://127.0.0.1:3000', timeout=5).close()
 script = r"""
 (async()=>{
- const pause=()=>new Promise(resolve=>setTimeout(resolve,80));const assert=(ok,message)=>{if(!ok)throw Error(message)};const wait=async(get)=>{for(let i=0;i<100;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for repository UI: '+get.toString());};
+ const pause=()=>new Promise(resolve=>setTimeout(resolve,80));const assert=(ok,message)=>{if(!ok)throw Error(message)};const wait=async(get)=>{for(let i=0;i<100;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for project UI: '+get.toString());};
  const apiSource=await (await fetch('/src/lib/conversationCache.ts')).text();const apiPath=apiSource.match(/from "([^"\n]*\/api\.ts[^"\n]*)"/)[1];const {api}=await import(apiPath);
  await wait(()=>document.querySelectorAll('.repo-row').length>0);const accounts=await api.identities();
  api.githubRepositories=async()=>({repositories:[],warnings:[]});
  let received;const create=api.createRepository;api.createRepository=async update=>{received=update;return create(update);};
- document.querySelector('[aria-label="Add repository"]').click();await wait(()=>document.querySelector('.chooser-actions'));[...document.querySelectorAll('.chooser-actions button')].find(button=>button.textContent.includes('Create new repository')).click();await wait(()=>document.querySelector('.config-grid'));
+ document.querySelector('[aria-label="Add project"]').click();await wait(()=>document.querySelector('.chooser-actions'));[...document.querySelectorAll('.chooser-actions button')].find(button=>button.textContent.includes('Create new project')).click();await wait(()=>document.querySelector('.config-grid'));
  const setInput=(label,value)=>{const node=[...document.querySelectorAll('.config-grid label')].find(node=>node.textContent.trim().startsWith(label)).querySelector('input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));};
  // Select closes on scroll; finish layout and scrolling before opening a menu.
  const openSelect=async(label)=>{
@@ -49,7 +49,7 @@ script = r"""
  assert(document.querySelector('[aria-label="GitHub repository visibility"]').textContent.includes('Public'),'Keyboard selection did not update visibility');
  await choose('GitHub repository visibility','private');await openSelect('Identity');document.querySelector('.repo-config h2').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));await wait(()=>!document.querySelector('[role="listbox"]'));setInput('Remote URL','https://github.com/example-org/new-project.git');await pause();const identities=await openSelect('Identity');assert(accounts.every(account=>identities.textContent.includes(account.label)),'Typing unknown GitHub URL removed accounts');identities.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await pause();
  document.querySelector('.repo-config button[type="submit"]').click();await wait(()=>received);assert(received.githubCreate.private===true&&received.identityId===accounts[0].id&&received.canonicalRemote==='https://github.com/example-org/new-project.git','Creation request lost identity, visibility or organization');await wait(()=>!document.querySelector('.repo-config'));
- const row=await wait(()=>[...document.querySelectorAll('.repo-row')].find(row=>row.textContent.includes('New Project')));row.click();await wait(()=>row.querySelector('button.identity'));row.querySelector('button.identity').click();await wait(()=>document.querySelector('[aria-label="GitHub account"]'));const list=await openSelect('GitHub account');assert(accounts.every(account=>list.textContent.includes('@'+account.providerUsername)),'New repository account assignment lost accounts after reload');
+ const row=await wait(()=>[...document.querySelectorAll('.repo-row')].find(row=>row.textContent.includes('New Project')));row.click();await wait(()=>row.querySelector('button.identity'));row.querySelector('button.identity').click();await wait(()=>document.querySelector('[aria-label="GitHub account"]'));const list=await openSelect('GitHub account');assert(accounts.every(account=>list.textContent.includes('@'+account.providerUsername)),'New project account assignment lost accounts after reload');
  window.__savedPromptCheck={passed:true,checks:'new remote defaults, generated destination, organization creation payload, identities without catalog matches, and creation dropdown zoom'};
 })().catch(error=>window.__savedPromptCheck={passed:false,error:String(error)});
 """
