@@ -1268,3 +1268,13 @@ input[type="number"] { text-align: right; }
 .mail-folder-row > button:not(.mail-folder-name) {min-width:26px;justify-content:center}
 .mail-folder-spacer {width:26px}
 .mail-folder-tree {padding-inline-end:8px}
+.email-three-pane {grid-template-columns:minmax(135px,.65fr) minmax(155px,.9fr) minmax(0,2fr)}
+.email-folders {min-width:0;min-height:0;overflow:auto}
+.email-folders .mail-folder-tree {max-height:none;overflow:visible;min-height:0}
+.email-folders .mail-folder-name {max-width:calc(100% - 30px);flex:1}
+.mail-folder-count {display:inline-flex;align-items:center;gap:4px;margin-inline-start:auto;white-space:nowrap;font-size:11px}
+.mail-folder-count b {border-radius:8px;padding:0 4px;background:var(--surface-control)}
+.feedback-list .email-unread strong {color:var(--color-b7a7ff)}
+.email-html-frame {display:block;width:100%;min-width:0;border:0;background:white;margin-block:8px;border-radius:4px}
+.email-content {min-width:0}
+@container (max-width: 700px) {.email-three-pane {grid-template-columns:minmax(125px,.8fr) minmax(0,2fr);grid-template-rows:minmax(70px,.8fr) minmax(120px,2fr)}.email-folders {grid-row:1/-1}.email-three-pane .feedback-reader {grid-column:2;grid-row:2}.email-three-pane .feedback-list {grid-column:2;grid-row:1}}

@@ -75,15 +75,28 @@ existing selectable folders and can create folders. Folder names support Unicode
 Folder hierarchy separators are server-defined and read from IMAP LIST. Settings
 show the discovered tree before saving, including nonselectable parent containers.
 Choose a purpose, then its destination in the tree; no mailbox path entry is
-required. The Email page always shows its configured email folder. Folder creation
+required. The Email page opens at the project’s configured email root. Its tree browses the
+mailbox folders and shows each folder’s total and unread count. Nonselectable
+namespace parents remain expandable; internal automation receipt folders are hidden. Folder creation
 is available in mailbox settings and automation trigger setup. Proton custom folders use full
 names such as `Folders/Reports`, while labels use `Labels/Reports`. Existing short
 Proton names are matched only against a confirmed server folder; exact names are
 preserved. A missing name remains unassigned until you select or create a folder.
 
 
-Select an email to read it without marking it read. HTML is shown as inert text;
-remote images/scripts aren't loaded. The reader lists attachment names; use your
+Select an email to read it without automatically marking it read. Use the envelope
+button to mark read/unread and the star to flag/unflag. The Trash button moves mail
+to an existing server-designated Trash folder (or a recognized Trash/Bin folder);
+it never permanently deletes or expunges mail. Move can restore mail from Trash.
+
+HTML alternatives render formatted tables, styles and embedded raster CID images
+in an opaque-origin sandbox, sanitized with [DOMPurify](https://github.com/cure53/DOMPurify). Sender scripts, forms,
+frames, external stylesheets and remote images are blocked. A fixed nonce-authorized
+bridge handles sizing and explicit links without exposing app DOM/storage/IPC.
+Links open in the system browser/mail client after protocol validation; file,
+script and custom-app protocols are refused. **Load images** permits remote images
+for that message only, which may contact tracking servers. The text icon switches
+to the plain-text alternative when present. The reader lists attachment names; use your
 mail client to download attachments or open messages larger than 2 MB. Lists load
 50 messages at a time, in UID arrival order, with **Load older emails**.
 
@@ -276,3 +289,13 @@ lists the entire mailbox for every missing folder. The source is read in its own
 session. Mailbox work is serialized per project rather than across unrelated
 projects. Status badges share one project subscription and cache checks for two
 minutes; project-specific changes invalidate only that project's status.
+
+
+Folder counts use STATUS MESSAGES/UNSEEN in one IMAP session, without selecting or
+reading every message. A folder whose counts cannot be retrieved shows an unknown
+count rather than a misleading zero. Refresh updates both messages and folder
+counts; mail actions also update counts. The email tool supports `folderTree` for
+the same count overview and `flag` with `read`, `unread`, `star`, or `unstar` for
+an existing message reference. Analyze-mode agents can read the overview but cannot
+change flags. Message read results include separate `body`, `html`, `inlineImages`,
+`read` and `starred` fields; rendered content is never saved as a local archive.

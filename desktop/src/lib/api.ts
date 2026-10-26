@@ -317,6 +317,7 @@ export const api = {
     }
     demoIdentities = demoIdentities.map((identity) => identity.id === identityId ? { ...identity, connected: false } : identity);
   },
+  async openEmailLink(url:string):Promise<void>{if(!inTauri()){window.open(url,'_blank','noopener,noreferrer');return;}await invoke('open_email_link',{url});},
   async openExternalUrl(url: string): Promise<void> {
     if (!inTauri()) { window.open(url, '_blank', 'noopener,noreferrer'); return; }
     await invoke("open_external_url", { url });

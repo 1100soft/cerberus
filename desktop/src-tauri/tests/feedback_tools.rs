@@ -74,13 +74,15 @@ fn request(modern: bool, read_only: bool, action: &str) -> std::process::Output 
 }
 #[test]
 fn analyze_tools_refuse_writes_for_public_and_legacy_names() {
-    for modern in [true, false] {
-        let output = request(modern, true, "draft");
-        assert!(!output.status.success());
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("Analyze mode permits only reading email"));
-        assert!(!error.contains("private customer content"));
-        assert!(output.stdout.is_empty());
+    for action in ["draft", "flag"] {
+        for modern in [true, false] {
+            let output = request(modern, true, action);
+            assert!(!output.status.success());
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(error.contains("Analyze mode permits only reading email"));
+            assert!(!error.contains("private customer content"));
+            assert!(output.stdout.is_empty());
+        }
     }
 }
 #[test]

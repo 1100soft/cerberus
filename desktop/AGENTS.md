@@ -58,3 +58,6 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 
 - Email folder deletion is immediate, with undo/redo instead of confirmation. Keep empty/unassigned/leaf and INBOX protections. Folder history covers actual successful mutations, including partially failed batches; never undo folders that predated a copy. Preserve native text-input undo.
 - Batch mailbox folder mutations in one authenticated session; avoid reconnecting/listing per child. Share status polling per project and keep unrelated projects independent.
+
+- Render email HTML only after sanitizing it in an opaque-origin sandbox. Sender scripts/forms/frames and remote media remain blocked by default; any trusted sizing/link bridge needs a fresh nonce, strict CSP and frame/token validation. Never grant email frames same-origin access or native IPC, and validate external link protocols on both sides.
+- Folder counts must use authoritative STATUS MESSAGES/UNSEEN attributes (imap 2.4 forwards them through its unsolicited channel); never display its default returned Mailbox zeros as real counts. Keep count scans from blocking interactive mail reads, after taking a coherent config/credential snapshot.

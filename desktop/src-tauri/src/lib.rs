@@ -853,6 +853,13 @@ fn open_local_folder(repository_id: String, state: State<AppState>) -> Result<()
     open_url::that(path.to_string_lossy().into_owned()).map_err(|e| e.to_string())
 }
 
+fn permitted_email_link(value:&str)->bool {
+ if value.chars().any(char::is_control){return false;}
+ let Ok(url)=url::Url::parse(value)else{return false;};
+ matches!(url.scheme(),"http"|"https")&&url.host_str().is_some() || url.scheme()=="mailto"
+}
+#[tauri::command]
+fn open_email_link(url:String)->Result<(),String>{if !permitted_email_link(&url){return Err("Email link protocol is not permitted".into());}open_url::that(url).map_err(|error|error.to_string())}
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     if !permitted_external_url(&url) {
@@ -867,6 +874,7 @@ fn permitted_external_url(url:&str)->bool{
 
 #[cfg(test)]
 mod external_url_tests {
+    #[test] fn email_links_allow_browser_and_mail_only(){for link in ["https://example.org/path","http://example.org","mailto:hello@example.org"]{assert!(super::permitted_email_link(link));}for link in ["javascript:alert(1)","file:///etc/passwd","data:text/html,test","https://example.org\n"]{assert!(!super::permitted_email_link(link));}}
     use super::permitted_external_url;
     #[test]
     fn usage_pages_are_permitted(){
@@ -1037,7 +1045,7 @@ pub fn run() {
             open_in_editor,
             open_hosted_repository,
             open_local_folder,
-            open_external_url
+            open_external_url, open_email_link
         ])
         .build(tauri::generate_context!())
         .expect("error while building GitCerberus")
