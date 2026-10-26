@@ -1,3 +1,4 @@
+import {resolveFeedbackFolder,mailboxScopeKey} from './feedbackFolders';
 import {feedback,mailKey,mailReference,type MailRef} from './feedback';
 import { resolveScriptRuntime } from './scriptRuntime';
 import type { ScriptRuntime } from './scriptRuntime';
@@ -23,7 +24,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'feedback' | 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export type AutomationRetry={feedback?:MailRef;inputValues?:AutomationInputValues;job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
 const blockedRuns=new Map<string,AutomationLog>();
 const retryingRuns=new Set<string>();
@@ -685,6 +686,7 @@ export async function pollFeedback(){
   if(feedbackPolling)return;feedbackPolling=true;
   try{
     const repositories=await api.repositories();
+    const trees=new Map<string,ReturnType<typeof feedback.setup>>();
     for(const job of jobs.filter(job=>job.enabled&&automationConditions(job).includes('feedback'))){
       for(const repo of repositories.filter(repo=>repo.localPath&&scopedTo(job,repo.id))){
         const key=`${job.id}:${repo.id}`,health=feedbackErrors.get(key);
@@ -695,10 +697,20 @@ export async function pollFeedback(){
           const config=await feedback.config(repo.id);if(!config?.enabled)continue;
           // Legacy/imported jobs start observing now; never replay the mailbox accidentally.
           if(!job.feedbackSince){change(job.id,{feedbackSince:Date.now()});continue;}
-          const events=await feedback.request<MailRef[]>(repo.id,{action:'poll',folder:job.feedbackFolder||config.inbox,subscription:job.id,since:job.feedbackSince});
+          let folder=job.feedbackFolder||config.inbox;
+          if(job.feedbackPath!==undefined){
+            const treeKey=JSON.stringify([repo.id,mailboxScopeKey(config)]);
+            if(!trees.has(treeKey))trees.set(treeKey,feedback.setup(repo.id,config));
+            const resolved=resolveFeedbackFolder(config,await trees.get(treeKey)!,job);
+            if(!resolved){feedbackErrors.delete(key);continue;} // Partial folder coverage is intentional.
+            folder=resolved;
+          }
+          const events=await feedback.request<MailRef[]>(repo.id,{action:'poll',folder,subscription:job.id,since:job.feedbackSince});
           feedbackErrors.delete(key);
+          const latestConfig=await feedback.config(repo.id);
+          if(!latestConfig?.enabled||mailboxScopeKey(latestConfig)!==mailboxScopeKey(config))continue;
           const current=jobs.find(item=>item.id===job.id);
-          if(!current?.enabled||current.feedbackSince!==job.feedbackSince||current.feedbackFolder!==job.feedbackFolder||!scopedTo(current,repo.id))continue;
+          if(!current?.enabled||current.feedbackSince!==job.feedbackSince||current.feedbackFolder!==job.feedbackFolder||JSON.stringify(current.feedbackPath)!==JSON.stringify(job.feedbackPath)||!scopedTo(current,repo.id))continue;
           const mail=events[0];if(!mail)continue;
           automationConditionSets(job).forEach((conditions,setIndex)=>{
             if(!conditions.includes('feedback'))return;

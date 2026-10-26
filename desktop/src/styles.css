@@ -1247,3 +1247,8 @@ input[type="number"] { text-align: right; }
 .automation-condition-content:has(.feedback-trigger-folders) {overflow:auto;min-height:0}
 .feedback-trigger-folders {min-width:0;display:flex;flex-direction:column;gap:6px}
 .feedback-trigger-folders > small {overflow-wrap:anywhere}
+.mail-folder-partial > .mail-folder-row .mail-folder-name {color:var(--text-secondary)}
+.mail-folder-coverage {margin-inline-start:auto;font-size:10px;white-space:nowrap}
+.feedback-folder-proposal {border:1px solid var(--border-control);padding:8px;border-radius:6px;overflow-wrap:anywhere}
+.feedback-folder-proposal p {margin:4px 0}
+.feedback-folder-proposal button {margin-inline-end:5px}

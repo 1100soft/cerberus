@@ -1,7 +1,7 @@
 import {invoke} from '@tauri-apps/api/core';
 import {inTauri} from './api';
 export type MailboxConfig={provider?:string;enabled:boolean;address:string;username:string;imapHost:string;imapPort:number;imapSecurity:string;smtpHost:string;smtpPort:number;smtpSecurity:string;inbox:string;drafts:string;sent:string;notes:string;metadata:string;certificatePath:string;allowSend:boolean};
-export type MailFolder={path:string;delimiter:string|null;selectable:boolean};
+export type MailFolder={path:string;delimiter:string|null;selectable:boolean;label?:string;coverage?:number;total?:number;detail?:string};
 export type MailRef={folder:string;validity:number;uid:number;messageId:string};
 export type FeedbackMail=MailRef&{subject:string;from:string;replyTo:string;date:string;timestamp:number;body:string;attachments:string[]};
 export const defaultMailbox=():MailboxConfig=>({provider:'custom',enabled:true,address:'',username:'',imapHost:'',imapPort:993,imapSecurity:'tls',smtpHost:'',smtpPort:465,smtpSecurity:'tls',inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Cerberus Notes',metadata:'Cerberus Receipts',certificatePath:'',allowSend:false});

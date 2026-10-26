@@ -5,7 +5,7 @@ its repository, and use the configuration icon. Repository configuration also ha
 **Configure feedback mailbox**. Configure IMAP and SMTP hosts, ports, TLS or
 STARTTLS, username, sending address and password/app password. Sending is off by
 default. Folder discovery starts as connection details become available. Select
-existing folders in the tree for Feedback, Drafts, Sent, Internal notes and
+existing folders in the tree for Email root, Drafts, Sent, Internal notes and
 Automation receipts. Use a folder's **+** button to create a child, entering only
 its name; the server's hierarchy separator is applied automatically. Namespace
 containers appear in the tree but cannot receive mail. **Save** automatically
@@ -111,12 +111,34 @@ tools and polling; existing mail and the stored password remain untouched.
 
 ## Feedback-triggered automations
 
-Add **On feedback email**. **Repository default** uses each repository's configured
-feedback folder, or choose a specific folder from a mailbox tree. Each repository
-uses its own connection. All-repository scopes skip repositories without a
-configured mailbox. This event can combine with compatible conditions in an AND
-row, with OR between rows. Commit/CI/feedback events are mutually exclusive within
-one row. Pure feedback rows don't use the branch filter.
+Add **On feedback email**. Its tree merges the children of every selected
+repository's **Email root**; there is no repository selector in the condition.
+The root itself is selectable. Unconfigured repositories are ignored. A `Bugs`
+rule means the `Bugs` child of each repository's own root, regardless of its full
+IMAP name or hierarchy separator. Automatic runs and **Run once** resolve the
+same folder. This lets a classifier watch the root and move mail into `Bugs`,
+`Support`, or other folders with independent automation rules.
+
+Folders present everywhere use the normal text color. Partial coverage is dimmed,
+with counts and repository names on hover. A configured but unreachable mailbox
+remains in the total and is reported as unverified, never silently treated as
+unconfigured. Selecting a partial folder offers to create it in the other
+configured repositories. Creating a folder also asks for confirmation before
+creating it across the selected configured repositories. Existing folders are
+preserved; nested creation adds only missing parents/children using each server's
+separator. Failures are reported per repository and can be retried. Declining is
+allowed: rules simply skip repositories where that folder does not exist.
+
+When email is configured later for a repository targeted by active automations,
+settings offers to create their missing relative folders. This includes rules
+that cover future repositories. It never creates folders without the user's
+confirmation. Sending and all ordinary automation enabled settings are unchanged.
+Previously saved absolute folder rules keep their behavior until a folder is
+reselected in the root-relative tree; they are not silently rewritten.
+
+Feedback events can combine with compatible conditions in an AND row, with OR
+between rows. Commit/CI/feedback events are mutually exclusive within one row.
+Pure feedback rows don't use the branch filter.
 
 The first successful poll saves the watched folder's UIDVALIDITY/UID watermark in
 the server's Receipts folder. **Emails already present then are excluded.** Later

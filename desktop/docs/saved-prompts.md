@@ -299,9 +299,13 @@ not provided by this feature.
 
 ## Feedback email condition
 
-**On feedback email** uses each repository's configured feedback folder by default.
-Choose another folder or create one in the discovered mailbox tree; no folder path
-entry is needed. It watches the selected IMAP folder in each repository's own
+**On feedback email** selects the email root or a relative child folder in a
+shared tree for all selected repositories. Coverage counts and dimmed rows show
+partial presence; unconfigured repositories are ignored and connection errors
+remain visible. Partial selection/new folders offer confirmed creation in all
+configured repositories. Late mailbox setup offers folders required by active
+rules. There is no repository selector or manual path entry at the condition
+level. Each repository resolves the relative selection inside its own
 mailbox. The first successful observation excludes existing messages; later
 arrivals and messages moved into that folder are eligible once per automation.
 Server-side email receipts track dispatch across restarts. Agent actions receive

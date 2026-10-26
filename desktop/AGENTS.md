@@ -53,3 +53,5 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 - Keep button text minimal: use short contextual labels (for example Import) and icons for obvious secondary actions, with accessible labels/tooltips. Avoid explaining ordinary Save/import behavior in the UI.
 
 - Mailbox folder selection must discover the server hierarchy and use a tree, including nonselectable namespace parents and server delimiters. Create folders by selecting a parent and entering a leaf name; never require manual IMAP path entry. Configured mailboxes activate automatically; automation rules control processing. Use one Save action that verifies access and leaves failures visible.
+
+- Feedback automation folders are relative to each selected repository's configured email root. Condition UI merges repository trees, shows coverage (including unverified configured accounts), ignores unconfigured repositories, and never adds a repository selector at trigger level. Creating missing folders across repositories requires an explicit in-app action.
