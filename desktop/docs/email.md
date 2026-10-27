@@ -303,3 +303,9 @@ the same count overview and `flag` with `read`, `unread`, `star`, or `unstar` fo
 an existing message reference. Analyze-mode agents can read the overview but cannot
 change flags. Message read results include separate `body`, `html`, `inlineImages`,
 `read` and `starred` fields; rendered content is never saved as a local archive.
+
+
+Password entry does not test partial values while you type. Folder discovery with
+a newly entered password starts when you leave that field, press Enter, or use
+Refresh folders. Saved credentials still discover folders automatically. This
+avoids spurious invalid-login warnings from providers such as Proton Bridge.
