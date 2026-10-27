@@ -1278,3 +1278,15 @@ input[type="number"] { text-align: right; }
 .email-html-frame {display:block;width:100%;min-width:0;border:0;background:white;margin-block:8px;border-radius:4px}
 .email-content {min-width:0}
 @container (max-width: 700px) {.email-three-pane {grid-template-columns:minmax(125px,.8fr) minmax(0,2fr);grid-template-rows:minmax(70px,.8fr) minmax(120px,2fr)}.email-folders {grid-row:1/-1}.email-three-pane .feedback-reader {grid-column:2;grid-row:2}.email-three-pane .feedback-list {grid-column:2;grid-row:1}}
+
+/* Folder trees must not inherit the sidebar nav's full-width button/pill rules. */
+.email-folders {display:block}
+.email-account-address {min-width:0;overflow-wrap:anywhere;color:var(--text-secondary);font-size:12px}
+.feedback-reader {display:flex;flex-direction:column;overflow:hidden;gap:8px}
+.email-message-scroll {flex:1;min-height:0;min-width:0;overflow:auto;overflow-wrap:anywhere}
+.email-reply-launch {flex:none;display:flex;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--border-control)}
+.email-reply-dialog {width:min(640px,calc(100% - 24px));height:min(440px,calc(100% - 24px))}
+.email-reply-dialog .automation-dialog-content {display:flex;flex-direction:column;gap:8px;min-height:0}
+.email-reply-dialog label {display:flex;flex-direction:column;flex:1;min-height:0;gap:6px}
+.email-reply-dialog textarea {width:100%;flex:1;min-height:60px;resize:none}
+.email-reply-dialog footer {flex-wrap:wrap}

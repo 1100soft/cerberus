@@ -76,7 +76,9 @@ Folder hierarchy separators are server-defined and read from IMAP LIST. Settings
 show the discovered tree before saving, including nonselectable parent containers.
 Choose a purpose, then its destination in the tree; no mailbox path entry is
 required. The Email page opens at the project’s configured email root. Its tree browses the
-mailbox folders and shows each folder’s total and unread count. Nonselectable
+mailbox folders and shows each folder’s total and unread count. Siblings follow
+the server’s returned order; Cerberus does not alphabetize them. The configured
+email address appears in the page header. Nonselectable
 namespace parents remain expandable; internal automation receipt folders are hidden. Folder creation
 is available in mailbox settings and automation trigger setup. Proton custom folders use full
 names such as `Folders/Reports`, while labels use `Labels/Reports`. Existing short
@@ -101,7 +103,9 @@ mail client to download attachments or open messages larger than 2 MB. Lists loa
 50 messages at a time, in UID arrival order, with **Load older emails**.
 
 **Move** uses UID MOVE. The server must support this extension; Cerberus refuses
-an unsafe generic expunge fallback. **Save reply draft** appends a draft to the
+an unsafe generic expunge fallback. **Reply** stays visible below the independently scrolling message and opens a
+floating editor. Closing the editor keeps the text for the current message;
+changing messages clears it. **Save reply draft** appends a draft to the
 configured Drafts folder. Replies honor the original Reply-To, falling back to
 From, and include In-Reply-To/References. **Save internal note** appends a separate
 message addressed to yourself in the Notes folder, linked to the original mail;

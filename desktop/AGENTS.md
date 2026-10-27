@@ -61,3 +61,6 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 
 - Render email HTML only after sanitizing it in an opaque-origin sandbox. Sender scripts/forms/frames and remote media remain blocked by default; any trusted sizing/link bridge needs a fresh nonce, strict CSP and frame/token validation. Never grant email frames same-origin access or native IPC, and validate external link protocols on both sides.
 - Folder counts must use authoritative STATUS MESSAGES/UNSEEN attributes (imap 2.4 forwards them through its unsolicited channel); never display its default returned Mailbox zeros as real counts. Keep count scans from blocking interactive mail reads, after taking a coherent config/credential snapshot.
+
+- Preserve server sibling order in mailbox trees; do not alphabetize them. Keep folder containers isolated from sidebar navigation styles. Reply controls must remain reachable independently of long message content, including the minimum window at 140/150% zoom.
+- Custom tooltips must follow live title changes while hovered/focused and must not restore an obsolete title after the control changes state.

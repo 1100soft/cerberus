@@ -66,5 +66,7 @@ history.record('Different edit',{nodes:[],changes:[],processed:0},sourceConfig,a
 const treeSource=await readFile(new URL('../src/lib/mailFolderTree.ts',import.meta.url),'utf8');const treeCompiled=ts.transpileModule(treeSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {indexMailFolders}=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled).toString('base64')}`);
 const large=indexMailFolders(Array.from({length:2000},(_,i)=>node(`Root/Group${i}/Leaf`)));assert.equal(large.rows.size,4001);assert.equal(large.children.size,2001);assert.equal(large.ordered.length,4001);
-assert.deepEqual(indexMailFolders([node('A/Z'),node('A-Other'),node('A/B')]).ordered.map(n=>n.path),['A','A/B','A/Z','A-Other']);
+assert.deepEqual(indexMailFolders([node('A/Z'),node('A-Other'),node('A/B')]).ordered.map(n=>n.path),['A','A/Z','A/B','A-Other']);
 console.log('Batched folder plans, delimiter mapping, retry deduplication, partial undo/redo, assignment history and large tree indexing passed');
+
+assert.deepEqual(indexMailFolders([node('Z/Second'),node('A'),node('Z/First'),node('Z')]).ordered.map(n=>n.path),['Z','Z/Second','Z/First','A']);
