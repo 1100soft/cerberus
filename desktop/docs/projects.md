@@ -2,10 +2,12 @@
 
 Use **Add project → Create new project**, enter a display name and local
 folder, and choose **github** as the host. **Create remote repository on GitHub**
-is enabled by default. Select the GitHub account and visibility (private by
-default). Without a remote URL, the destination uses that account's username and
-the display name, replacing unsupported characters with hyphens. Enter an
-organization repository URL to create under an organization instead.
+is enabled by default. Select the GitHub identity first, then enter the repository
+name separately from the project's display name. Cerberus generates the remote
+URL from that account's username and repository name. Optionally enter an
+organization name to use it as the owner instead. Choose visibility (private by
+default) when creating the remote. Turning off remote creation uses the generated
+URL to link an existing repository.
 
 Cerberus initializes the local project, creates an empty GitHub repository,
 and configures `origin` and the selected identity. It does not commit or push
