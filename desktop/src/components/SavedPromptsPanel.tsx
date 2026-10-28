@@ -1,3 +1,4 @@
+import {folderPathLabel} from '../lib/feedbackFolders';
 import {FeedbackTriggerFolders} from './FeedbackTriggerFolders';
 import { ScriptRuntimeSelector } from './ScriptRuntimeSelector';
 import { runtimeLabel, runtimeError, detectScriptRuntime, type ScriptRuntime } from '../lib/scriptRuntime';
@@ -126,7 +127,7 @@ export function SavedPromptsPanel({repositories,profiles,chatgptSettings,externa
   const selectConditionSet=(index:number)=>{const sets=[conditions,...otherSets];const selected=sets.splice(index,1)[0];setOtherSets(sets);setTrigger(selected[0]||'manual');setMoreConditions(selected.slice(1));setConditionEmpty(!selected.length);setEditingCondition(null);};
 
   const parameterConditions:Trigger[]=['feedback','interval','changeCount','handoff','idleTime'];
-  const conditionLabel=(condition:Trigger)=>{const label=conditionChoices.find(item=>item.value===condition)?.label||condition;switch(condition){case 'feedback':return `${label}: ${feedbackPath?.length?feedbackPath.join(' / '):feedbackFolder||'Email root'}`;case 'interval':return `${label}: ${minutes} min`;case 'changeCount':return `${label}: ${changeThreshold} lines`;case 'handoff':return `${label}: ${handoffName.trim()||'set name'}${handoffVariables.length?' · '+handoffVariables.join(' + ')+' true':''}`;case 'idleTime':return `${label}: ${Math.round(debounceSeconds/60)} min`;default:return label;}};
+  const conditionLabel=(condition:Trigger)=>{const label=conditionChoices.find(item=>item.value===condition)?.label||condition;switch(condition){case 'feedback':return `${label}: ${feedbackPath?.length?folderPathLabel(feedbackPath):feedbackFolder||'Email root'}`;case 'interval':return `${label}: ${minutes} min`;case 'changeCount':return `${label}: ${changeThreshold} lines`;case 'handoff':return `${label}: ${handoffName.trim()||'set name'}${handoffVariables.length?' · '+handoffVariables.join(' + ')+' true':''}`;case 'idleTime':return `${label}: ${Math.round(debounceSeconds/60)} min`;default:return label;}};
   const removeCondition=(condition:Trigger)=>{const remaining=conditions.filter(item=>item!==condition);if(!remaining.length){setTrigger('manual');setMoreConditions([]);setConditionEmpty(true);}else{setTrigger(remaining[0]);setMoreConditions(remaining.slice(1));}if(editingCondition===condition)setEditingCondition(null);};
   const addCondition=(condition:Trigger)=>{if(!condition||(!conditionEmpty&&!conditionsCompatible(conditions,condition)))return;if(conditionEmpty){setTrigger(condition);setMoreConditions([]);}else setMoreConditions(current=>[...current,condition]);setConditionEmpty(false);setEditingCondition(parameterConditions.includes(condition)?condition:null);};
   const hasCondition=(condition:Trigger)=>allConditions.includes(condition);

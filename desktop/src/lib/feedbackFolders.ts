@@ -1,6 +1,9 @@
 import {feedback,type MailboxConfig,type MailFolder} from './feedback';
 export type FeedbackFolderRule={feedbackPath?:string[];feedbackFolder?:string};
-export type MailboxTree={id:string;label:string;config:MailboxConfig;nodes:MailFolder[];error?:string};
+export type MailboxTree={id:string;label:string;config:MailboxConfig;nodes:MailFolder[];error?:string;unverified?:boolean};
+// Reserved internal path segment; IMAP folder names cannot contain NUL.
+export const mailboxFolderScope='\0mailbox';
+export const folderPathLabel=(parts:string[])=>parts.map(part=>part===mailboxFolderScope?'Mailbox folders':part).join(' / ');
 export const folderKey=(parts:string[])=>['root',...parts.map(encodeURIComponent)].join('/');
 export const folderParts=(key:string)=>key?key.split('/').slice(1).map(decodeURIComponent):[];
 export function mailboxRoot(config:MailboxConfig,nodes:MailFolder[]){
@@ -12,6 +15,7 @@ export function mailboxRoot(config:MailboxConfig,nodes:MailFolder[]){
 export const mailboxScopeKey=(config:MailboxConfig)=>JSON.stringify([config.inbox,config.username,config.imapHost,config.imapPort,config.imapSecurity,config.certificatePath]);
 export function relativeFolder(config:MailboxConfig,nodes:MailFolder[],parts:string[]):string|null{
  const root=mailboxRoot(config,nodes);
+ if(parts[0]===mailboxFolderScope){const delimiter=root.delimiter||nodes.find(node=>node.delimiter)?.delimiter;const rest=parts.slice(1);if(!rest.length||rest.some(part=>!part||delimiter&&part.includes(delimiter)))return null;const path=rest.join(delimiter||'');return nodes.some(node=>node.path===path&&node.selectable)&&![config.drafts,config.sent,config.notes,config.metadata].includes(path)?path:null;}
  if(!parts.length)return root.path;
  if(!root.delimiter)return null;
  if(parts.some(part=>!part||part.includes(root.delimiter!)))return null;
@@ -30,30 +34,38 @@ export function mergedFolderTree(mailboxes:MailboxTree[]):MailFolder[]{
  for(const mailbox of mailboxes){
   if(mailbox.error)continue;
   const root=mailboxRoot(mailbox.config,mailbox.nodes);add([],mailbox.id,true);
-  if(!root.delimiter)continue;
+  const delimiter=root.delimiter||mailbox.nodes.find(node=>node.delimiter)?.delimiter;
+  add([mailboxFolderScope],mailbox.id,false);
   for(const node of mailbox.nodes){
-   if(!node.path.startsWith(root.path+root.delimiter))continue;
-   const parts=node.path.slice(root.path.length+root.delimiter.length).split(root.delimiter);
+   const parts=[mailboxFolderScope,...(node.delimiter?node.path.split(node.delimiter):[node.path])];
+   const reserved=[mailbox.config.drafts,mailbox.config.sent,mailbox.config.notes,mailbox.config.metadata].includes(node.path);
+   for(let length=2;length<=parts.length;length++)add(parts.slice(0,length),mailbox.id,length===parts.length&&node.selectable&&!reserved);
+  }
+  if(!delimiter)continue;
+  for(const node of mailbox.nodes){
+   if(!node.path.startsWith(root.path+delimiter))continue;
+   const parts=node.path.slice(root.path.length+delimiter.length).split(delimiter);
    const reserved=[mailbox.config.drafts,mailbox.config.sent,mailbox.config.notes,mailbox.config.metadata].includes(node.path);
    for(let length=1;length<=parts.length;length++)add(parts.slice(0,length),mailbox.id,length===parts.length&&node.selectable&&!reserved);
   }
  }
  if(!entries.size)entries.set(folderKey([]),{parts:[],present:new Set(),selectable:new Set()});
  return [...entries.entries()].map(([path,entry])=>{
-  const present=mailboxes.filter(mailbox=>entry.present.has(mailbox.id)),selectable=mailboxes.filter(mailbox=>entry.selectable.has(mailbox.id));
-  const missing=mailboxes.filter(mailbox=>!mailbox.error&&!entry.selectable.has(mailbox.id));
-  const unknown=mailboxes.filter(mailbox=>mailbox.error);
-  return {path,delimiter:'/',selectable:entry.selectable.size>0,label:entry.parts.at(-1)||'Email root',coverage:present.length,total:mailboxes.length,
+  const present=mailboxes.filter(mailbox=>!mailbox.unverified&&entry.present.has(mailbox.id)),selectable=mailboxes.filter(mailbox=>!mailbox.unverified&&entry.selectable.has(mailbox.id));
+  const missing=mailboxes.filter(mailbox=>!mailbox.error&&!mailbox.unverified&&!entry.selectable.has(mailbox.id));
+  const unknown=mailboxes.filter(mailbox=>mailbox.error||mailbox.unverified);
+  return {path,delimiter:'/',selectable:entry.selectable.size>0,label:entry.parts.at(-1)===mailboxFolderScope?'Mailbox folders':entry.parts.at(-1)||'Email root',coverage:present.length,total:mailboxes.length,
    detail:[`Present: ${present.map(mailbox=>mailbox.label).join(', ')||'none'}`,missing.length?`Missing or unavailable: ${missing.map(mailbox=>mailbox.label).join(', ')}`:'',unknown.length?`Unverified: ${unknown.map(mailbox=>mailbox.label).join(', ')}`:'',present.length&&!selectable.length?'Container only':''].filter(Boolean).join('\n')};
  });
 }
 export async function ensureRelativeFolder(mailbox:MailboxTree,parts:string[]):Promise<MailFolder[]>{
  let nodes=await feedback.setup(mailbox.id,mailbox.config);
- let parent=mailboxRoot(mailbox.config,nodes).path;
- for(const name of parts){
-  const node=nodes.find(node=>node.path===parent);if(!node?.delimiter)throw Error(`“${parent}” does not support child folders.`);
+ const namespace=parts[0]===mailboxFolderScope;
+ let parent=namespace?'':mailboxRoot(mailbox.config,nodes).path;
+ for(const name of namespace?parts.slice(1):parts){
+  const node=parent?nodes.find(node=>node.path===parent):nodes.find(node=>node.delimiter);if(!node?.delimiter)throw Error(`“${parent}” does not support child folders.`);
   if(!name||name.includes(node.delimiter)||/[\/\\\r\n\0]/.test(name))throw Error('Enter a folder name, not a path.');
-  const child=parent+node.delimiter+name;
+  const child=parent?parent+node.delimiter+name:name;
   if(!nodes.some(node=>node.path===child))nodes=await feedback.setup(mailbox.id,mailbox.config,undefined,parent,name);
   if(!nodes.some(node=>node.path===child))throw Error(`The server did not return the created folder “${child}”.`);
   parent=child;

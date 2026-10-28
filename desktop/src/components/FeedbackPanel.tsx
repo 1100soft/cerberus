@@ -33,7 +33,7 @@ export function FeedbackSettings({repositoryId,onClose,onSaved}:{repositoryId:st
  useEffect(()=>{
   let active=true;setDiscovered('');setServerFolders([]);
   if(!passwordReady||oauth||!config.username||!config.address.includes('@')||!config.imapHost||!config.smtpHost||(!password&&(!original||accountChanged)))return;
-  const timer=setTimeout(()=>{setDiscovering(true);setError('');void feedback.setup(repositoryId,config,password).then(nodes=>{if(active){acceptFolders(nodes);setDiscovered(connectionKey);}}).catch(reason=>{if(active)setError(String(reason));}).finally(()=>{if(active)setDiscovering(false);});},400);
+  const timer=setTimeout(()=>{setDiscovering(true);setError('');void feedback.setup(repositoryId,config,password,undefined,undefined,attempt>0).then(nodes=>{if(active){acceptFolders(nodes);setDiscovered(connectionKey);}}).catch(reason=>{if(active)setError(String(reason));}).finally(()=>{if(active)setDiscovering(false);});},400);
   return()=>{active=false;clearTimeout(timer);setDiscovering(false);};
  },[connectionKey,passwordReady]);
  const folderProblem=roles.some(role=>!serverFolders.some(node=>node.selectable&&node.path===config[role.value]))?'Choose existing folders for each purpose, or create them in the tree.':new Set(roles.map(role=>config[role.value])).size!==roles.length?'Choose a different folder for each purpose.':'';

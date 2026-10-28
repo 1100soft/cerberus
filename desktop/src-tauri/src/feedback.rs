@@ -372,6 +372,18 @@ pub fn save(root: &Path, id: &str, mut c: Config, secret: Option<String>) -> Res
     output.persist(p).map_err(|e| e.to_string())?;
     Ok(())
 }
+fn tls_failure(stage: &str, detail: &str) -> String {
+    let lower = detail.to_lowercase();
+    let advice = if ["timed out", "timeout", "would block", "temporarily unavailable", "os error 11"].iter().any(|word| lower.contains(word)) {
+        "The server did not complete the TLS handshake in time. Retry and check server availability or network access."
+    } else if ["certificate", "issuer", "hostname", "verify failed"].iter().any(|word| lower.contains(word)) {
+        "Certificate verification failed. Check the hostname and trusted certificate; Proton Bridge may require importing its current certificate."
+    } else {
+        "The TLS connection was interrupted or rejected. Retry and verify the server port and TLS/STARTTLS mode."
+    };
+    format!("IMAP {stage} failed. {advice} Details: {detail}")
+}
+
 fn connect(c: &Config, secret: &str) -> Result<Session, String> {
     let mut tls = native_tls::TlsConnector::builder();
     if !c.certificate_path.is_empty() {
@@ -390,7 +402,7 @@ fn connect(c: &Config, secret: &str) -> Result<Session, String> {
         .map_err(|_| "Cannot resolve the IMAP server")?;
     let mut stream = None;
     for address in addresses {
-        if let Ok(value) = TcpStream::connect_timeout(&address, TIMEOUT) {
+        if let Ok(value) = TcpStream::connect_timeout(&address, Duration::from_secs(3)) {
             stream = Some(value);
             break;
         }
@@ -409,11 +421,11 @@ fn connect(c: &Config, secret: &str) -> Result<Session, String> {
             .map_err(|_| "Cannot read IMAP greeting")?;
         plain
             .secure(&c.imap_host, &tls)
-            .map_err(|_| "IMAP STARTTLS failed. Check the hostname and trusted certificate.")?
+            .map_err(|error| tls_failure("STARTTLS", &error.to_string()))?
     } else {
         let mut client = imap::Client::new(
             tls.connect(&c.imap_host, stream)
-                .map_err(|_| "IMAP TLS failed. Check the hostname and trusted certificate.")?,
+                .map_err(|error| tls_failure("TLS", &error.to_string()))?,
         );
         client
             .read_greeting()
@@ -1267,6 +1279,9 @@ pub fn setup_batch(
             password(id)?
         }
     };
+    // Discovery only needs a coherent credential snapshot, not exclusive access
+    // for the entire network request. Mutating batches keep their lock.
+    if operations.is_empty() { drop(_guard); }
     let mut session = connect(&c, &secret)?;
     let result = (|| {
         let mut nodes = folder_tree(&mut session)?;
@@ -1650,6 +1665,15 @@ pub fn instructions() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tls_errors_distinguish_transport_from_certificate_failures() {
+        let timeout = tls_failure("TLS", "Resource temporarily unavailable (os error 11)");
+        assert!(timeout.contains("handshake in time"));
+        assert!(!timeout.contains("Certificate verification failed"));
+        assert!(tls_failure("STARTTLS", "certificate verify failed").contains("Certificate verification failed"));
+        assert!(tls_failure("TLS", "unexpected EOF").contains("interrupted or rejected"));
+    }
+
     #[test]
     fn mailbox_names_roundtrip_including_ampersands_and_non_bmp() {
         for name in [

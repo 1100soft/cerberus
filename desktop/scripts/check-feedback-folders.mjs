@@ -5,7 +5,7 @@ const source=await readFile(new URL('../src/lib/feedbackFolders.ts',import.meta.
 let implementation=()=>{throw Error('Unexpected server call');};
 globalThis.feedbackFolderFixture={setup:(...args)=>implementation(...args)};
 const compiled=ts.transpileModule(source.replace(/^import .* from '\.\/feedback';\n/, 'const feedback=globalThis.feedbackFolderFixture;\n'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {folderKey,folderParts,mergedFolderTree,relativeFolder,resolveFeedbackFolder,ensureRelativeFolder,mailboxScopeKey}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const {folderKey,folderParts,mergedFolderTree,relativeFolder,resolveFeedbackFolder,ensureRelativeFolder,mailboxScopeKey,mailboxFolderScope}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const config=(inbox)=>({inbox,drafts:'Drafts',sent:'Sent',notes:'Notes',metadata:'Receipts'});
 const node=(path,delimiter='/',selectable=true)=>({path,delimiter,selectable});
 const a={id:'a',label:'A',config:config('Folders/Reports'),nodes:[node('Folders/Reports'),node('Folders/Reports/Bugs'),node('Folders/Reports/Bugs/UI'),node('Folders/Reports/Only A')]};
@@ -63,10 +63,35 @@ assert.deepEqual(history.redo[0].operations,undoChanges.map(c=>c.inverse).revers
 const remaining=history.undo[0].operations.length;history.finish('undo',{nodes:[],changes:[],processed:0,error:'Has mail'},sourceConfig);assert.equal(history.undo[0].operations.length,remaining);
 history.reset();const assigned={...sourceConfig,inbox:'Other'};history.record('Assignment',{nodes:[],changes:[],processed:0},sourceConfig,assigned);assert.equal(history.undo.length,1);history.finish('undo',{nodes:[],changes:[],processed:0},assigned);assert.deepEqual(history.redo[0].assignments,assigned);
 history.record('Different edit',{nodes:[],changes:[],processed:0},sourceConfig,assigned);assert.equal(history.redo.length,0);
+const rememberedOrder=new Map();globalThis.localStorage={getItem:key=>rememberedOrder.get(key)||null,setItem:(key,value)=>rememberedOrder.set(key,value)};
 const treeSource=await readFile(new URL('../src/lib/mailFolderTree.ts',import.meta.url),'utf8');const treeCompiled=ts.transpileModule(treeSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {indexMailFolders}=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled).toString('base64')}`);
 const large=indexMailFolders(Array.from({length:2000},(_,i)=>node(`Root/Group${i}/Leaf`)));assert.equal(large.rows.size,4001);assert.equal(large.children.size,2001);assert.equal(large.ordered.length,4001);
 assert.deepEqual(indexMailFolders([node('A/Z'),node('A-Other'),node('A/B')]).ordered.map(n=>n.path),['A','A/Z','A/B','A-Other']);
 console.log('Batched folder plans, delimiter mapping, retry deduplication, partial undo/redo, assignment history and large tree indexing passed');
 
-assert.deepEqual(indexMailFolders([node('Z/Second'),node('A'),node('Z/First'),node('Z')]).ordered.map(n=>n.path),['Z','Z/Second','Z/First','A']);
+assert.deepEqual(indexMailFolders([node('Z/Second'),node('A'),node('Z/First'),node('Z')]).ordered.map(n=>n.path),['A','Z','Z/Second','Z/First']);
+assert.deepEqual(indexMailFolders([node('Z/First'),node('A'),node('Z/Second')]).ordered.map(n=>n.path),['A','Z','Z/Second','Z/First']);
+assert.deepEqual(indexMailFolders(['Trash','Archive','Inbox','Drafts','Sent','Custom'].map(path=>node(path))).ordered.map(n=>n.path),['Inbox','Drafts','Sent','Archive','Custom','Trash']);
+const reloadedTree=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled+'\n// reload persisted order').toString('base64')}`);
+assert.deepEqual(reloadedTree.indexMailFolders([node('Z/First'),node('A'),node('Z/Second')]).ordered.map(n=>n.path),['A','Z','Z/Second','Z/First']);
+const siblingMailbox={id:'sibling',label:'Sibling',config:config('INBOX'),nodes:[node('INBOX'),node('Reports'),node('Reports/Bugs')]};
+assert.equal(relativeFolder(siblingMailbox.config,siblingMailbox.nodes,[mailboxFolderScope,'Reports','Bugs']),'Reports/Bugs');
+assert(mergedFolderTree([siblingMailbox]).some(n=>n.path===folderKey([mailboxFolderScope,'Reports'])&&n.selectable));
+
+// Snapshot sharing must save connections without caching credentials or failures.
+globalThis.window=new EventTarget();
+let folderCalls=0,releaseFolder;
+globalThis.mailFolderInvoke=async()=>{folderCalls++;return new Promise(resolve=>{releaseFolder=resolve;});};
+const feedbackSource=await readFile(new URL('../src/lib/feedback.ts',import.meta.url),'utf8');
+const feedbackCompiled=ts.transpileModule(feedbackSource.replace(/^import .*;\n/gm,'const invoke=globalThis.mailFolderInvoke;const inTauri=()=>true;\n').replace('const invoke=globalThis.mailFolderInvoke;const inTauri=()=>true;\nconst invoke=globalThis.mailFolderInvoke;const inTauri=()=>true;','const invoke=globalThis.mailFolderInvoke;const inTauri=()=>true;'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const folderCache=await import(`data:text/javascript;base64,${Buffer.from(feedbackCompiled).toString('base64')}`);
+const settings={...folderCache.defaultMailbox(),imapHost:'fixture',username:'fixture'};
+const first=folderCache.feedback.setup('one',settings),second=folderCache.feedback.setup('one',settings);
+assert.equal(folderCalls,1);releaseFolder([node('INBOX')]);await Promise.all([first,second]);
+await folderCache.feedback.setup('one',settings);assert.equal(folderCalls,1);
+const other=folderCache.feedback.setup('two',settings);assert.equal(folderCalls,2);releaseFolder([node('INBOX')]);await other;
+folderCache.invalidateMailFolders('one');assert.equal(folderCache.cachedMailFolders('one',settings),undefined);assert.ok(folderCache.cachedMailFolders('two',settings));
+const stale=folderCache.feedback.setup('one',settings);folderCache.invalidateMailFolders('one');releaseFolder([node('Stale')]);await stale;assert.equal(folderCache.cachedMailFolders('one',settings),undefined);
+const forced=folderCache.feedback.setup('two',settings,undefined,undefined,undefined,true);assert.equal(folderCalls,4);releaseFolder([node('Fresh')]);await forced;
+console.log('Folder snapshot cache, concurrent request sharing, project isolation, forced refresh and invalidation during loading passed');

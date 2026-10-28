@@ -11,10 +11,26 @@ export type FeedbackMail=MailRef&{subject:string;from:string;replyTo:string;date
 export const defaultMailbox=():MailboxConfig=>({provider:'custom',enabled:true,address:'',username:'',imapHost:'',imapPort:993,imapSecurity:'tls',smtpHost:'',smtpPort:465,smtpSecurity:'tls',inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Cerberus Notes',metadata:'Cerberus Receipts',certificatePath:'',allowSend:false});
 // Preview data stays in memory. Real mail never goes into localStorage or a DB.
 const preview=new Map<string,MailboxConfig>();
+const folderSnapshots=new Map<string,{nodes:MailFolder[];at:number}>();
+let folderEpoch=0;
+const folderEpochs=new Map<string,number>();
+const folderVersion=(id:string)=>`${folderEpoch}:${folderEpochs.get(id)||0}`;
+const folderPending=new Map<string,Promise<MailFolder[]>>();
+const folderScope=(id:string,c:MailboxConfig)=>JSON.stringify([id,c.imapHost,c.imapPort,c.imapSecurity,c.username,c.certificatePath]);
+export const cachedMailFolders=(id:string,c:MailboxConfig)=>folderSnapshots.get(folderScope(id,c))?.nodes;
+export function invalidateMailFolders(id?:string){if(id)folderEpochs.set(id,(folderEpochs.get(id)||0)+1);else folderEpoch++;for(const key of folderPending.keys())if(!id||JSON.parse(key)[0]===id)folderPending.delete(key);for(const key of folderSnapshots.keys())if(!id||JSON.parse(key)[0]===id)folderSnapshots.delete(key);}
+window.addEventListener('feedback-config-changed',event=>invalidateMailFolders((event as CustomEvent<string>).detail));
 export const feedback={
- setup:(repositoryId:string,config:MailboxConfig,password?:string,parent?:string,name?:string):Promise<MailFolder[]>=>inTauri()?invoke('feedback_setup',{repositoryId,config,password:password||null,parent:parent??null,name:name??null}):Promise.resolve(['INBOX','Drafts','Sent','Cerberus Notes','Cerberus Receipts'].map(path=>({path,delimiter:'/',selectable:true}))),
- manage:(repositoryId:string,config:MailboxConfig,password:string,parent:string,operation:'rename'|'delete',name?:string):Promise<MailFolder[]>=>invoke('feedback_setup',{repositoryId,config,password:password||null,parent,name:name??null,operation}),
- batch:(repositoryId:string,config:MailboxConfig,password:string,operations:FolderOperation[]):Promise<FolderBatch>=>invoke('feedback_folder_batch',{repositoryId,config,password:password||null,operations}),
+ setup:async(repositoryId:string,config:MailboxConfig,password?:string,parent?:string,name?:string,force=false):Promise<MailFolder[]>=>{
+  const epoch=folderVersion(repositoryId),key=folderScope(repositoryId,config),readOnly=!password&&parent===undefined&&name===undefined;
+  if(readOnly&&!force){const saved=folderSnapshots.get(key);if(saved&&Date.now()-saved.at<120_000)return saved.nodes;}
+  if(readOnly&&folderPending.has(key))return folderPending.get(key)!;
+  if(!readOnly)invalidateMailFolders(repositoryId);
+  const request=(inTauri()?invoke<MailFolder[]>('feedback_setup',{repositoryId,config,password:password||null,parent:parent??null,name:name??null}):Promise.resolve(['INBOX','Drafts','Sent','Cerberus Notes','Cerberus Receipts'].map(path=>({path,delimiter:'/',selectable:true})))).then(nodes=>{if(readOnly&&epoch===folderVersion(repositoryId))folderSnapshots.set(key,{nodes,at:Date.now()});return nodes;}).finally(()=>{if(readOnly&&folderPending.get(key)===request)folderPending.delete(key);});
+  if(readOnly)folderPending.set(key,request);return request;
+ },
+ manage:(repositoryId:string,config:MailboxConfig,password:string,parent:string,operation:'rename'|'delete',name?:string):Promise<MailFolder[]>=>{invalidateMailFolders(repositoryId);return invoke('feedback_setup',{repositoryId,config,password:password||null,parent,name:name??null,operation});},
+ batch:(repositoryId:string,config:MailboxConfig,password:string,operations:FolderOperation[]):Promise<FolderBatch>=>{invalidateMailFolders(repositoryId);return invoke('feedback_folder_batch',{repositoryId,config,password:password||null,operations});},
  config:(repositoryId:string):Promise<MailboxConfig|null>=>inTauri()?invoke('feedback_config',{repositoryId}):Promise.resolve(preview.get(repositoryId)||null),
  save:async(repositoryId:string,config:MailboxConfig,password?:string):Promise<void>=>{if(inTauri())await invoke('save_feedback_config',{repositoryId,config,password:password||null});else preview.set(repositoryId,config);window.dispatchEvent(new CustomEvent('feedback-config-changed',{detail:repositoryId}));},
  request:<T,>(repositoryId:string,request:Record<string,unknown>):Promise<T>=>inTauri()?invoke('feedback_request',{repositoryId,request}):Promise.resolve((request.action==='folderTree'?['INBOX','Email/Ready','Email/Resolved','Drafts','Sent'].map(path=>({path,delimiter:'/',selectable:true,count:0,unread:0})):request.action==='folders'?['INBOX','Email/Ready','Email/Resolved','Drafts','Sent']:request.action==='list'||request.action==='poll'?[]:{}) as T),

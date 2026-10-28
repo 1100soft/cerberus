@@ -309,3 +309,14 @@ Password entry does not test partial values while you type. Folder discovery wit
 a newly entered password starts when you leave that field, press Enter, or use
 Refresh folders. Saved credentials still discover folders automatically. This
 avoids spurious invalid-login warnings from providers such as Proton Bridge.
+
+
+### Folder loading and order
+
+Folder discovery shares in-memory snapshots for up to two minutes across the Email page, settings and automation pickers. Refresh in the automation picker requests a fresh snapshot; settings changes and folder mutations invalidate it. Passwords and messages are not cached with the tree. Folder names become usable before the separate, slower per-folder message counts finish. Automation pickers display each project's results as they arrive, retaining usable snapshots while refreshing.
+
+Common mail folders use functional order (Inbox, Drafts, Sent, archive and other standard groups, with spam/trash last). Custom names use a shared remembered first-seen order across projects, so repeated server LIST responses cannot reshuffle them. Names are not sorted alphabetically.
+
+Email automation conditions keep **Email root** and its relative children. **Mailbox folders** additionally shows the union of complete mailbox hierarchies across configured projects, including siblings of INBOX. Coverage indicates which projects have each folder; choosing a folder never changes existing root-relative rules. Folder paths translate server delimiters per project. Drafts, Sent, internal Notes and Receipts remain excluded as event sources. Missing-folder creation still requires the user's explicit action.
+
+TLS errors retain the transport's diagnostic detail and distinguish handshake timeouts/interrupted connections from certificate verification failures. A timeout does not imply the certificate needs replacing. Imported certificates and hostname verification remain enforced.
