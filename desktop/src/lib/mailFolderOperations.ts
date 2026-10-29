@@ -3,7 +3,8 @@ export const partsFor=(path:string,nodes:MailFolder[])=>{const delimiter=nodes.f
 export function projectFolderPath(parts:string[],nodes:MailFolder[]){
  let parent='';for(const part of parts){const delimiter=parent?nodes.find(n=>n.path===parent)?.delimiter:nodes.find(n=>n.delimiter)?.delimiter;if(!part||parent&&!delimiter||delimiter&&part.includes(delimiter))throw Error('This project cannot represent the folder path.');parent=parent?parent+delimiter+part:part;}return parent;
 }
-export function planProjectFolderCreate(parts:string[],tree:MailFolder[]){
+export function planProjectFolderCreate(parts:string[],tree:MailFolder[],config?:MailboxConfig){
+ if(parts.length===1&&config?.provider==='proton'&&tree.some(n=>n.path==='Folders'&&!n.selectable))parts=['Folders',...parts];
  const nodes=new Map(tree.map(n=>[n.path,n])),operations:FolderOperation[]=[];let parent='';
  for(const name of parts){const delimiter=parent?nodes.get(parent)?.delimiter:tree.find(n=>n.delimiter)?.delimiter;
   if(!name||/[\/\\\r\n\0]/.test(name)||delimiter&&name.includes(delimiter))throw Error('Enter a folder name, not a path.');

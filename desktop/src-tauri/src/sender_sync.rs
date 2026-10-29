@@ -203,11 +203,28 @@ fn import(
     list: Vec<Identity>,
 ) -> Result<(), String> {
     let primary=list.iter().find(|i|i.email.eq_ignore_ascii_case(&c.address)).ok_or("The default sender was removed on the server. Choose an existing account address before reconnecting.")?;
+    let old = c.sender_identities.clone();
     c.sender_name = primary.name.clone();
     c.sender_identities = list
         .iter()
         .filter(|i| i.id != primary.id && address(&i.email))
         .map(|i| SenderIdentity {
+            identity_name: old
+                .iter()
+                .find(|o| o.id == i.id)
+                .or_else(|| {
+                    let matches: Vec<_> = old
+                        .iter()
+                        .filter(|o| o.address.eq_ignore_ascii_case(&i.email))
+                        .collect();
+                    if matches.len() == 1 {
+                        Some(matches[0])
+                    } else {
+                        None
+                    }
+                })
+                .map(|o| o.identity_name.clone())
+                .unwrap_or_default(),
             id: i.id.clone(),
             address: i.email.clone(),
             name: i.name.clone(),
@@ -320,6 +337,7 @@ mod tests {
             address: "primary@example.org".into(),
             sender_name: "Primary".into(),
             sender_identities: vec![SenderIdentity {
+                identity_name: "Support".into(),
                 id: "alias".into(),
                 address: "alias@example.org".into(),
                 name: "New name".into(),
@@ -354,6 +372,26 @@ mod tests {
         }
     }
     #[test]
+    fn provider_refresh_preserves_local_automation_identity_names() {
+        let mut c = fixture();
+        c.sender_identity_name = "General".into();
+        let list = c.sender_sync.as_ref().unwrap().baseline.clone();
+        import(&mut c, "account".into(), "s2".into(), list).unwrap();
+        assert_eq!(c.sender_identity_name, "General");
+        assert_eq!(c.sender_identities[0].identity_name, "Support");
+        let patch = changes(&c, c.sender_sync.as_ref().unwrap()).unwrap();
+        assert!(!dirty(&patch));
+        // New provider IDs after creating a local alias retain an unambiguous name/address mapping.
+        c.sender_identities[0].id = "local:new".into();
+        let list = c.sender_sync.as_ref().unwrap().baseline.clone();
+        import(&mut c, "account".into(), "s3".into(), list).unwrap();
+        assert_eq!(c.sender_identities[0].identity_name, "Support");
+        c.sender_identities[0].identity_name = "Billing".into();
+        assert!(!dirty(
+            &changes(&c, c.sender_sync.as_ref().unwrap()).unwrap()
+        ));
+    }
+    #[test]
     fn patches_only_changed_fields_and_preserves_wildcard() {
         let c = fixture();
         let p = changes(&c, c.sender_sync.as_ref().unwrap()).unwrap();
@@ -365,6 +403,7 @@ mod tests {
     fn deletion_and_creation_are_explicit() {
         let mut c = fixture();
         c.sender_identities = vec![SenderIdentity {
+            identity_name: "New role".into(),
             id: "local:new".into(),
             address: "new@example.org".into(),
             name: "New".into(),

@@ -60,9 +60,9 @@ export function useMailOrganization({projects,projectId,config,nodes,onRefresh,o
     let operations:FolderOperation[];
     if(job.kind==='create'){
      // Create missing ancestors in a single batch, translating each project's delimiter.
-     operations=planProjectFolderCreate([...job.parts,name.trim()],tree);
+     operations=planProjectFolderCreate([...job.parts,name.trim()],tree,current);
     }else{if(!origin)throw Error('Choose a source project.');operations=planMailFolderCopy(origin.config,sourceNodes,tree,false).operations;}
-    if(operations.length){const {result,inverse}=await execute(project,operations);if(inverse.operations.length)inverses.push(inverse);if(result.error)throw Error(result.error);}
+    if(operations.length){const {result,inverse}=await execute(project,operations);if(inverse.operations.length)inverses.push(inverse);if(result.error)throw Error(result.error);if(job.kind==='create'&&project.id===projectId){const created=result.changes.filter(change=>change.forward.operation==='create').at(-1)?.inverse.parent;if(created)onInspect(project.id,created);}}else if(job.kind==='create'&&project.id===projectId){const last=[...job.parts,name.trim()];if(last.length===1&&current.provider==='proton'&&tree.some(n=>n.path==='Folders'))last.unshift('Folders');onInspect(project.id,projectFolderPath(last,tree));}
    }catch(reason){errors.push(`${project.label}: ${String(reason)}`);}}
   }finally{record(job.kind==='create'?'Create folders':'Copy folder structure',inverses);}
   if(errors.length)throw Error(errors.join('\n'));setStatus(job.kind==='create'?'Folders created.':'Folder structure copied.');setRequest(null);

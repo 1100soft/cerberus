@@ -71,3 +71,12 @@ approval before executing. Use fixed provider commands and no privilege elevatio
   synchronization of folder structures and rules. Basic mail reading/replying is
   secondary. Webmail links use the default browser session; never forward IMAP,
   SMTP, Bridge passwords or API tokens, or claim browser account authentication.
+
+- Sender automation identity names are local, case-insensitive project mappings,
+  independent of provider display names/IDs. Suggest names across projects, enforce
+  per-project uniqueness, preserve them through provider refresh, and fail a
+  missing requested name instead of falling back to another sender. Never copy
+  another project's sender address/credentials when reusing its name.
+- Respect provider creation namespaces (Proton custom folders belong under Folders).
+  Reveal a newly created folder by selecting it and expanding ancestors. Do not
+  scroll unrelated dialogs or their ancestors when refreshing background trees.

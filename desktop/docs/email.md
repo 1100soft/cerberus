@@ -409,3 +409,38 @@ undo. Undo refuses to delete folders that have subsequently received mail. Text
 fields retain their own editing shortcuts. Existing automation rules and saved
 message references keep their old folder paths after rename/move; update those
 rules explicitly if their watched folder changed.
+
+
+### Shared automation sender identities
+
+Give the default sender or any additional address an **Automation identity** name
+in Email settings. Suggestions include names defined in other projects. For
+example, assign **Support** to `support@projectA.com` in project A and
+`support@projectB.com` in project B. The automation can use the same name in both
+projects; the email tool resolves it against the project running the action.
+Names are case-insensitive, unique within a project, and limited to 64 characters
+without `@` or control characters. A missing name fails instead of choosing
+another sender. An unnamed identity remains usable by its address or provider ID.
+
+Automation identity names are local mappings, separate from the display name
+shown to recipients. Provider identity synchronization preserves these mappings;
+editing a local name does not rename the provider identity. Suggestions reuse the
+name, never another project's address or credentials. The reply composer's From
+menu shows the automation name alongside its current project address.
+
+Agent prompt example: “Read the incoming email and save a reply draft using the
+Support sender identity.” Agents can pass `"sender":"Support"` to draft or send.
+`CERBERUS_EMAIL_SENDERS` lists each configured `identityName`, `address`, display
+`name` and optional provider ID, including the default sender. Sending permission
+and confirmation/idempotency rules remain unchanged.
+
+Bash example for an email-triggered script:
+
+```bash
+printf '{"action":"draft","sender":"Support","message":%s,"text":"Thanks. We are reviewing your report."}\n' \
+  "$CERBERUS_EMAIL_MESSAGE" | "$CERBERUS_EMAIL_TOOL" --cerberus-email
+```
+
+For Proton Bridge, a new top-level custom folder is created inside the server's
+`Folders` namespace. Newly created folders are selected and their ancestors
+expanded, so they are visible even when the parent was collapsed.

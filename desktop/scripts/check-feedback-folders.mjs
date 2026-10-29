@@ -145,3 +145,12 @@ console.log('Folder drag cycles/collisions, project-scoped mail references, cros
 assert(operations.sameMailAccount(settings,{...settings,notes:'Other notes'}));
 assert(!operations.sameMailAccount(settings,{...settings,username:'different'}));
 assert(!operations.sameMailAccount(settings,{...settings,imapPort:12345}));
+
+assert.deepEqual(operations.planProjectFolderCreate(['New'],[node('Folders','/',false),node('INBOX')],{provider:'proton'}),[{operation:'create',parent:'Folders',name:'New'}]);
+const namesSource=await readFile(new URL('../src/lib/senderIdentityNames.ts',import.meta.url),'utf8');
+const senderNames=await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(namesSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`);
+assert.deepEqual(senderNames.senderIdentityNames([{senderIdentityName:'General',senderIdentities:[{identityName:'Support'}]},{senderIdentities:[{identityName:'support'},{identityName:'Billing'}]}]),['Billing','General','Support']);
+assert(senderNames.identityNameProblem({senderIdentityName:'Support',senderIdentities:[{identityName:' SUPPORT '}]}));
+assert.equal(senderNames.identityNameProblem({senderIdentityName:'Support',senderIdentities:[{identityName:'Billing'}]}),'');
+assert(senderNames.identityNameProblem({senderIdentities:[{identityName:'wrong@example.org'}]}));
+console.log('Proton namespace creation, shared sender-name suggestions, uniqueness and validation passed');

@@ -1423,3 +1423,33 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
   existing email regression fixture, and organization fixture at 900×620 and
   1720×1080 with 100/140/150% zoom. Tests used isolated fixtures only, without
   changing live mailboxes. No commit/push was requested for this implementation.
+
+
+## 2026-10-29 — folder creation repair and shared sender names
+
+- Read-only inspection of the configured Proton mailbox confirmed explicit
+  Folders/Labels namespaces. Root CREATE previously submitted a bare name, which
+  Bridge rejects. Project folder creation now targets Folders for Proton and
+  records canonical paths for undo. Created folders are selected/revealed under
+  collapsed parents; tree reveal scrolls only its own container.
+- Added optional senderIdentityName for the default address and identityName on
+  aliases. Suggested text inputs reuse the union of saved project names, with
+  zoom-aware body portals. Per-project names are case-insensitive and unique;
+  @/control characters and overlong names are rejected. Recipient display names
+  remain separate. Composer labels show local name/address; provider IDs use an
+  explicit UI token to avoid name collisions, with legacy raw IDs still accepted.
+- Agent/Script requests can use sender:"Support"; native resolution maps it to the
+  executing project's address and errors if undefined. CERBERUS_EMAIL_SENDERS now
+  includes the default mapping too. Provider refresh preserves local role names
+  by stable ID or an unambiguous address match; role edits never patch provider
+  display names. Existing unnamed identities keep address/ID compatibility.
+- Fixtures cover project-specific lookup, missing/duplicate names, sync preservation,
+  Proton canonical CREATE and collapsed-parent reveal, and cross-project name
+  suggestions/validation at 100/140/150% zoom. No live mailbox mutations were used.
+
+- Validation passed: production build (TypeScript/style/dropdown checks), provider
+  and folder/name logic checks, full locked native suite (186 unit + 3 integration
+  tests passed, 5 ignored), sender-sync regression tests, handoff UI fixture, and
+  email/folder fixtures at minimum and wide sizes with 100/140/150% zoom. Live
+  Proton inspection was read-only (folder names/status only); all mutation tests
+  used isolated fixtures. No commit or push was requested for these changes.

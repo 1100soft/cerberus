@@ -1291,7 +1291,7 @@ input[type="number"] { text-align: right; }
 .email-reply-dialog textarea {width:100%;flex:1;min-height:60px;resize:none}
 .email-reply-dialog footer {flex-wrap:wrap}
 
-.feedback-fields.mail-sender-row {grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;align-items:end}
+.feedback-fields.mail-sender-row {grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end}
 
 /* Selected folder assignments must remain legible in dark and light themes. */
 .mailbox-folder-assignments button[aria-pressed=true] {background:var(--surface-control);color:var(--text-primary);border-color:var(--accent-codex-border);box-shadow:inset 0 0 0 1px var(--accent-codex-border)}
@@ -1309,3 +1309,5 @@ input[type="number"] { text-align: right; }
 .mail-folder-inspection {display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid var(--status-warning);border-radius:6px}
 .mail-folder-inspection span {flex:1 1 240px;min-width:0;overflow-wrap:anywhere}
 .mail-action-menu {max-width:calc(100% - 16px)}
+
+@media (max-width:620px) {.feedback-fields.mail-sender-row {grid-template-columns:minmax(0,1fr) auto}.mail-sender-row>label {grid-column:1}.mail-sender-row>button {grid-column:2;grid-row:1 / span 3}}
