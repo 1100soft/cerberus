@@ -39,10 +39,18 @@ const MAX_MESSAGE: u32 = 2_000_000;
 type Session = imap::Session<native_tls::TlsStream<TcpStream>>;
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+pub struct SenderIdentity {
+    pub address: String,
+    pub name: String,
+}
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Config {
     pub provider: String,
     pub enabled: bool,
     pub address: String,
+    pub sender_identities: Vec<SenderIdentity>,
+    pub sender_name: String,
     pub username: String,
     pub imap_host: String,
     pub imap_port: u16,
@@ -89,6 +97,7 @@ pub struct Request {
     #[serde(skip)]
     scope: String,
     pub action: String,
+    pub sender: String,
     pub flag: String,
     pub folder: String,
     pub message: Option<MailRef>,
@@ -224,6 +233,19 @@ pub fn documentation_url(url: &str) -> bool {
                 .any(|key| provider[*key].as_str() == Some(url))
         })
 }
+fn selected_sender(c: &Config, requested: &str) -> Result<String, String> {
+    if requested.is_empty() || requested.eq_ignore_ascii_case(&c.address) {
+        if c.sender_name.chars().any(char::is_control) { return Err("Invalid sender display name".into()); }
+        if c.sender_name.is_empty() { return Ok(c.address.clone()); }
+        return Ok(lettre::message::Mailbox::new(Some(c.sender_name.clone()), c.address.parse::<lettre::Address>().map_err(|_|"Invalid sender address")?).to_string());
+    }
+    let sender = c.sender_identities.iter().find(|sender| sender.address.eq_ignore_ascii_case(requested))
+        .ok_or("Choose a configured sender identity; arbitrary From addresses are not allowed")?;
+    if sender.name.chars().any(char::is_control) { return Err("Invalid sender display name".into()); }
+    let address = sender.address.parse::<lettre::Address>().map_err(|_| "Invalid sender address")?;
+    Ok(lettre::message::Mailbox::new(if sender.name.is_empty() {None} else {Some(sender.name.clone())}, address).to_string())
+}
+
 fn validate_connection(c: &Config) -> Result<(), String> {
     if providers().iter().any(|provider| {
         provider["id"].as_str() == Some(c.provider.as_str()) && provider["auth"] == "oauth"
@@ -233,6 +255,14 @@ fn validate_connection(c: &Config) -> Result<(), String> {
     c.address
         .parse::<lettre::message::Mailbox>()
         .map_err(|_| "Enter a valid sending email address")?;
+    if c.sender_name.chars().any(char::is_control) {return Err("Invalid sender display name".into());}
+    let mut senders = std::collections::HashSet::from([c.address.to_lowercase()]);
+    for sender in &c.sender_identities {
+        sender.address.parse::<lettre::Address>().map_err(|_| "Enter a valid sender identity address")?;
+        if sender.name.chars().any(char::is_control) || !senders.insert(sender.address.to_lowercase()) {
+            return Err("Sender identities must have unique addresses and valid display names".into());
+        }
+    }
     if c.username.is_empty() || c.username.contains(['\r', '\n']) {
         return Err("Enter the mailbox username".into());
     }
@@ -255,7 +285,7 @@ fn validate(c: &Config) -> Result<(), String> {
         return Ok(());
     }
     validate_connection(c)?;
-    let folders = [&c.inbox, &c.drafts, &c.sent, &c.notes, &c.metadata];
+    let folders = [&c.drafts, &c.sent, &c.notes, &c.metadata];
     for name in folders {
         folder(name)?;
     }
@@ -265,7 +295,7 @@ fn validate(c: &Config) -> Result<(), String> {
         .any(|(index, name)| folders[..index].contains(name))
     {
         return Err(
-            "Inbox, Drafts, Sent, Notes and automation receipts must use distinct folders".into(),
+            "Drafts, Sent, Notes and automation receipts must use distinct folders".into(),
         );
     }
     Ok(())
@@ -840,8 +870,10 @@ fn reply(
     } else {
         None
     };
+    let mut outgoing = c.clone();
+    outgoing.address = selected_sender(c, &request.sender)?;
     let message = email(
-        c,
+        &outgoing,
         &source.reply_to,
         &subject,
         &request.text,
@@ -1167,8 +1199,7 @@ fn apply_folder_operation(
             let stored = config(root, id)?;
             if std::iter::once(c).chain(stored.as_ref()).any(|config| {
                 [
-                    &config.inbox,
-                    &config.drafts,
+                                        &config.drafts,
                     &config.sent,
                     &config.notes,
                     &config.metadata,
@@ -1487,12 +1518,12 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
     let mut s = connect(&c, &secret)?;
     let result = (|| {
         let name = if request.folder.is_empty() {
-            c.inbox.as_str()
+            "INBOX"
         } else {
             request.folder.as_str()
         };
         match request.action.as_str() {
-            "test" | "status" => mailbox_status(&mut s, &c.inbox),
+            "test" | "status" => mailbox_status(&mut s, "INBOX"),
             "folders" => Ok(serde_json::json!(available_folders(&mut s)?)),
             "folderTree" => Ok(serde_json::json!(folder_overview(&mut s, &c)?)),
             "flag" => update_flag(
@@ -1626,7 +1657,11 @@ pub fn environment(
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let mut env = std::collections::HashMap::new();
     if let Some(config) = config(root, id)?.filter(|c| c.enabled) {
+        // Deprecated compatibility snapshot for older scripts, never a scope boundary.
         env.insert("CERBERUS_EMAIL_ROOT_FOLDER".into(), config.inbox.clone());
+        env.insert("CERBERUS_EMAIL_INBOX_FOLDER".into(), "INBOX".into());
+        env.insert("CERBERUS_EMAIL_SENDERS".into(), serde_json::to_string(&config.sender_identities).map_err(|e|e.to_string())?);
+        env.insert("CERBERUS_EMAIL_DEFAULT_SENDER".into(), config.address.clone());
         env.insert("CERBERUS_FEEDBACK_READ_ONLY".into(), read_only.to_string());
         // Preserve Secret Service routing through provider shell-env filters.
         for name in ["DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"] {
@@ -1665,6 +1700,16 @@ pub fn instructions() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sender_identities_are_explicit_and_cannot_inject_headers() {
+        let c = Config { address: "default@example.org".into(), sender_identities: vec![SenderIdentity {address:"support@example.org".into(),name:"Support".into()}], ..Default::default() };
+        assert_eq!(selected_sender(&c, "").unwrap(), "default@example.org");
+        assert_eq!(selected_sender(&c, "support@example.org").unwrap(), "Support <support@example.org>");
+        assert!(selected_sender(&c, "other@example.org").is_err());
+        let mut bad=c;bad.sender_identities[0].name="Injected\r\nBcc: stranger@example.org".into();
+        assert!(selected_sender(&bad, "support@example.org").is_err());
+    }
+
     #[test]
     fn tls_errors_distinguish_transport_from_certificate_failures() {
         let timeout = tls_failure("TLS", "Resource temporarily unavailable (os error 11)");
@@ -2374,7 +2419,8 @@ mod wire_tests {
         ]);
         steps.extend([("EXAMINE", SELECT.into()), ("APPEND", String::new())]);
         let (root, port, server) = fixture(steps);
-        let c = config_for(root.path(), port);
+        let mut c = config_for(root.path(), port);
+        c.sender_identities.push(SenderIdentity {address:"alias@example.org".into(),name:"Support team".into()});
         let mut s = connect(&c, "fixture-secret").unwrap();
         let rows = list(&mut s, "INBOX", None).unwrap();
         assert_eq!(rows.len(), 1);
@@ -2388,6 +2434,7 @@ mod wire_tests {
             "fixture-secret",
             &Request {
                 action: "draft".into(),
+                sender: "alias@example.org".into(),
                 text: "Thanks for reporting this.".into(),
                 ..Default::default()
             },
@@ -2396,6 +2443,10 @@ mod wire_tests {
         .unwrap();
         s.logout().unwrap();
         let drafts = server.join().unwrap();
+        let parsed = mailparse::parse_mail(drafts[0].as_bytes()).unwrap();
+        let from = parsed.headers.get_first_value("From").unwrap().parse::<lettre::message::Mailbox>().unwrap();
+        assert_eq!(from.email.to_string(), "alias@example.org");
+        assert_eq!(from.name.as_deref(), Some("Support team"));
         assert!(drafts[0].contains("In-Reply-To: <feedback@example.org>"));
         assert!(drafts[0].contains("To: Customer <customer@example.org>"));
         assert!(drafts[0].contains("Thanks for reporting this."));

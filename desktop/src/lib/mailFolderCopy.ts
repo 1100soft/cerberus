@@ -1,5 +1,5 @@
 import {type MailboxConfig,type MailFolder,type FolderOperation} from './feedback';
-export const folderRoles=['inbox','drafts','sent','notes','metadata'] as const;
+export const folderRoles=['drafts','sent','notes','metadata'] as const;
 export function folderParts(path:string,nodes:MailFolder[]):string[]{const node=nodes.find(node=>node.path===path);return node?.delimiter?path.split(node.delimiter):[path];}
 // Build a deduplicated plan locally; the destination executes it in one IMAP session.
 export function planMailFolderCopy(source:MailboxConfig,sourceNodes:MailFolder[],targetNodes:MailFolder[]){

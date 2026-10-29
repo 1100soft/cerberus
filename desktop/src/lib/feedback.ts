@@ -1,6 +1,9 @@
 import {invoke} from '@tauri-apps/api/core';
 import {inTauri} from './api';
-export type MailboxConfig={provider?:string;enabled:boolean;address:string;username:string;imapHost:string;imapPort:number;imapSecurity:string;smtpHost:string;smtpPort:number;smtpSecurity:string;inbox:string;drafts:string;sent:string;notes:string;metadata:string;certificatePath:string;allowSend:boolean};
+export type SenderIdentity={address:string;name:string};
+export const mailboxSenders=(config:MailboxConfig):SenderIdentity[]=>[{address:config.address,name:config.senderName||''},...(config.senderIdentities||[])];
+export function senderIdentityProblem(config:MailboxConfig){if(/[\x00-\x1f\x7f]/.test(config.senderName||''))return 'Enter a valid sender display name.';const seen=new Set([config.address.toLowerCase()]);for(const sender of config.senderIdentities||[]){if(!/^[^\s<>@]+@[^\s<>@]+$/.test(sender.address)||/[\x00-\x1f\x7f]/.test(sender.name))return 'Enter a valid address and display name for each sender identity.';const key=sender.address.toLowerCase();if(seen.has(key))return 'Sender identity addresses must be unique.';seen.add(key);}return '';}
+export type MailboxConfig={senderName?:string;senderIdentities?:SenderIdentity[];provider?:string;enabled:boolean;address:string;username:string;imapHost:string;imapPort:number;imapSecurity:string;smtpHost:string;smtpPort:number;smtpSecurity:string;inbox:string;drafts:string;sent:string;notes:string;metadata:string;certificatePath:string;allowSend:boolean};
 export type MailFolder={path:string;delimiter:string|null;selectable:boolean;label?:string;coverage?:number;total?:number;detail?:string};
 export type FolderOverview=MailFolder&{count?:number|null;unread?:number|null;error?:string|null;trash?:boolean};
 export type FolderOperation={operation:'create'|'rename'|'delete';parent:string;name?:string|null};

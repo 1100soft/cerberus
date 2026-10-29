@@ -11,10 +11,11 @@ const node=(path,delimiter='/',selectable=true)=>({path,delimiter,selectable});
 const a={id:'a',label:'A',config:config('Folders/Reports'),nodes:[node('Folders/Reports'),node('Folders/Reports/Bugs'),node('Folders/Reports/Bugs/UI'),node('Folders/Reports/Only A')]};
 const b={id:'b',label:'B',config:config('Inbox'),nodes:[node('Inbox','.'),node('Inbox.Bugs','.'),node('Inbox.Support','.')]};
 assert.notEqual(mailboxScopeKey(a.config),mailboxScopeKey({...a.config,inbox:'Other'}));
+a.nodes.push(node('Shared'));b.nodes.push(node('Shared','.'));
 const tree=mergedFolderTree([a,b]);
-assert.equal(tree.find(node=>node.path===folderKey(['Bugs'])).coverage,2);
-assert.equal(tree.find(node=>node.path===folderKey(['Only A'])).coverage,1);
-assert.ok(tree.find(node=>node.path===folderKey(['Only A'])).detail.includes('B'));
+assert.equal(tree.find(node=>node.path===folderKey([mailboxFolderScope,'Shared'])).coverage,2);
+assert.equal(tree.find(node=>node.path===folderKey([mailboxFolderScope,'Folders','Reports','Only A'])).coverage,1);
+assert.ok(tree.find(node=>node.path===folderKey([mailboxFolderScope,'Folders','Reports','Only A'])).detail.includes('B'));
 assert.equal(relativeFolder(a.config,a.nodes,['Bugs','UI']),'Folders/Reports/Bugs/UI');
 assert.equal(relativeFolder(b.config,b.nodes,['Bugs']),'Inbox.Bugs');
 assert.equal(relativeFolder(b.config,b.nodes,['Bugs','UI']),null);
@@ -24,9 +25,9 @@ assert.equal(resolveFeedbackFolder(b.config,b.nodes,{feedbackPath:['Support']}),
 assert.equal(relativeFolder({...a.config,notes:'Folders/Reports/Bugs'},a.nodes,['Bugs']),null);
 assert.equal(relativeFolder(config('Flat'),[node('Flat',null)],['Child']),null);
 assert.throws(()=>relativeFolder(config('Missing'),a.nodes,['Bugs']));
-assert.equal(mergedFolderTree([a,{...b,error:'offline'}]).find(node=>node.path===folderKey(['Bugs'])).total,2);
+assert.equal(mergedFolderTree([a,{...b,error:'offline'}]).find(node=>node.path===folderKey([mailboxFolderScope,'Shared'])).total,2);
 assert.ok(mergedFolderTree([a,{...b,error:'offline'}])[0].detail.includes('Unverified: B'));
-const unicode=['Bug reports','台北','a/b','x.y','100%'];assert.deepEqual(folderParts(folderKey(unicode)),unicode);
+const unicode=['Bug reports','台北','a/b','x.y','100%'];assert.deepEqual(folderParts(folderKey(unicode)),[mailboxFolderScope,...unicode]);
 let created=[];
 implementation=async(id,cfg,password,parent,name)=>{
  assert.equal(id,'b');if(name){const delimiter=b.nodes.find(node=>node.path===parent).delimiter;created.push({parent,name});b.nodes.push(node(parent+delimiter+name,delimiter));}return b.nodes;
@@ -44,7 +45,7 @@ const {planMailFolderCopy}=await import(copyUrl);
 const sourceConfig={inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Notes',metadata:'Receipts'};
 const sourceNodes=['INBOX','INBOX/Bugs','INBOX/Bugs/UI','Drafts','Sent','Notes','Receipts'].map(path=>node(path));
 const target=[node('INBOX','.')];const plan=planMailFolderCopy(sourceConfig,sourceNodes,target);
-assert.deepEqual(plan.assignments,sourceConfig);assert.ok(plan.operations.some(op=>op.parent==='INBOX.Bugs'&&op.name==='UI'));
+assert.deepEqual(plan.assignments,{drafts:'Drafts',sent:'Sent',notes:'Notes',metadata:'Receipts'});assert(!('inbox' in plan.assignments),'Folder copy reintroduced a root');assert.ok(plan.operations.some(op=>op.parent==='INBOX.Bugs'&&op.name==='UI'));
 assert.equal(new Set(plan.operations.map(op=>op.parent+'.'+op.name)).size,plan.operations.length);
 const existing=[...target,...plan.operations.map(op=>node(op.parent?op.parent+'.'+op.name:op.name,'.'))];
 assert.equal(planMailFolderCopy(sourceConfig,sourceNodes,existing).operations.length,0);
@@ -95,3 +96,10 @@ folderCache.invalidateMailFolders('one');assert.equal(folderCache.cachedMailFold
 const stale=folderCache.feedback.setup('one',settings);folderCache.invalidateMailFolders('one');releaseFolder([node('Stale')]);await stale;assert.equal(folderCache.cachedMailFolders('one',settings),undefined);
 const forced=folderCache.feedback.setup('two',settings,undefined,undefined,undefined,true);assert.equal(folderCalls,4);releaseFolder([node('Fresh')]);await forced;
 console.log('Folder snapshot cache, concurrent request sharing, project isolation, forced refresh and invalidation during loading passed');
+
+assert.equal(folderCache.senderIdentityProblem({...settings,address:'primary@example.org',senderIdentities:[{address:'alias@example.org',name:'Team'}]}),'');
+assert(folderCache.senderIdentityProblem({...settings,address:'primary@example.org',senderIdentities:[{address:'PRIMARY@example.org',name:'Duplicate'}]}));
+assert(folderCache.senderIdentityProblem({...settings,address:'primary@example.org',senderIdentities:[{address:'alias@example.org',name:'Bad\r\nBcc: other@example.org'}]}));
+assert(!mergedFolderTree([a,b]).some(node=>node.label==='Email root'));
+assert.equal(relativeFolder({...a.config,inbox:'missing legacy folder'},a.nodes,[mailboxFolderScope,'Shared']),'Shared');
+console.log('Mailbox-wide scopes without root dependence, legacy-rule compatibility and sender identity validation passed');

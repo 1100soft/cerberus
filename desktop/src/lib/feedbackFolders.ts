@@ -3,9 +3,9 @@ export type FeedbackFolderRule={feedbackPath?:string[];feedbackFolder?:string};
 export type MailboxTree={id:string;label:string;config:MailboxConfig;nodes:MailFolder[];error?:string;unverified?:boolean};
 // Reserved internal path segment; IMAP folder names cannot contain NUL.
 export const mailboxFolderScope='\0mailbox';
-export const folderPathLabel=(parts:string[])=>parts.map(part=>part===mailboxFolderScope?'Mailbox folders':part).join(' / ');
-export const folderKey=(parts:string[])=>['root',...parts.map(encodeURIComponent)].join('/');
-export const folderParts=(key:string)=>key?key.split('/').slice(1).map(decodeURIComponent):[];
+export const folderPathLabel=(parts:string[])=>parts.filter(part=>part!==mailboxFolderScope).join(' / ');
+export const folderKey=(parts:string[])=>['root',...(parts[0]===mailboxFolderScope?parts.slice(1):parts).map(encodeURIComponent)].join('/');
+export const folderParts=(key:string)=>key?[mailboxFolderScope,...key.split('/').slice(1).map(decodeURIComponent)]:[mailboxFolderScope];
 export function mailboxRoot(config:MailboxConfig,nodes:MailFolder[]){
  const root=nodes.find(node=>node.selectable&&node.path===config.inbox)||
   (config.provider==='proton'?nodes.find(node=>node.selectable&&node.path===`Folders/${config.inbox}`):undefined);
@@ -14,8 +14,8 @@ export function mailboxRoot(config:MailboxConfig,nodes:MailFolder[]){
 }
 export const mailboxScopeKey=(config:MailboxConfig)=>JSON.stringify([config.inbox,config.username,config.imapHost,config.imapPort,config.imapSecurity,config.certificatePath]);
 export function relativeFolder(config:MailboxConfig,nodes:MailFolder[],parts:string[]):string|null{
- const root=mailboxRoot(config,nodes);
- if(parts[0]===mailboxFolderScope){const delimiter=root.delimiter||nodes.find(node=>node.delimiter)?.delimiter;const rest=parts.slice(1);if(!rest.length||rest.some(part=>!part||delimiter&&part.includes(delimiter)))return null;const path=rest.join(delimiter||'');return nodes.some(node=>node.path===path&&node.selectable)&&![config.drafts,config.sent,config.notes,config.metadata].includes(path)?path:null;}
+ if(parts[0]===mailboxFolderScope){const delimiter=nodes.find(node=>node.delimiter)?.delimiter;const rest=parts.slice(1);if(!rest.length||rest.some(part=>!part||delimiter&&part.includes(delimiter)))return null;const path=rest.join(delimiter||'');return nodes.some(node=>node.path===path&&node.selectable)&&![config.drafts,config.sent,config.notes,config.metadata].includes(path)?path:null;}
+ const root=mailboxRoot(config,nodes); // Compatibility for already-saved root-relative rules only.
  if(!parts.length)return root.path;
  if(!root.delimiter)return null;
  if(parts.some(part=>!part||part.includes(root.delimiter!)))return null;
@@ -33,20 +33,11 @@ export function mergedFolderTree(mailboxes:MailboxTree[]):MailFolder[]{
  };
  for(const mailbox of mailboxes){
   if(mailbox.error)continue;
-  const root=mailboxRoot(mailbox.config,mailbox.nodes);add([],mailbox.id,true);
-  const delimiter=root.delimiter||mailbox.nodes.find(node=>node.delimiter)?.delimiter;
   add([mailboxFolderScope],mailbox.id,false);
   for(const node of mailbox.nodes){
    const parts=[mailboxFolderScope,...(node.delimiter?node.path.split(node.delimiter):[node.path])];
    const reserved=[mailbox.config.drafts,mailbox.config.sent,mailbox.config.notes,mailbox.config.metadata].includes(node.path);
    for(let length=2;length<=parts.length;length++)add(parts.slice(0,length),mailbox.id,length===parts.length&&node.selectable&&!reserved);
-  }
-  if(!delimiter)continue;
-  for(const node of mailbox.nodes){
-   if(!node.path.startsWith(root.path+delimiter))continue;
-   const parts=node.path.slice(root.path.length+delimiter.length).split(delimiter);
-   const reserved=[mailbox.config.drafts,mailbox.config.sent,mailbox.config.notes,mailbox.config.metadata].includes(node.path);
-   for(let length=1;length<=parts.length;length++)add(parts.slice(0,length),mailbox.id,length===parts.length&&node.selectable&&!reserved);
   }
  }
  if(!entries.size)entries.set(folderKey([]),{parts:[],present:new Set(),selectable:new Set()});
@@ -54,7 +45,7 @@ export function mergedFolderTree(mailboxes:MailboxTree[]):MailFolder[]{
   const present=mailboxes.filter(mailbox=>!mailbox.unverified&&entry.present.has(mailbox.id)),selectable=mailboxes.filter(mailbox=>!mailbox.unverified&&entry.selectable.has(mailbox.id));
   const missing=mailboxes.filter(mailbox=>!mailbox.error&&!mailbox.unverified&&!entry.selectable.has(mailbox.id));
   const unknown=mailboxes.filter(mailbox=>mailbox.error||mailbox.unverified);
-  return {path,delimiter:'/',selectable:entry.selectable.size>0,label:entry.parts.at(-1)===mailboxFolderScope?'Mailbox folders':entry.parts.at(-1)||'Email root',coverage:present.length,total:mailboxes.length,
+  return {path,delimiter:'/',selectable:entry.selectable.size>0,label:entry.parts.at(-1)===mailboxFolderScope?'Mailbox':entry.parts.at(-1)||'Mailbox',coverage:present.length,total:mailboxes.length,
    detail:[`Present: ${present.map(mailbox=>mailbox.label).join(', ')||'none'}`,missing.length?`Missing or unavailable: ${missing.map(mailbox=>mailbox.label).join(', ')}`:'',unknown.length?`Unverified: ${unknown.map(mailbox=>mailbox.label).join(', ')}`:'',present.length&&!selectable.length?'Container only':''].filter(Boolean).join('\n')};
  });
 }

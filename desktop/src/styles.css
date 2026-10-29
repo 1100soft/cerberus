@@ -1290,3 +1290,5 @@ input[type="number"] { text-align: right; }
 .email-reply-dialog label {display:flex;flex-direction:column;flex:1;min-height:0;gap:6px}
 .email-reply-dialog textarea {width:100%;flex:1;min-height:60px;resize:none}
 .email-reply-dialog footer {flex-wrap:wrap}
+
+.feedback-fields.mail-sender-row {grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;align-items:end}

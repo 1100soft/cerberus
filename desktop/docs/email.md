@@ -5,7 +5,7 @@ its project, and use the configuration icon. Project configuration also has
 **Email settings**. Configure IMAP and SMTP hosts, ports, TLS or
 STARTTLS, username, sending address and password/app password. Sending is off by
 default. Folder discovery starts as connection details become available. Select
-existing folders in the tree for Email root, Drafts, Sent, Internal notes and
+existing folders in the tree for Drafts, Sent, Internal notes and
 Automation receipts. Use a folder's **+** button to create a child, entering only
 its name; the server's hierarchy separator is applied automatically. Namespace
 containers appear in the tree but cannot receive mail. **Save** automatically
@@ -75,7 +75,7 @@ existing selectable folders and can create folders. Folder names support Unicode
 Folder hierarchy separators are server-defined and read from IMAP LIST. Settings
 show the discovered tree before saving, including nonselectable parent containers.
 Choose a purpose, then its destination in the tree; no mailbox path entry is
-required. The Email page opens at the project’s configured email root. Its tree browses the
+required. The Email page opens at Inbox and covers the entire mailbox. Its tree browses the
 mailbox folders and shows each folder’s total and unread count. Siblings follow
 the server’s returned order; Cerberus does not alphabetize them. The configured
 email address appears in the page header. Nonselectable
@@ -122,19 +122,18 @@ Inspect delivery before explicitly trying a new operation ID. An SMTP failure ca
 be uncertain even when no Sent copy exists. Cerberus doesn't promise exactly-once
 SMTP delivery or cross-device locking; use one automation host per mailbox.
 
-The configured Inbox, Drafts, Sent, Notes and Receipts folders must be distinct.
+The configured Drafts, Sent, Notes and Receipts folders must be distinct.
 Drafts/Notes/Receipts can be created when needed. Disabling the mailbox stops its
 tools and polling; existing mail and the stored password remain untouched.
 
 ## Email-triggered automations
 
-Add **On email**. Its tree merges the children of every selected
-project's **Email root**; there is no project selector in the condition.
-The root itself is selectable. Unconfigured projects are ignored. A `Bugs`
-rule means the `Bugs` child of each project's own root, regardless of its full
-IMAP name or hierarchy separator. Automatic runs and **Run once** resolve the
-same folder. This lets a classifier watch the root and move mail into `Bugs`,
-`Support`, or other folders with independent automation rules.
+Add **On email** and select a folder from the single merged mailbox tree.
+Each project uses one account; there is no email-root boundary or project selector
+inside a trigger. An `INBOX` rule watches Inbox; a `Reports/Bugs` rule resolves
+that hierarchy using each server's delimiter. Automatic runs and **Run once**
+use the same resolver. A classifier can move mail between folders whose common
+paths are shared by rules covering all projects, including future projects.
 
 Folders present everywhere use the normal text color. Partial coverage is dimmed,
 with counts and project names on hover. A configured but unreachable mailbox
@@ -147,11 +146,11 @@ separator. Failures are reported per project and can be retried. Declining is
 allowed: rules simply skip projects where that folder does not exist.
 
 When email is configured later for a project targeted by active automations,
-settings offers to create their missing relative folders. This includes rules
+settings offers to create their missing mailbox folders. This includes rules
 that cover future projects. It never creates folders without the user's
 confirmation. Sending and all ordinary automation enabled settings are unchanged.
 Previously saved absolute folder rules keep their behavior until a folder is
-reselected in the root-relative tree; they are not silently rewritten.
+reselected in the mailbox-wide tree. Old root-relative rules retain their per-project targets through compatibility metadata; unrelated edits do not change their destinations.
 
 Email events can combine with compatible conditions in an AND row, with OR
 between rows. Commit/CI/email events are mutually exclusive within one row.
@@ -246,15 +245,16 @@ missing details; do not send it.”
 ## Naming and compatibility
 
 Projects are the linked Git workspaces previously called repositories. Each project
-has its own mailbox and Email root; feedback triage is one use of the email system.
+has its own mailbox; feedback triage is one use of the email system.
 Existing project IDs, Git links, mail settings, credential-store entries, automation
 triggers and stored message references are retained. Legacy internal `repositoryId`
 and `feedback` fields remain supported; changing labels does not migrate account
 credentials or rename folders on the server.
 
 New scripts use `--cerberus-email`, `CERBERUS_EMAIL_TOOL`,
-`CERBERUS_EMAIL_MESSAGE`, and `CERBERUS_EMAIL_ROOT_FOLDER` (the configured IMAP
-root). `CERBERUS_PROJECT_ID`, `CERBERUS_PROJECT_NAME`, and `CERBERUS_PROJECT_PATH`
+`CERBERUS_EMAIL_MESSAGE`, and `CERBERUS_EMAIL_INBOX_FOLDER` (`INBOX`). The deprecated
+`CERBERUS_EMAIL_ROOT_FOLDER` preserves the old value for existing scripts only; it
+does not restrict mailbox access. `CERBERUS_PROJECT_ID`, `CERBERUS_PROJECT_NAME`, and `CERBERUS_PROJECT_PATH`
 identify the script's project. The previous `--cerberus-feedback`,
 `CERBERUS_FEEDBACK_*` and `CERBERUS_REPOSITORY_*` names remain compatible.
 
@@ -317,6 +317,14 @@ Folder discovery shares in-memory snapshots for up to two minutes across the Ema
 
 Common mail folders use functional order (Inbox, Drafts, Sent, archive and other standard groups, with spam/trash last). Custom names use a shared remembered first-seen order across projects, so repeated server LIST responses cannot reshuffle them. Names are not sorted alphabetically.
 
-Email automation conditions keep **Email root** and its relative children. **Mailbox folders** additionally shows the union of complete mailbox hierarchies across configured projects, including siblings of INBOX. Coverage indicates which projects have each folder; choosing a folder never changes existing root-relative rules. Folder paths translate server delimiters per project. Drafts, Sent, internal Notes and Receipts remain excluded as event sources. Missing-folder creation still requires the user's explicit action.
+Email automation conditions show one merged mailbox hierarchy. Coverage indicates which projects have each folder. Paths translate server delimiters per project; existing rules retain their previous targets. Drafts, Sent, internal Notes and Receipts remain excluded as event sources. Missing-folder creation requires an explicit action.
 
-TLS errors retain the transport's diagnostic detail and distinguish handshake timeouts/interrupted connections from certificate verification failures. A timeout does not imply the certificate needs replacing. Imported certificates and hostname verification remain enforced.
+### Sender identities
+
+The account's sending address is its default sender. Add provider-authorized aliases and display names under **Sender identities**; they share the same SMTP login. Choose **From** in the reply composer when more than one identity exists. Sending permission and confirmation remain unchanged, and reply drafts use the selected identity too.
+
+Scripts and agents can pass `"sender":"support@example.org"` with `draft` or `send`. `CERBERUS_EMAIL_DEFAULT_SENDER` and `CERBERUS_EMAIL_SENDERS` (JSON alias list) expose configured choices without passwords. Missing `sender` uses the default; arbitrary unconfigured addresses are rejected. Alias entry configures the client, not the provider's authorization; the SMTP server can still reject an unauthorized sender. IMAP does not provide a portable account-alias discovery operation, so enter aliases from your provider's settings.
+
+### Consistent setup across projects
+
+Use **Copy folders from project** to create missing structure and match special-folder purposes. This preserves existing email, sender identities, credentials and server settings, and supports undo before saving. Automations target common mailbox paths across selected projects, with partial coverage and explicit creation in missing projects. New projects covered by active rules are offered missing folders after setup. No per-project root mapping is needed.
