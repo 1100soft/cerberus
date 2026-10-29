@@ -8,7 +8,7 @@ const load=async(path,replace=source=>source)=>{
  const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
  return import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 };
-const {defaultMailbox}=await load('../src/lib/feedback.ts',source=>source.replace(/^import .*;\n/gm,''));
+const {defaultMailbox}=await load('../src/lib/feedback.ts',source=>source.replace(/^import .*;\r?\n/gm,''));
 const {normalizeMailbox,selectMailProvider,connectionOverrides,mailboxAccountChanged}=await load('../src/lib/mailProviders.ts',source=>source.replace("import catalog from './mailProviders.json';",`const catalog=${JSON.stringify(catalog)};`));
 const defaults=defaultMailbox();assert.equal(defaults.provider,'custom');assert.equal(defaults.imapHost,'');assert.equal(defaults.smtpHost,'');
 assert.equal(new Set(catalog.map(provider=>provider.id)).size,catalog.length);
