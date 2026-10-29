@@ -103,3 +103,10 @@ assert(folderCache.senderIdentityProblem({...settings,address:'primary@example.o
 assert(!mergedFolderTree([a,b]).some(node=>node.label==='Email root'));
 assert.equal(relativeFolder({...a.config,inbox:'missing legacy folder'},a.nodes,[mailboxFolderScope,'Shared']),'Shared');
 console.log('Mailbox-wide scopes without root dependence, legacy-rule compatibility and sender identity validation passed');
+
+assert.equal(folderCache.senderIdentityProblem({...settings,address:'primary@example.org',senderIdentities:[{id:'server-alt',address:'primary@example.org',name:'Alternate'}]}),'');
+const specialNodes=[node('Drafts'),{...node('[Gmail]/Draft messages'),role:'drafts'},{...node('Sent messages'),role:'sent'}];
+assert.deepEqual(folderCache.automaticMailFolders(settings,specialNodes),{drafts:'[Gmail]/Draft messages',sent:'Sent messages'});
+assert.deepEqual(folderCache.automaticMailFolders({...settings,drafts:'Personal drafts',sent:'Outbound'},[node('Personal drafts'),node('Outbound'),node('Drafts')]),{drafts:'Personal drafts',sent:'Outbound'});
+assert.deepEqual(folderCache.automaticMailFolders(settings,[node('INBOX.Drafts','.'),node('INBOX.Sent Items','.')]),{drafts:'INBOX.Drafts',sent:'INBOX.Sent Items'});
+console.log('Automatic special-use folder detection, delimiter fallbacks, preserved assignments and same-address server identities passed');

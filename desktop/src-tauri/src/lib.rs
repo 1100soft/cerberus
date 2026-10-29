@@ -1,4 +1,5 @@
 mod feedback;
+mod sender_sync;
 pub use feedback::cli_main as feedback_cli_main;
 #[doc(hidden)]
 pub mod commit_provenance;
@@ -724,6 +725,8 @@ async fn auto_fast_forward(repository_id:String,app:tauri::AppHandle,state:State
  Ok(updated)
 }
 #[tauri::command]
+async fn sync_email_senders(repository_id:String,config:Option<feedback::Config>,token:Option<String>,push:bool,state:State<'_,AppState>)->Result<feedback::Config,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||sender_sync::synchronize(&root,&repository_id,config,token,push)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
 fn feedback_config(repository_id:String,state:State<AppState>)->Result<Option<feedback::Config>,String>{state.db.repository_path(&repository_id)?;feedback::config(&state.data_dir,&repository_id)}
 #[tauri::command]
 async fn save_feedback_config(repository_id:String,config:feedback::Config,password:Option<String>,state:State<'_,AppState>)->Result<(),String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::save(&root,&repository_id,config,password)).await.map_err(|e|e.to_string())?}
@@ -1003,7 +1006,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_platform, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, repository_automation_logs, repository_commit_origins, feedback_config, save_feedback_config, feedback_setup, feedback_folder_batch, feedback_request, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_platform, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, repository_automation_logs, repository_commit_origins, sync_email_senders, feedback_config, save_feedback_config, feedback_setup, feedback_folder_batch, feedback_request, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,

@@ -40,6 +40,8 @@ type Session = imap::Session<native_tls::TlsStream<TcpStream>>;
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SenderIdentity {
+    pub id: String,
+    pub may_delete: Option<bool>,
     pub address: String,
     pub name: String,
 }
@@ -51,6 +53,8 @@ pub struct Config {
     pub address: String,
     pub sender_identities: Vec<SenderIdentity>,
     pub sender_name: String,
+    pub sender_sync: Option<crate::sender_sync::Settings>,
+    pub auto_special_folders: Option<bool>,
     pub username: String,
     pub imap_host: String,
     pub imap_port: u16,
@@ -228,7 +232,7 @@ fn providers() -> &'static Vec<serde_json::Value> {
 pub fn documentation_url(url: &str) -> bool {
     !url.is_empty()
         && providers().iter().any(|provider| {
-            ["documentation", "passwordDocumentation"]
+            ["documentation", "passwordDocumentation", "identityDocumentation"]
                 .iter()
                 .any(|key| provider[*key].as_str() == Some(url))
         })
@@ -239,7 +243,7 @@ fn selected_sender(c: &Config, requested: &str) -> Result<String, String> {
         if c.sender_name.is_empty() { return Ok(c.address.clone()); }
         return Ok(lettre::message::Mailbox::new(Some(c.sender_name.clone()), c.address.parse::<lettre::Address>().map_err(|_|"Invalid sender address")?).to_string());
     }
-    let sender = c.sender_identities.iter().find(|sender| sender.address.eq_ignore_ascii_case(requested))
+    let sender = c.sender_identities.iter().find(|sender| sender.id == requested || sender.address.eq_ignore_ascii_case(requested))
         .ok_or("Choose a configured sender identity; arbitrary From addresses are not allowed")?;
     if sender.name.chars().any(char::is_control) { return Err("Invalid sender display name".into()); }
     let address = sender.address.parse::<lettre::Address>().map_err(|_| "Invalid sender address")?;
@@ -257,9 +261,10 @@ fn validate_connection(c: &Config) -> Result<(), String> {
         .map_err(|_| "Enter a valid sending email address")?;
     if c.sender_name.chars().any(char::is_control) {return Err("Invalid sender display name".into());}
     let mut senders = std::collections::HashSet::from([c.address.to_lowercase()]);
+    let mut sender_ids = std::collections::HashSet::new();
     for sender in &c.sender_identities {
         sender.address.parse::<lettre::Address>().map_err(|_| "Enter a valid sender identity address")?;
-        if sender.name.chars().any(char::is_control) || !senders.insert(sender.address.to_lowercase()) {
+        if sender.name.chars().any(char::is_control) || (!sender.id.is_empty() && !sender_ids.insert(&sender.id)) || ((sender.id.is_empty()||sender.id.starts_with("local:")) && !senders.insert(sender.address.to_lowercase())) {
             return Err("Sender identities must have unique addresses and valid display names".into());
         }
     }
@@ -1009,9 +1014,22 @@ fn poll(
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderNode {
+    pub role: Option<String>,
     pub path: String,
     pub delimiter: Option<String>,
     pub selectable: bool,
+}
+fn special_role(attributes:&[imap::types::NameAttribute<'_>])->Option<String>{
+    for role in ["drafts","sent"] { if attributes.iter().any(|a|matches!(a,imap::types::NameAttribute::Custom(value) if value.eq_ignore_ascii_case(&format!("\\{role}")))) {return Some(role.into());} } None
+}
+fn resolve_special_folders(c:&mut Config,nodes:&[FolderNode]){
+    for role in ["drafts","sent"] {
+        let current=if role=="drafts" {&c.drafts} else {&c.sent};
+        let found=nodes.iter().find(|n|n.selectable&&n.role.as_deref()==Some(role))
+            .or_else(||nodes.iter().find(|n|n.selectable&&n.path==*current))
+            .or_else(||nodes.iter().find(|n| {let leaf=n.path.rsplit(n.delimiter.as_deref().unwrap_or("/")).next().unwrap_or("").to_lowercase();n.selectable&&if role=="drafts" {matches!(leaf.as_str(),"drafts"|"draft")}else{matches!(leaf.as_str(),"sent"|"sent items"|"sent mail"|"sent messages")}}));
+        if let Some(n)=found {if role=="drafts" {c.drafts=n.path.clone();}else{c.sent=n.path.clone();}}
+    }
 }
 fn folder_tree(s: &mut Session) -> Result<Vec<FolderNode>, String> {
     let names = s
@@ -1020,6 +1038,7 @@ fn folder_tree(s: &mut Session) -> Result<Vec<FolderNode>, String> {
     Ok(names
         .iter()
         .map(|name| FolderNode {
+            role: special_role(name.attributes()),
             path: display_folder(name.name()),
             delimiter: name.delimiter().map(str::to_owned),
             selectable: !name
@@ -1151,6 +1170,7 @@ fn apply_folder_operation(
         }
         create_child(s, nodes, &op.parent, name)?;
         nodes.push(FolderNode {
+            role: None,
             path: destination.clone(),
             delimiter,
             selectable: true,
@@ -1442,6 +1462,7 @@ fn folder_overview(s: &mut Session, c: &Config) -> Result<Vec<FolderOverview>, S
         };
         folders.push(FolderOverview {
             node: FolderNode {
+                role: special_role(name.attributes()),
                 path,
                 delimiter,
                 selectable,
@@ -1516,6 +1537,7 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
         drop(process_lock);
     }
     let mut s = connect(&c, &secret)?;
+    if c.auto_special_folders==Some(true)&&matches!(request.action.as_str(),"draft"|"send") {let nodes=folder_tree(&mut s)?;resolve_special_folders(&mut c,&nodes);validate(&c)?;}
     let result = (|| {
         let name = if request.folder.is_empty() {
             "INBOX"
@@ -1701,8 +1723,18 @@ pub fn instructions() -> &'static str {
 mod tests {
     use super::*;
     #[test]
+    fn special_folders_prefer_server_flags_and_keep_legacy_overrides() {
+        let mut c=Config {drafts:"Drafts".into(),sent:"Sent".into(),..Default::default()};
+        let nodes=vec![FolderNode{path:"Provider/Draft mail".into(),delimiter:Some("/".into()),selectable:true,role:Some("drafts".into())},FolderNode{path:"Sent Items".into(),delimiter:Some("/".into()),selectable:true,role:None}];
+        resolve_special_folders(&mut c,&nodes);assert_eq!(c.drafts,"Provider/Draft mail");assert_eq!(c.sent,"Sent Items");
+        assert_eq!(special_role(&[imap::types::NameAttribute::Custom("\\Drafts".into())]),Some("drafts".into()));
+        assert_eq!(special_role(&[imap::types::NameAttribute::NoSelect]),None);
+        // Existing settings do not opt into runtime automatic reassignment.
+        assert_eq!(Config::default().auto_special_folders,None);
+    }
+    #[test]
     fn sender_identities_are_explicit_and_cannot_inject_headers() {
-        let c = Config { address: "default@example.org".into(), sender_identities: vec![SenderIdentity {address:"support@example.org".into(),name:"Support".into()}], ..Default::default() };
+        let c = Config { address: "default@example.org".into(), sender_identities: vec![SenderIdentity {address:"support@example.org".into(),name:"Support".into(),..Default::default()}], ..Default::default() };
         assert_eq!(selected_sender(&c, "").unwrap(), "default@example.org");
         assert_eq!(selected_sender(&c, "support@example.org").unwrap(), "Support <support@example.org>");
         assert!(selected_sender(&c, "other@example.org").is_err());
@@ -1813,7 +1845,7 @@ mod tests {
         };
         assert!(validate(&oauth).unwrap_err().contains("requires OAuth"));
         for provider in providers() {
-            for key in ["documentation", "passwordDocumentation"] {
+            for key in ["documentation", "passwordDocumentation", "identityDocumentation"] {
                 if let Some(url) = provider[key].as_str().filter(|url| !url.is_empty()) {
                     assert!(documentation_url(url));
                     assert!(!documentation_url(&format!(
@@ -2420,7 +2452,7 @@ mod wire_tests {
         steps.extend([("EXAMINE", SELECT.into()), ("APPEND", String::new())]);
         let (root, port, server) = fixture(steps);
         let mut c = config_for(root.path(), port);
-        c.sender_identities.push(SenderIdentity {address:"alias@example.org".into(),name:"Support team".into()});
+        c.sender_identities.push(SenderIdentity {address:"alias@example.org".into(),name:"Support team".into(),..Default::default()});
         let mut s = connect(&c, "fixture-secret").unwrap();
         let rows = list(&mut s, "INBOX", None).unwrap();
         assert_eq!(rows.len(), 1);

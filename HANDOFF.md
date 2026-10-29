@@ -1327,3 +1327,29 @@ Folder copying creates the complete missing hierarchy and assigns only Drafts/Se
 Added default sender display name and configurable additional sender identities (email/display name) sharing the existing SMTP login. Config serialization defaults preserve old accounts. Compact alias rows have add/remove icons and validation for unique addresses/control characters. Existing connected account login no longer follows changes to its default sending address. Reply composer shows From only with multiple identities and carries selection into drafts/sends; changing sender resets send confirmation/idempotency context. Native sender resolution allowlists configured addresses, rejects injection/arbitrary From, and keeps original Reply-To, send permission and confirmation safeguards. Scripts/agents can pass sender with draft/send and inspect CERBERUS_EMAIL_DEFAULT_SENDER/CERBERUS_EMAIL_SENDERS; provider authorization is still required and alias discovery is not assumed from IMAP.
 
 Validation: production TypeScript/dropdown/style/Vite build and pure folder/cache/copy/undo/legacy-scope/sender validation checks passed. Full native suite passed (175 unit tests, 5 ignored, 3 executable integration checks), including actual TLS fixture draft From/Reply-To verification and sender rejection tests. Email WebKit suites passed at 900×620 and 1720×1080, 100/140/150% zoom, including From menu bounds/Escape, selected draft sender, root removal and shared mailbox paths/manual/automatic/future-project behavior. Existing bundle/WebKit shutdown diagnostics remain. No emails sent, credentials changed, commit or push; earlier pending work preserved.
+
+
+## 2026-10-29 — sender synchronization and special-folder defaults
+
+- Added Fastmail JMAP bidirectional identities: explicit Connect/Refresh imports,
+  Save publishes patches guarded by server state. Tokens use the Linux named
+  GitCerberus keyring collection (platform keychain elsewhere). Endpoint allowlist,
+  redirect refusal, response limits and timeouts protect token handling. No API
+  tokens enter mailbox JSON. Stable identity IDs support same-address alternatives;
+  immutable addresses/nondeletable entries and unmodeled wildcard/signature data
+  are preserved. Concurrent changes/partial failures remain visible.
+- Proton Bridge and Purelymail lack supported read/write sender-identity APIs;
+  their UI truthfully retains manual setup. Do not implement routing as identity
+  synchronization or scrape private Bridge/webmail storage.
+- Drafts/Sent auto-detect server flags for new mailboxes; fall back to existing or
+  common folder names. Manual override remains under Folder settings. Preserve
+  legacy nonstandard assignments. Runtime draft/send resolves server flags again.
+- Folder purpose selection uses a dark readable surface with an accent outline.
+  Existing broader pending changes were preserved; no commit/push in this task.
+
+- Validation: production build (dropdown/style checks, TypeScript, Vite), folder
+  logic/cache checks, WebKit email fixtures at 900×620 and 1720×1080 including
+  100/140/150% zoom, identity pull/publish/conflict preservation and selection
+  contrast; native suite 180 passed + 3 integration tests, 5 ignored. Native
+  sync tests cover endpoint trust, guarded patches and protected identities.
+  No live mailbox identities or email messages were modified for validation.

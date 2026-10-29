@@ -5,8 +5,11 @@ its project, and use the configuration icon. Project configuration also has
 **Email settings**. Configure IMAP and SMTP hosts, ports, TLS or
 STARTTLS, username, sending address and password/app password. Sending is off by
 default. Folder discovery starts as connection details become available. Select
-existing folders in the tree for Drafts, Sent, Internal notes and
-Automation receipts. Use a folder's **+** button to create a child, entering only
+existing folders in the tree for Internal notes and Automation receipts.
+Drafts and Sent are detected from server special-use flags, with existing-folder
+and common-name fallbacks. **Folder settings** exposes manual overrides when a
+server lacks those flags or you want a different destination. Existing custom
+assignments remain manual. Use a folder's **+** button to create a child, entering only
 its name; the server's hierarchy separator is applied automatically. Namespace
 containers appear in the tree but cannot receive mail. **Save** automatically
 enables the mailbox and tests access. Failures stay visible without disabling it.
@@ -328,3 +331,31 @@ Scripts and agents can pass `"sender":"support@example.org"` with `draft` or `se
 ### Consistent setup across projects
 
 Use **Copy folders from project** to create missing structure and match special-folder purposes. This preserves existing email, sender identities, credentials and server settings, and supports undo before saving. Automations target common mailbox paths across selected projects, with partial coverage and explicit creation in missing projects. New projects covered by active rules are offered missing folders after setup. No per-project root mapping is needed.
+
+
+### Server identity synchronization
+
+Fastmail supports bidirectional sender identity synchronization through JMAP.
+Save the mailbox first, then use **Connect sync** under **Sender identities**
+with a Fastmail API token that permits mail submission/identity access
+([token setup](https://www.fastmail.com/dev/)). This token is separate from the
+IMAP app password and is stored in the OS password store, never mailbox settings.
+Connecting and **Refresh senders** import server identities; opening the Email
+page refreshes connected identities independently of message/folder loading.
+Refresh replaces unsaved identity edits. **Save** publishes additions, display-name
+edits and permitted removals, then imports the actual server result.
+
+Server identity email addresses are immutable; add a new identity instead of
+renaming its email. The server decides which sending addresses are authorized.
+Nondeletable identities are protected, and wildcard identities, signatures,
+Reply-To and Bcc settings are preserved. Concurrent server edits block publishing
+until refreshed. A partial server rejection can leave some edits applied; refresh
+before retrying. Failed synchronization keeps the local form and last saved
+configuration. Disconnecting sync stops synchronization without deleting server
+identities. Folder copying never copies identities or API credentials.
+
+IMAP and SMTP do not provide a standard sender-identity settings API. Proton
+Bridge does not expose address-editing operations, and Purelymail's public API
+manages routing rather than webmail sender identities. These and other providers
+keep manual identity configuration; there is no promise of two-way synchronization
+where the provider cannot support it.
