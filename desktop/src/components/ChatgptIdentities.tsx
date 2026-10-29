@@ -24,7 +24,7 @@ export function ChatgptIdentityCards(){
 }
 export function ChatgptSettings(){
  const {profiles,settings}=useChatgptAccounts();const external=useExternalIdentities();const [error,setError]=useState('');
- return <details className="identity-settings"><summary>Default agent accounts</summary><p>New and unassigned repositories use these accounts automatically.</p><div className="identity-defaults">
+ return <details className="identity-settings"><summary>Default agent accounts</summary><p>New and unassigned projects use these accounts automatically.</p><div className="identity-defaults">
  <label>ChatGPT<Select label="Default ChatGPT account" value={settings.defaultAccount||''} options={[{value:'',label:'None'},...profiles.filter(p=>p.subscription && !p.disconnected).map(p=>({value:p.id,label:p.label}))]} onChange={id=>void assignChatgpt(null,id||null).catch(error=>setError(String(error)))}/></label>
  {externalProviders.map(provider=><label key={provider.id}>{provider.label}<Select label={`Default ${provider.label} account`} value={external.settings.defaultAccounts[provider.id]||''} options={[{value:'',label:'None'},...external.identities.filter(item=>item.provider===provider.id).map(item=>({value:item.id,label:item.label}))]} onChange={id=>void defaultExternalIdentity(provider.id,id||null).catch(error=>setError(String(error)))}/></label>)}
  </div>{error && <p role="alert">{error}</p>}</details>;

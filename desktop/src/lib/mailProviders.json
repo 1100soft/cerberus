@@ -1,0 +1,223 @@
+[
+  {
+    "id": "custom",
+    "label": "Other IMAP server",
+    "editable": true,
+    "certificate": true,
+    "auth": "password",
+    "passwordLabel": "Password / app password",
+    "help": "Use the IMAP and SMTP settings supplied by your email host or administrator. Both connections require TLS or STARTTLS.",
+    "documentation": "",
+    "passwordDocumentation": "",
+    "settings": {
+      "imapHost": "",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "",
+      "smtpPort": 465,
+      "smtpSecurity": "tls"
+    },
+    "webmail": ""
+  },
+  {
+    "id": "gmail",
+    "label": "Gmail / Google Workspace",
+    "editable": false,
+    "certificate": false,
+    "auth": "appPassword",
+    "passwordLabel": "Google app password",
+    "help": "Use your full account email and an app password with 2-Step Verification. Some managed or protected accounts do not allow app passwords; OAuth sign-in is not available in Cerberus yet.",
+    "documentation": "https://support.google.com/mail/answer/7126229",
+    "passwordDocumentation": "https://support.google.com/accounts/answer/185833",
+    "settings": {
+      "imapHost": "imap.gmail.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp.gmail.com",
+      "smtpPort": 465,
+      "smtpSecurity": "tls"
+    },
+    "webmail": "https://mail.google.com/"
+  },
+  {
+    "id": "icloud",
+    "label": "iCloud Mail",
+    "editable": false,
+    "certificate": false,
+    "auth": "appPassword",
+    "passwordLabel": "Apple app-specific password",
+    "help": "Use an app-specific password and your full iCloud account email as the username for both IMAP and SMTP.",
+    "documentation": "https://support.apple.com/102525",
+    "passwordDocumentation": "",
+    "settings": {
+      "imapHost": "imap.mail.me.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp.mail.me.com",
+      "smtpPort": 587,
+      "smtpSecurity": "starttls"
+    },
+    "webmail": "https://www.icloud.com/mail/"
+  },
+  {
+    "id": "outlook",
+    "label": "Outlook.com / Hotmail",
+    "editable": false,
+    "certificate": false,
+    "auth": "oauth",
+    "passwordLabel": "",
+    "help": "Microsoft requires OAuth (Modern Authentication). Cerberus does not support Microsoft mailbox sign-in yet. These are the documented server settings; password login is unavailable.",
+    "documentation": "https://support.microsoft.com/en-US/Outlook/pop-imap-and-smtp-settings-for-outlook-com",
+    "passwordDocumentation": "",
+    "settings": {
+      "imapHost": "outlook.office365.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp-mail.outlook.com",
+      "smtpPort": 587,
+      "smtpSecurity": "starttls"
+    },
+    "webmail": "https://outlook.live.com/mail/"
+  },
+  {
+    "id": "microsoft365",
+    "label": "Microsoft 365 / Exchange Online",
+    "editable": false,
+    "certificate": false,
+    "auth": "oauth",
+    "passwordLabel": "",
+    "help": "Microsoft requires OAuth and your organization must allow IMAP/SMTP access. Cerberus does not support Microsoft mailbox sign-in yet; password login is unavailable.",
+    "documentation": "https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/pop3-and-imap4/pop3-and-imap4",
+    "passwordDocumentation": "https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth/",
+    "settings": {
+      "imapHost": "outlook.office365.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp.office365.com",
+      "smtpPort": 587,
+      "smtpSecurity": "starttls"
+    },
+    "webmail": "https://outlook.office.com/mail/"
+  },
+  {
+    "id": "yahoo",
+    "label": "Yahoo Mail",
+    "editable": false,
+    "certificate": false,
+    "auth": "appPassword",
+    "passwordLabel": "Yahoo app password",
+    "help": "Use your full Yahoo account email and a generated app password.",
+    "documentation": "https://help.yahoo.com/kb/SLN4075.html",
+    "passwordDocumentation": "",
+    "settings": {
+      "imapHost": "imap.mail.yahoo.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp.mail.yahoo.com",
+      "smtpPort": 465,
+      "smtpSecurity": "tls"
+    },
+    "webmail": "https://mail.yahoo.com/"
+  },
+  {
+    "id": "fastmail",
+    "label": "Fastmail",
+    "editable": false,
+    "certificate": false,
+    "auth": "appPassword",
+    "passwordLabel": "Fastmail app password",
+    "help": "Use your full Fastmail account username and an app password with Mail access. Basic plans do not include IMAP/SMTP.",
+    "documentation": "https://www.fastmail.help/hc/en-us/articles/1500000278342-Server-names-and-ports",
+    "passwordDocumentation": "https://www.fastmail.help/hc/en-us/articles/1500000277802-Troubleshooting-mail-client-issues",
+    "settings": {
+      "imapHost": "imap.fastmail.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp.fastmail.com",
+      "smtpPort": 465,
+      "smtpSecurity": "tls"
+    },
+    "identityDocumentation": "https://www.fastmail.com/dev/",
+    "webmail": "https://app.fastmail.com/"
+  },
+  {
+    "id": "zoho",
+    "label": "Zoho Mail (personal)",
+    "editable": true,
+    "certificate": false,
+    "auth": "password",
+    "passwordLabel": "Password / app password",
+    "help": "Defaults use Zoho\u2019s .com data center. Confirm your region-specific servers in your account\u2019s Server Configuration Details and enable IMAP. Use an app password with 2FA.",
+    "documentation": "https://www.zoho.com/mail/help/imap-access.html",
+    "passwordDocumentation": "",
+    "settings": {
+      "imapHost": "imap.zoho.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp.zoho.com",
+      "smtpPort": 465,
+      "smtpSecurity": "tls"
+    },
+    "webmail": "https://mail.zoho.com/"
+  },
+  {
+    "id": "zohoOrganization",
+    "label": "Zoho Mail (paid organization)",
+    "editable": true,
+    "certificate": false,
+    "auth": "password",
+    "passwordLabel": "Password / app password",
+    "help": "Defaults use Zoho\u2019s .com paid-organization servers. Confirm your region-specific servers in your account\u2019s Server Configuration Details and enable IMAP. Use an app password with 2FA.",
+    "documentation": "https://www.zoho.com/mail/help/imap-access.html",
+    "passwordDocumentation": "",
+    "settings": {
+      "imapHost": "imappro.zoho.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtppro.zoho.com",
+      "smtpPort": 465,
+      "smtpSecurity": "tls"
+    },
+    "webmail": "https://mail.zoho.com/"
+  },
+  {
+    "id": "purelymail",
+    "label": "Purelymail",
+    "editable": false,
+    "certificate": false,
+    "auth": "password",
+    "passwordLabel": "Password / app password",
+    "help": "Use your full mailbox username. If 2FA is enabled, generate an app password.",
+    "documentation": "https://purelymail.com/docs/setup/technical",
+    "passwordDocumentation": "",
+    "settings": {
+      "imapHost": "imap.purelymail.com",
+      "imapPort": 993,
+      "imapSecurity": "tls",
+      "smtpHost": "smtp.purelymail.com",
+      "smtpPort": 465,
+      "smtpSecurity": "tls"
+    },
+    "webmail": "https://inbox.purelymail.com/"
+  },
+  {
+    "id": "proton",
+    "label": "Proton Mail Bridge",
+    "editable": true,
+    "certificate": true,
+    "auth": "bridge",
+    "passwordLabel": "Bridge-generated password",
+    "help": "Run Proton Mail Bridge on this computer (paid plan). Match the username, password, ports and security shown by Bridge; its defaults are filled below. Add Bridge\u2019s trusted certificate PEM if needed. Your Proton account password will not work here.",
+    "documentation": "https://proton.me/support/imap-smtp-and-pop3-setup",
+    "passwordDocumentation": "https://proton.me/support/port-already-occupied-error",
+    "settings": {
+      "imapHost": "127.0.0.1",
+      "imapPort": 1143,
+      "imapSecurity": "starttls",
+      "smtpHost": "127.0.0.1",
+      "smtpPort": 1025,
+      "smtpSecurity": "starttls"
+    },
+    "webmail": "https://mail.proton.me/"
+  }
+]

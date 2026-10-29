@@ -40,7 +40,7 @@ export function AgentsPanel({ visible, identities, onSetup }: { visible: boolean
   }, [visible]);
   const ready = agents.filter(agent => installation[agent.id]?.path).length;
   return <section className="agents-panel" hidden={!visible} aria-label="Agent workspace">
-    <header><h1>Agents</h1><p>Install each CLI, then connect the account it uses. Chat from a repository’s conversation pane.</p></header>
+    <header><h1>Agents</h1><p>Install each CLI, then connect the account it uses. Chat from a project’s conversation pane.</p></header>
     <p className="agent-page-status">{inTauri() ? `${ready} of ${agents.length} CLIs ready.` : 'Agent detection, execution, and credential storage require the desktop app.'} Setup installs the CLI. Identities connects the account. Conversations stay off until you enable that provider.</p>
     <div className="agent-cards">{agents.map(agent => {
       const github = identities.filter(identity => identity.connected !== false);

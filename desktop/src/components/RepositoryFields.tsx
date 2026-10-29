@@ -30,13 +30,16 @@ type Props = {
   onChange: (value: RepositoryFormValue) => void;
   browseTitle?: string;
   identityRequired?:boolean;
+  githubDestination?: {name:string; organization:string; remote:string; onNameChange:(name:string)=>void; onOrganizationChange:(organization:string)=>void};
 };
 
-export function RepositoryFields({ value, identities, onChange, browseTitle, identityRequired }: Props) {
+export function RepositoryFields({ value, identities, onChange, browseTitle, identityRequired, githubDestination }: Props) {
   async function browse() {
     const path = await api.selectRepositoryDirectory();
     if (path) onChange({ ...value, localPath: path });
   }
+
+  const identityField = <label>Identity<Select label="Identity" value={value.identityId} onChange={(identityId) => onChange({ ...value, identityId })} options={[...(identityRequired?[]:[{value:"",label:"Unassigned"}]), ...identities.map((identity) => ({value:identity.id,label:identity.label}))]} /></label>;
 
   return <div className="config-grid">
     <label>Display name<input value={value.displayName} onChange={(e) => onChange({ ...value, displayName: e.target.value })} required /></label>
@@ -47,11 +50,16 @@ export function RepositoryFields({ value, identities, onChange, browseTitle, ide
         <button type="button" onClick={browse} title={browseTitle ?? "Choose folder"}><FolderSearch size={16} /></button>
       </span>
     </label>
-    <label className="full">Remote URL
+    {githubDestination ? <>
+      {identityField}
+      <label>Repository name<input value={githubDestination.name} onChange={event=>githubDestination.onNameChange(event.target.value)} required pattern="[A-Za-z0-9_.-]+" /></label>
+      <label className="full">Organization (optional)<input value={githubDestination.organization} onChange={event=>githubDestination.onOrganizationChange(event.target.value)} pattern="[A-Za-z0-9-]+" placeholder="Uses the selected identity when empty" /></label>
+      <label className="full">Remote URL<input value={githubDestination.remote} readOnly /></label>
+    </> : <label className="full">Remote URL
       <input value={value.canonicalRemote} onChange={(e) => onChange({ ...value, canonicalRemote: e.target.value, hostType: detectHost(e.target.value) })} placeholder="https://github.com/owner/repo.git" />
-    </label>
+    </label>}
     <label>Default branch<input value={value.defaultBranch} onChange={(e) => onChange({ ...value, defaultBranch: e.target.value })} placeholder="main" /></label>
-    <label>Identity<Select label="Identity" value={value.identityId} onChange={(identityId) => onChange({ ...value, identityId })} options={[...(identityRequired?[]:[{value:"",label:"Unassigned"}]), ...identities.map((identity) => ({value:identity.id,label:identity.label}))]} /></label>
+    {!githubDestination && identityField}
     <label className="full">Tags<input value={value.tags} onChange={(e) => onChange({ ...value, tags: e.target.value })} placeholder="backend, production" /></label>
   </div>;
 }

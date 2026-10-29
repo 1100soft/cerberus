@@ -34,8 +34,8 @@ script = r"""
  const apiPath = cacheModule.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];
  const {api} = await import(apiPath);
  api.codexAccount = async () => ({account:{email:'ui-test@example.test'}});
- api.codexThreads = async () => ({data:[{id:'fixture-one',name:'Review repository',updatedAt:1700000000},{id:'fixture-two',name:'Plan a change',updatedAt:1699999999}]});
- api.codexMessages = async (_,id) => ({data:[{id:id+'-user',role:'user',text:'Review this repository'},{id:id+'-progress',role:'assistant',text:'Checking the source files'},{id:id+'-progress-2',role:'assistant',text:'Running the checks'},{id:id+'-answer',role:'assistant',text:'A fixture response for keyboard and layout testing.\n\n'.repeat(30),edits:[{path:'src/fixture.ts',kind:'update',diff:'+example'},{path:'src/second.ts',kind:'update',diff:'+second'}]}]});
+ api.codexThreads = async () => ({data:[{id:'fixture-one',name:'Review project',updatedAt:1700000000},{id:'fixture-two',name:'Plan a change',updatedAt:1699999999}]});
+ api.codexMessages = async (_,id) => ({data:[{id:id+'-user',role:'user',text:'Review this project'},{id:id+'-progress',role:'assistant',text:'Checking the source files'},{id:id+'-progress-2',role:'assistant',text:'Running the checks'},{id:id+'-answer',role:'assistant',text:'A fixture response for keyboard and layout testing.\n\n'.repeat(30),edits:[{path:'src/fixture.ts',kind:'update',diff:'+example'},{path:'src/second.ts',kind:'update',diff:'+second'}]}]});
  api.copilotThreads = async () => ({data:[{id:'copilot-fixture',name:'Copilot review',preview:'Copilot review',updatedAt:1700000001}]});
  api.claudeThreads = async () => ({data:[{id:'claude-fixture',name:'Claude review',preview:'Claude review',updatedAt:1700000002}]});
  api.copilotMessages = async () => ({data:[{id:'cp-answer',role:'assistant',text:'Copilot transcript'}]});
@@ -58,7 +58,7 @@ script = r"""
   }
   repositoryList.style.maxHeight = '';
   rows()[0].click(); await pause();
-  window.__repositoryProgress = 'repository controls '+zoom;
+  window.__repositoryProgress = 'project controls '+zoom;
   const before = rows().map(row => row.getBoundingClientRect().height);
   rows()[1].click(); await pause();
   assert(rows().every((row, i) => Math.abs(row.getBoundingClientRect().height - before[i]) < 1), 'Selection changed card height: ' + JSON.stringify({before, after:rows().map(row => row.getBoundingClientRect().height), zoom}));
@@ -89,7 +89,7 @@ script = r"""
   const assign = selected().querySelector('.identity');
   assign.click(); await pause();
   assert(document.querySelector('.repository-accounts'),'Unified account panel did not open');
-  assert(selected().querySelectorAll('.row-actions .identity').length===1 && !selected().querySelector('.assign-chatgpt, .assign-external'),'Repository tray has redundant account buttons');
+  assert(selected().querySelectorAll('.row-actions .identity').length===1 && !selected().querySelector('.assign-chatgpt, .assign-external'),'Project tray has redundant account buttons');
   document.querySelector('.repository-accounts [aria-label="GitHub account"]').click();await pause();
   let menu = document.querySelector('[role=listbox]');
   assert(menu, 'GitHub account menu did not open');
@@ -110,7 +110,7 @@ script = r"""
   assert(tray.top < rowRect.bottom && tray.bottom > rowRect.bottom, 'Tray does not overlap card bottom');
   const mid = (rowRect.left + rowRect.right) / 2, trayMid = (tray.left + tray.right) / 2;
   assert(Math.abs(trayMid - mid) < rowRect.width / 3, 'Control tray is not centered on the card');
-  assert(rowRect.height / zoom <= 38, 'Repository cards are not dense');
+  assert(rowRect.height / zoom <= 38, 'Project cards are not dense');
   assert(!card.querySelector('.availability'), 'Local presence consumes card content');
   assert(card.querySelector('.repo-owner').getBoundingClientRect().top < rowRect.top, 'Owner is not on the corner');
   assert(card.querySelector('.repo-visibility').getBoundingClientRect().top < rowRect.top, 'Visibility is not on the corner');
@@ -119,7 +119,7 @@ script = r"""
   const cr = context.getBoundingClientRect();
   assert(cr.left >= -1 && cr.right <= innerWidth + 1 && cr.top >= -1 && cr.bottom <= innerHeight + 1, 'Context menu outside viewport');
   key(context, 'Escape'); await pause();
-  assert(pane.scrollWidth <= pane.clientWidth + 2, 'Repository pane overflows horizontally');
+  assert(pane.scrollWidth <= pane.clientWidth + 2, 'Project pane overflows horizontally');
   const remote = document.querySelector('.repo-remote'); remote.click(); await pause();
   assert(selected() === remote && chosen().length === 1, 'Remote selection is not exclusive');
   assert(remote.querySelector('[aria-label="Clone from GitHub"]'), 'Remote card missing Clone');
@@ -128,7 +128,7 @@ script = r"""
   const rt = remote.querySelector('.row-panel').getBoundingClientRect();
   const pr = pane.getBoundingClientRect();
   assert(rt.top >= pr.top - 1 && rt.bottom <= pr.bottom + 1, 'Selected tray is clipped by scroll pane');
-  const filterToggle = document.querySelector('[aria-label="Filter repositories"]');
+  const filterToggle = document.querySelector('[aria-label="Filter projects"]');
   assert(filterToggle, 'Filter toggle is missing');
   if (filterToggle.getAttribute('aria-pressed') !== 'true') filterToggle.click();
   for (let wait = 0; !document.querySelector('.repo-filters') && wait < 20; wait++) await pause();
@@ -150,7 +150,7 @@ script = r"""
   }
   document.querySelector('[aria-label="Toggle navigation"]').click(); await pause();
   assert(document.querySelector('.repo-filters [aria-label="Filter by status"]'), 'Status filter is not grouped with the other filters');
-  const sortToggle = document.querySelector('[aria-label="Sort repositories"]');
+  const sortToggle = document.querySelector('[aria-label="Sort projects"]');
   sortToggle.click(); await pause();
   const directSort = document.querySelector('[role=listbox]');
   assert(directSort && directSort.querySelector('[data-value="updated"]'), 'Sort icon did not open options directly');
@@ -183,12 +183,12 @@ script = r"""
     for (let i=0; i<index; i++) key(dropdown, 'ArrowDown');
     await pause(); key(dropdown, 'Enter'); await pause();
   }
-  assert(rows().length === 1 && rows()[0].textContent.includes('design-system'), 'Combined filters did not isolate expected repository');
+  assert(rows().length === 1 && rows()[0].textContent.includes('design-system'), 'Combined filters did not isolate expected project');
   document.querySelector('[aria-label="Select all owners"]').click(); await pause();
   for (const label of ['Filter by visibility', 'Filter by local presence']) {
     document.querySelector(`[aria-label="${label}"]`).click(); await pause(); document.querySelector('[role=option]').click(); await pause();
   }
-  const sort = document.querySelector('button[aria-label="Sort repositories"]');
+  const sort = document.querySelector('button[aria-label="Sort projects"]');
   sort.click(); await pause();
   let sortMenu = document.querySelector('[role=listbox]');
   const sortBounds = sortMenu.getBoundingClientRect();
@@ -204,7 +204,7 @@ script = r"""
   assert(!document.querySelector('.repo-filters'), 'Filter panel did not close on outside click');
   rows()[0].click(); await pause();
   let chatButton = selected().querySelector('[aria-label="Chat with agent"]');
-  assert(chatButton && chatButton.dataset.controlIndex === '0', 'Chat must be the first repository action');
+  assert(chatButton && chatButton.dataset.controlIndex === '0', 'Chat must be the first project action');
   chatButton.click(); await pause();
   let input = document.querySelector('.codex-thread-list button.active');
   assert(input && document.activeElement?.closest('.codex-panel'), 'Chat action must focus the Agent history pane');
@@ -228,7 +228,7 @@ script = r"""
 
   assert(!document.querySelector('.codex-thread-list button.provider-codex small, .codex-thread-list button.provider-codex .provider-badge'), 'Conversation cards still show redundant metadata');
   rows()[1].click(); await pause(); rows()[0].click(); await pause(); await pause();
-  assert(document.querySelector('.codex-thread-list .active')?.textContent === 'Review repository', 'Repository selection should open latest conversation');
+  assert(document.querySelector('.codex-thread-list .active b')?.textContent === 'Review project', 'Project selection should open latest conversation');
   assert(!document.querySelector('.toast'), 'Persistent monitoring overlay remains');
   input = document.querySelector('.codex-thread-list button.active');
   chatButton = selected().querySelector('[aria-label="Chat with agent"]');
@@ -267,11 +267,11 @@ script = r"""
   assert(display.querySelector('mark'), 'Search does not highlight matches');
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(localSearch,'');localSearch.dispatchEvent(new Event('input',{bubbles:true}));await pause();
   localSearch.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true,cancelable:true}));await pause();
-  const repoSearch=document.querySelector('[aria-label="Search repository conversations"]');assert(document.activeElement===repoSearch,'Repository conversation search shortcut failed');
+  const repoSearch=document.querySelector('[aria-label="Search project conversations"]');assert(document.activeElement===repoSearch,'Project conversation search shortcut failed');
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(repoSearch,'fixture response');repoSearch.dispatchEvent(new Event('input',{bubbles:true}));
   for(let wait=0;!document.querySelector('.codex-thread-list > button.search-hit') && wait<40;wait++)await pause();
-  assert(document.querySelector('.codex-thread-list > button.search-hit'), 'Repository-wide message search returned no results');
-  await pause();assert(display.querySelector('mark.current-search-match'), 'Repository search did not jump to its first match');
+  assert(document.querySelector('.codex-thread-list > button.search-hit'), 'Project-wide message search returned no results');
+  await pause();assert(display.querySelector('mark.current-search-match'), 'Project search did not jump to its first match');
   const firstConversation=document.querySelector('.codex-thread-list > button.active').textContent;
   const firstMatch=display.querySelector('mark.current-search-match');key(repoSearch,'Enter');await pause();
   assert(display.querySelector('mark.current-search-match')!==firstMatch,'Enter did not move to next match');
@@ -283,7 +283,7 @@ script = r"""
   assert(document.querySelector('.codex-thread-list > button.active').textContent===firstConversation,'Previous match did not cross conversation boundary');
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(repoSearch,'');repoSearch.dispatchEvent(new Event('input',{bubbles:true}));await pause();
   key(repoSearch,'Escape');await pause();key(document.activeElement,'f');await pause();
-  assert(document.activeElement===document.querySelector('.search input'),'F did not focus repository search');
+  assert(document.activeElement===document.querySelector('.search input'),'F did not focus project search');
   key(document.activeElement,'Escape');await pause();input.focus();
   assert(!document.querySelector('.chat-composer'), 'Composer must be absent from read-only history');
   const browseOwner = input;
@@ -317,7 +317,7 @@ script = r"""
   key(dialog, 'Escape'); await pause();
   assert(!document.querySelector('.provider-dialog') && document.activeElement === setupButton, 'Popup dismissal or focus restoration failed');
   if(document.querySelector('aside').hidden)document.querySelector('[aria-label="Toggle navigation"]').click(); await pause();
-  [...document.querySelectorAll('nav button')].find(b => b.textContent.includes('Repositories')).click(); await pause();
+  [...document.querySelectorAll('nav button')].find(b => b.textContent.includes('Projects')).click(); await pause();
   document.querySelector('.codex-panel [aria-label="Set up Codex"]').click(); await pause();
   dialog = document.querySelector('.provider-dialog');
   assert(dialog && dialog.textContent === firstContents, 'Both routes must open identical setup');
@@ -411,9 +411,9 @@ script = r"""
   document.querySelector('[role=listbox] [data-value="claude:fixture"]').click();await pause();await pause();
   assert(externalSettings.defaultAccounts.cursor==='cursor:fixture' && externalSettings.defaultAccounts.claude==='claude:fixture','External identity defaults were not saved');
   if(document.querySelector('aside').hidden)document.querySelector('[aria-label="Toggle navigation"]').click();await pause();
-  [...document.querySelectorAll('nav button')].find(button=>button.textContent.includes('Repositories')).click();await pause();
+  [...document.querySelectorAll('nav button')].find(button=>button.textContent.includes('Projects')).click();await pause();
 
-  window.__repositoryProgress='ChatGPT repository assignment '+zoom;
+  window.__repositoryProgress='ChatGPT project assignment '+zoom;
   assert(identitySignInClass && document.querySelector('.codex-panel .identity-sign-in-trigger')?.className===identitySignInClass,'Shared sign-in trigger missing');
   document.querySelector('.codex-panel .add-identity > button').click();await pause();
   const agentSignIn=[...document.querySelectorAll('.codex-panel .identity-sign-in button')].find(button=>button.textContent==='Sign in with ChatGPT');
@@ -423,12 +423,12 @@ script = r"""
   key(document.activeElement,'Escape');await pause();
   selected().querySelector('.identity').click();await pause();
   assert(document.querySelector('.repository-accounts'),'Account panel missing');
-  assert(document.querySelector('.repository-accounts [aria-label="Cursor account"]').textContent.includes('Cursor fixture') && document.querySelector('.repository-accounts [aria-label="Claude account"]').textContent.includes('Claude fixture'),'Repository did not inherit external defaults');
+  assert(document.querySelector('.repository-accounts [aria-label="Cursor account"]').textContent.includes('Cursor fixture') && document.querySelector('.repository-accounts [aria-label="Claude account"]').textContent.includes('Claude fixture'),'Project did not inherit external defaults');
   assert(!selected().querySelector('.assign-chatgpt, .assign-external'),'Redundant account controls remain');
   document.querySelector('.repository-accounts [aria-label="ChatGPT account"]').click();await pause();
   let accountMenu=document.querySelector('[role=listbox]');
-  assert(accountMenu && accountMenu.textContent.includes('subscriber@example.test') && !accountMenu.textContent.includes('Use default'),'Repository account options are incorrect');
-  assert(accountMenu.getBoundingClientRect().bottom<=innerHeight+1,'Repository account menu overflows viewport');
+  assert(accountMenu && accountMenu.textContent.includes('subscriber@example.test') && !accountMenu.textContent.includes('Use default'),'Project account options are incorrect');
+  assert(accountMenu.getBoundingClientRect().bottom<=innerHeight+1,'Project account menu overflows viewport');
   accountMenu.querySelector('[data-value=""]').click();await pause();await pause();
   assert(Object.values(chatgptSettings.repositories).includes(null),'Explicit no-account choice was not saved: '+JSON.stringify(chatgptSettings));
   document.querySelector('.repository-accounts [aria-label="ChatGPT account"]').click();await pause();

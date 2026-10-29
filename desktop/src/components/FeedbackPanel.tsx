@@ -1,0 +1,115 @@
+import {EmailPage} from './EmailPage';
+import {FolderHistory,assignments} from '../lib/mailFolderHistory';
+import {CopyMailFolders} from './CopyMailFolders';
+import {FeedbackMissingFolders} from './FeedbackMissingFolders';
+import {MailFolderTree} from './MailFolderTree';
+import {FeedbackMailboxBadge} from './FeedbackMailboxBadge';
+import {recordMailboxStatus} from '../lib/feedbackStatus';
+import {api} from '../lib/api';
+import {mailProviders,mailProvider,normalizeMailbox,selectMailProvider,connectionOverrides,mailboxAccountChanged,webmailUrlProblem} from '../lib/mailProviders';
+import {useEffect,useRef,useState} from 'react';
+import {RefreshCw,X,Trash2,Check,Undo2,Redo2,Plus} from 'lucide-react';
+import {feedback,defaultMailbox,senderIdentityProblem,automaticMailFolders,type MailFolder,type MailboxConfig,type FolderOperation} from '../lib/feedback';
+import {Select} from './Select';
+import type {Repository} from '../types';
+export function FeedbackSettings({repositoryId,onClose,onSaved}:{repositoryId:string;onClose:()=>void;onSaved?:()=>void}){
+ const [config,setConfig]=useState<MailboxConfig>(defaultMailbox),[original,setOriginal]=useState<MailboxConfig|null>(null),[password,setPassword]=useState(''),[passwordReady,setPasswordReady]=useState(true),[busy,setBusy]=useState(true),[error,setError]=useState(''),[status,setStatus]=useState(''),[advanced,setAdvanced]=useState(false),[serverFolders,setServerFolders]=useState<MailFolder[]>([]),[folderRole,setFolderRole]=useState<'drafts'|'sent'|'notes'|'metadata'>('notes'),[discovering,setDiscovering]=useState(false),[discovered,setDiscovered]=useState(''),[attempt,setAttempt]=useState(0),[checkedConfig,setCheckedConfig]=useState<MailboxConfig|null>(null);
+ useEffect(()=>{let active=true;void feedback.config(repositoryId).then(value=>{if(active){const loaded=value?{...normalizeMailbox(value),enabled:true}:defaultMailbox();setOriginal(value);setConfig(loaded);setAdvanced(connectionOverrides(loaded));setBusy(false);}}).catch(reason=>{if(active){setError(String(reason));setBusy(false);}});return()=>{active=false;};},[repositoryId]);
+ const [syncToken,setSyncToken]=useState(''),[folderOverrides,setFolderOverrides]=useState(false);
+ const history=useRef(new FolderHistory()),mutating=useRef(false);const [,refreshHistory]=useState(0);
+ const historyScope=JSON.stringify([repositoryId,config.username,config.imapHost,config.imapPort,config.imapSecurity,config.certificatePath]);
+ useEffect(()=>{history.current.reset();refreshHistory(value=>value+1);},[historyScope]);
+ const provider=mailProvider(config.provider),oauth=provider.auth==='oauth',editable=provider.editable||advanced,accountChanged=mailboxAccountChanged(original,config);
+ const problem=webmailUrlProblem(config.webmailUrl||'')||senderIdentityProblem(config)||(oauth?'Microsoft OAuth sign-in is not available yet.':accountChanged&&!password?'Enter the new mailbox password before changing its account or servers.':'');
+ const update=(patch:Partial<MailboxConfig>)=>{setConfig(current=>({...current,...patch}));setStatus('');setError('');};
+ const field=(key:keyof MailboxConfig,label:string,type='text')=><label>{label}<input disabled={busy} type={type} value={String(config[key]??'')} onChange={event=>update({[key]:type==='number'?Number(event.target.value):event.target.value})}/></label>;
+ const link=(url:string,label:string)=><a href={url} onClick={event=>{event.preventDefault();void api.openExternalUrl(url).catch(reason=>setError(String(reason)));}}>{label}</a>;
+ const roles=[{value:'drafts',label:'Drafts'},{value:'sent',label:'Sent'},{value:'notes',label:'Internal notes'},{value:'metadata',label:'Automation receipts'}] as const;
+ const connectionKey=JSON.stringify([repositoryId,config.provider,config.address,config.username,config.imapHost,config.imapPort,config.imapSecurity,config.smtpHost,config.smtpPort,config.smtpSecurity,config.certificatePath,password,attempt]);
+ const currentConnection=useRef(connectionKey);currentConnection.current=connectionKey;
+ const acceptFolders=(nodes:MailFolder[])=>{
+  setServerFolders(nodes);
+  setConfig(current=>{const next={...current,...(current.autoSpecialFolders?automaticMailFolders(current,nodes):{})};for(const role of roles){if(!nodes.some(node=>node.selectable&&node.path===next[role.value])&&current.provider==='proton'&&nodes.some(node=>node.selectable&&node.path===`Folders/${next[role.value]}`))next[role.value]=`Folders/${next[role.value]}`;}return next;});
+ };
+ useEffect(()=>{
+  let active=true;setDiscovered('');setServerFolders([]);
+  if(!passwordReady||oauth||!config.username||!config.address.includes('@')||!config.imapHost||!config.smtpHost||(!password&&(!original||accountChanged)))return;
+  const timer=setTimeout(()=>{setDiscovering(true);setError('');void feedback.setup(repositoryId,config,password,undefined,undefined,attempt>0).then(nodes=>{if(active){acceptFolders(nodes);setDiscovered(connectionKey);}}).catch(reason=>{if(active)setError(String(reason));}).finally(()=>{if(active)setDiscovering(false);});},400);
+  return()=>{active=false;clearTimeout(timer);setDiscovering(false);};
+ },[connectionKey,passwordReady]);
+ const folderProblem=roles.some(role=>!serverFolders.some(node=>node.selectable&&node.path===config[role.value]))?'Choose existing folders for each purpose, or create them in the tree.':new Set(roles.map(role=>config[role.value])).size!==roles.length?'Choose a different folder for each purpose.':'';
+ const editFolders=async(operations:FolderOperation[],patch:Partial<MailboxConfig>={},label='Folder change')=>{
+  if(mutating.current)throw Error('A folder operation is already running.');mutating.current=true;setBusy(true);setError('');setStatus('');
+  const before=assignments(config);
+  try{
+   const result=operations.length?await feedback.batch(repositoryId,{...config,...patch},password,operations):{nodes:serverFolders,changes:[],processed:0,error:null};
+   acceptFolders(result.nodes);
+   const after=result.processed===operations.length?assignments({...config,...patch}):before;
+   setConfig(current=>({...current,...after}));history.current.record(label,result,before,after);refreshHistory(value=>value+1);
+   setStatus(result.error?(result.changes.length?`${result.changes.length} folder changes completed. Undo available.`:''):history.current.undo.length?`${label}. Undo available until Save or closing this dialog.`:'Folders already match.');
+   if(result.error)throw Error(result.error);
+  }catch(reason){setError(String(reason));throw reason;}finally{mutating.current=false;setBusy(false);}
+ };
+ const createFolder=async(parent:string,name:string)=>editFolders([{operation:'create',parent,name}],{},'Folder created');
+ const manageFolder=async(path:string,operation:'rename'|'delete',name?:string)=>{
+  const patch:Partial<MailboxConfig>={};
+  if(operation==='rename'&&name){const separator=serverFolders.find(node=>node.path===path)?.delimiter;const destination=separator&&path.includes(separator)?path.slice(0,path.lastIndexOf(separator)+separator.length)+name:name;
+   for(const role of roles){const old=config[role.value];if(old===path||separator&&old.startsWith(path+separator))patch[role.value]=destination+old.slice(path.length);}
+  }
+  await editFolders([{operation,parent:path,name}],patch,operation==='rename'?'Folder renamed':'Folder deleted');
+ };
+ const assignFolder=(path:string)=>{
+  const before=assignments(config),after={...before,[folderRole]:path};history.current.record('Folder assignment',{nodes:serverFolders,changes:[],processed:0},before,after);refreshHistory(value=>value+1);update(after);
+ };
+ const replay=async(direction:'undo'|'redo')=>{
+  const entry=history.current[direction].at(-1);if(!entry||mutating.current||busy||discovering)return;
+  mutating.current=true;setBusy(true);setError('');setStatus('');const before=assignments(config);
+  try{
+   const result=entry.operations.length?await feedback.batch(repositoryId,{...config,...entry.assignments},password,entry.operations):{nodes:serverFolders,changes:[],processed:0,error:null};
+   acceptFolders(result.nodes);history.current.finish(direction,result,before);refreshHistory(value=>value+1);
+   if(result.changes.length||!result.error)setConfig(current=>({...current,...entry.assignments}));
+   setStatus(result.error?(result.changes.length?`${direction==='undo'?'Undo':'Redo'} partially completed.`:''):`${direction==='undo'?'Undid':'Redid'}: ${entry.label}`);if(result.error)setError(result.error);
+  }catch(reason){setError(String(reason));}finally{mutating.current=false;setBusy(false);}
+ };
+ const syncSenders=async()=>{
+  setBusy(true);setError('');setStatus('');
+  try{const next=await feedback.syncSenders(repositoryId,config,syncToken);setConfig(next);setSyncToken('');setStatus('Sender identities refreshed. Save publishes edits to the server.');}
+  catch(reason){setError(String(reason));}finally{setBusy(false);}
+ };
+ const save=async()=>{
+  if(problem||folderProblem||discovered!==connectionKey)return;
+  let saved=false,stored={...config,enabled:true};
+  setBusy(true);setError('');setStatus('');
+  try{
+   if(stored.senderSync?.enabled)stored=await feedback.syncSenders(repositoryId,stored,undefined,true);
+   await feedback.save(repositoryId,stored,password);saved=true;history.current.reset();refreshHistory(value=>value+1);
+   stored=await feedback.config(repositoryId)||stored;
+   setConfig(stored);setOriginal(stored);setPassword('');
+   const result=await feedback.request<{count:number}>(repositoryId,{action:'test'});
+   recordMailboxStatus(repositoryId,stored,result);setCheckedConfig(stored);setStatus('Connected.');
+  }catch(reason){setError(String(reason));if(saved)recordMailboxStatus(repositoryId,stored,null,String(reason));}
+  finally{if(saved)onSaved?.();setBusy(false);}
+ };
+
+ return <div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)onClose();}}><section role="dialog" aria-modal="true" aria-label="Email settings" className="automation-dialog feedback-settings" onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&!(event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')&&['z','y'].includes(event.key.toLowerCase())){event.preventDefault();event.stopPropagation();void replay(event.key.toLowerCase()==='y'||event.shiftKey?'redo':'undo');return;}if(event.key==='Escape'&&!busy){event.stopPropagation();onClose();}}}>
+  <header><h2>Email</h2><FeedbackMailboxBadge repositoryId={repositoryId} showEmpty/><button type="button" aria-label="Close email settings" disabled={busy} onClick={onClose}><X size={17}/></button></header>
+  <div className="automation-dialog-content">
+   <Select label="Email provider" disabled={busy} value={provider.id} onChange={id=>{setConfig(current=>selectMailProvider(current,id));setPassword('');setPasswordReady(true);setServerFolders([]);setAdvanced(false);setError('');setStatus('');}} options={mailProviders.map(item=>({value:item.id,label:item.label}))}/>
+   <p className="feedback-provider-help">{provider.help} {provider.documentation&&link(provider.documentation,`${provider.label} setup`)} {provider.passwordDocumentation&&link(provider.passwordDocumentation,provider.auth==='oauth'?'OAuth requirements':provider.auth==='bridge'?'Bridge connection details':'Password setup')}</p>
+   {!oauth&&<>
+    <div className="feedback-fields"><label>Sending address<input disabled={busy} readOnly={!!config.senderSync?.enabled} type="email" value={config.address} onChange={event=>{const address=event.target.value;update({address,...(!config.username||!original&&config.username===config.address?{username:address}:{})});}}/></label>{field('senderName','Sender name')}{field('username',provider.auth==='bridge'?'Bridge username':'Mailbox username')}
+     <label>{provider.passwordLabel}<input disabled={busy} type="password" autoComplete="new-password" value={password} placeholder={original&&!accountChanged?'Leave empty to keep saved password':''} onChange={event=>{setPassword(event.target.value);setPasswordReady(false);}} onBlur={()=>setPasswordReady(true)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.stopPropagation();setPasswordReady(true);}}}/></label>
+    </div></>}
+   {!oauth&&<section aria-label="Sender identities"><div className="feedback-toolbar"><strong>Sender identities</strong><button type="button" disabled={busy} title="Add sender identity" aria-label="Add sender identity" onClick={()=>update({senderIdentities:[...(config.senderIdentities||[]),{id:'local:'+crypto.randomUUID(),address:'',name:''}]})}><Plus size={14}/></button></div>{(config.senderIdentities||[]).map((sender,index)=><div className="feedback-fields mail-sender-row" key={index}><label>Display name<input aria-label={`Sender name ${index+1}`} disabled={busy} value={sender.name} onChange={event=>update({senderIdentities:config.senderIdentities!.map((value,i)=>i===index?{...value,name:event.target.value}:value)})}/></label><label>Address<input type="email" required aria-label={`Sender address ${index+1}`} readOnly={!!config.senderSync?.enabled&&!!sender.id&&!sender.id.startsWith('local:')} disabled={busy} value={sender.address} onChange={event=>update({senderIdentities:config.senderIdentities!.map((value,i)=>i===index?{...value,address:event.target.value}:value)})}/></label><button type="button" disabled={busy||config.senderSync?.enabled&&sender.mayDelete===false} aria-label={`Remove sender identity ${index+1}`} onClick={()=>update({senderIdentities:config.senderIdentities!.filter((_,i)=>i!==index)})}><Trash2 size={14}/></button></div>)}<small>Additional addresses authorized by your provider. They use this mailbox’s SMTP login.</small>{config.provider==='fastmail'?<div className="sender-sync-settings">{!config.senderSync?.enabled&&<label>Fastmail API token<input type="password" aria-label="Sender sync API token" autoComplete="new-password" disabled={busy||!original} value={syncToken} onChange={event=>setSyncToken(event.target.value)}/></label>}<div className="feedback-toolbar"><button type="button" disabled={busy||!original||!config.senderSync?.enabled&&!syncToken.trim()} onClick={()=>void syncSenders()}>{config.senderSync?.enabled?'Refresh senders':'Connect sync'}</button>{config.senderSync?.enabled&&<button type="button" disabled={busy} onClick={()=>update({senderSync:null})}>Disconnect sync</button>}</div><small>{!original?'Save the mailbox first. ':''}{config.senderSync?.enabled?'Two-way sync: Refresh imports server identities; Save publishes your edits. Refresh replaces unsaved sender edits.':'Use a Fastmail API token with mail submission access. It is stored in the system password store.'} {provider.identityDocumentation&&link(provider.identityDocumentation,'API token setup')}</small></div>:<small>Server identity sync is unavailable for this provider. Manage authorized addresses with your provider, then add them here.</small>}</section>}
+   {!editable&&<div className="feedback-connection-summary" aria-label="Provider server settings"><span>IMAP: {config.imapHost}:{config.imapPort} · {config.imapSecurity==='tls'?'TLS':'STARTTLS'}</span><span>SMTP: {config.smtpHost}:{config.smtpPort} · {config.smtpSecurity==='tls'?'TLS':'STARTTLS'}</span></div>}
+   {!provider.editable&&!oauth&&<button type="button" disabled={busy} aria-expanded={advanced} onClick={()=>setAdvanced(value=>!value)}>{advanced?'Hide connection settings':'Customize connection settings'}</button>}
+   {editable&&!oauth&&<div className="feedback-fields">{(['imap','smtp'] as const).map(protocol=><fieldset key={protocol}><legend>{protocol.toUpperCase()}</legend>{field(`${protocol}Host`,`${protocol.toUpperCase()} host`)}{field(`${protocol}Port`,`${protocol.toUpperCase()} port`,'number')}<Select disabled={busy} label={`${protocol.toUpperCase()} security`} value={config[`${protocol}Security`]} onChange={value=>update({[`${protocol}Security`]:value})} options={[{value:'tls',label:'TLS'},{value:'starttls',label:'STARTTLS'}]}/></fieldset>)}</div>}
+   {!oauth&&(provider.certificate||!!config.certificatePath)&&<section className="feedback-certificate" aria-label="Trusted certificate"><div className="feedback-toolbar"><span>Certificate</span><button type="button" disabled={busy} onClick={()=>{void api.selectLocalFile('Import public TLS certificate',['pem','crt','cer']).then(selected=>{if(selected)update({certificatePath:selected});}).catch(reason=>setError(String(reason)));}}>Import</button>{config.certificatePath&&<><Check size={15} aria-label="Certificate selected"/><button type="button" aria-label="Remove certificate" title="Remove certificate" disabled={busy} onClick={()=>update({certificatePath:''})}><Trash2 size={15}/></button></>}</div>{provider.auth==='bridge'&&<small>Bridge: Settings → Advanced settings → Export TLS certificates.</small>}</section>}
+   {!oauth&&<section className="mailbox-folder-settings"><div className="feedback-toolbar"><strong>Folders</strong><CopyMailFolders repositoryId={repositoryId} nodes={serverFolders} onBusy={setBusy} disabled={busy||discovering||discovered!==connectionKey} apply={editFolders}/>{discovering&&<small role="status">Connecting…</small>}<button type="button" aria-label="Refresh folders" title="Refresh" disabled={busy||discovering} onClick={()=>{setPasswordReady(true);setAttempt(value=>value+1);}}><RefreshCw size={14}/></button></div>{serverFolders.length>0?<><div className="mailbox-folder-assignments">{roles.filter(role=>!config.autoSpecialFolders||!['drafts','sent'].includes(role.value)||!serverFolders.some(node=>node.selectable&&node.path===config[role.value])).map(role=><button type="button" disabled={busy} key={role.value} aria-pressed={folderRole===role.value} onClick={()=>setFolderRole(role.value)}><span>{role.label}</span><small>{serverFolders.some(node=>node.selectable&&node.path===config[role.value])?config[role.value]:'Choose a folder'}</small></button>)}</div><button type="button" className="mail-folder-options" disabled={busy} aria-expanded={folderOverrides} onClick={()=>setFolderOverrides(value=>!value)}>Folder settings</button>{folderOverrides&&<label><input type="checkbox" disabled={busy} checked={!!config.autoSpecialFolders} onChange={event=>{const autoSpecialFolders=event.target.checked;update({autoSpecialFolders,...(autoSpecialFolders?automaticMailFolders(config,serverFolders):{})});if(autoSpecialFolders)setFolderRole('notes');}}/>Detect Drafts and Sent automatically</label>}<MailFolderTree key={connectionKey} nodes={serverFolders} value={config[folderRole]} onSelect={assignFolder} onCreate={createFolder} onRename={(path,name)=>manageFolder(path,'rename',name)} onDelete={path=>manageFolder(path,'delete')} disabled={busy||discovering}/>{folderProblem&&<small role="status">{folderProblem}</small>}</>:!discovering&&<small>Enter connection details to load folders.</small>}</section>}
+   {(provider.id==='custom'||advanced)&&field('webmailUrl','Webmail URL','url')}
+   {!oauth&&<label><input disabled={busy} type="checkbox" checked={config.allowSend} onChange={event=>update({allowSend:event.target.checked})}/>Allow replies to be sent, including by automation agents</label>}
+   {problem&&<p role="status">{problem}</p>}{status==='Connected.'&&checkedConfig&&<FeedbackMissingFolders repositoryId={repositoryId} config={checkedConfig}/>}
+  </div><footer><div className="mail-settings-result" aria-live="polite">{error&&<p role="alert" className="config-error">{error}</p>}{status&&<p role="status">{status}</p>}</div><button type="button" aria-label="Undo folder action" title={`Undo${history.current.undo.at(-1)?': '+history.current.undo.at(-1)!.label:''} · Ctrl/Cmd+Z`} disabled={busy||discovering||!history.current.undo.length} onClick={()=>void replay('undo')}><Undo2 size={16}/></button><button type="button" aria-label="Redo folder action" title="Redo · Ctrl/Cmd+Shift+Z / Ctrl+Y" disabled={busy||discovering||!history.current.redo.length} onClick={()=>void replay('redo')}><Redo2 size={16}/></button><button type="button" disabled={busy||discovering||!!problem||!!folderProblem||discovered!==connectionKey} onClick={()=>void save()}>Save</button></footer>
+ </section></div>;
+}
+export function FeedbackPanel({repositories,initialRepositoryId}:{repositories:Repository[];initialRepositoryId?:string}){return <EmailPage repositories={repositories} initialRepositoryId={initialRepositoryId} Settings={FeedbackSettings}/>;}

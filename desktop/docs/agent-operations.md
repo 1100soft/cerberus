@@ -4,13 +4,13 @@
 
 From `desktop/`, run `npm run dev` for the browser demo or `npm run tauri dev` for native Git, SQLite, credentials, and provider commands. `npm run build` checks TypeScript, the dropdown convention, and the production bundle.
 
-The Repository view lists local and GitHub repositories. Select a local checkout to read its enabled provider conversations in the Agent pane. Use the VS Code or Cursor button to continue interactive work. The Agents view is for provider setup and accounts; the Agent conversation pane currently has no composer or model selector.
+The Project view lists local and GitHub repositories. Select a local checkout to read its enabled provider conversations in the Agent pane. Use the VS Code or Cursor button to continue interactive work. The Agents view is for provider setup and accounts; the Agent conversation pane currently has no composer or model selector.
 
 The Identity page manages ChatGPT, GitHub, Cursor, and Claude identities. Each identity icon carries editable initials beside the account name. ChatGPT rate limits display on its account card when available. GitHub cards try Copilot CLI quota and always offer a web usage link. Cursor and Claude cards link to their web usage pages. A web link uses the browser's current login, which may differ from the card's account.
 
 ## Copilot startup and quota
 
-Copilot conversations are the editor chat sessions saved for the repository folder. Listing them does not start the Copilot CLI. Quota still uses the official Copilot SDK with the connected GitHub account's saved token. A connected GitHub identity does not by itself install a CLI.
+Copilot conversations are the editor chat sessions saved for the project folder. Listing them does not start the Copilot CLI. Quota still uses the official Copilot SDK with the connected GitHub account's saved token. A connected GitHub identity does not by itself install a CLI.
 
 If the Agent pane says the Copilot CLI stopped during startup:
 
@@ -20,7 +20,7 @@ If the Agent pane says the Copilot CLI stopped during startup:
 
 The previous raw `Copilot CLI: request cancelled` message came from SDK `Client::start`; it did **not** prove that `account.getQuota` rejected the GitHub identity. The current backend translates this transport error into a startup diagnostic. The CLI was absent from the development shell's `PATH` during this handoff, so live quota recovery was not verified here.
 
-The Identity card labels `premium_interactions` as **Premium requests** only when that bucket has a positive entitlement. Chat, Completions, and a 0/0 premium snapshot are unlimited and stay hidden. Usage is not repeated on the repository action tray. The source is `src-tauri/src/copilot.rs`; the renderer is `src/components/CopilotQuota.tsx`.
+The Identity card labels `premium_interactions` as **Premium requests** only when that bucket has a positive entitlement. Chat, Completions, and a 0/0 premium snapshot are unlimited and stay hidden. Usage is not repeated on the project action tray. The source is `src-tauri/src/copilot.rs`; the renderer is `src/components/CopilotQuota.tsx`.
 
 ## Provider setup rules
 
@@ -32,7 +32,7 @@ password manager may prompt to create or unlock that collection. Keep the same
 Secret Service provider active between sign-in and execution; switching between
 GNOME Keyring and KDE's service can make another provider's saved tokens invisible.
 Unlock or repair unavailable storage before reconnecting accounts. No plaintext
-token fallback is used. Reconnection queues a fresh repository catalog lookup
+token fallback is used. Reconnection queues a fresh project catalog lookup
 after any in-flight lookup and discards pre-reconnection results.
 
 Conversation providers are queried only after configuration and opt-in. Provider installers must display their exact command plan and wait for explicit in-app approval. Do not silently install tools or run a paid inference call as a diagnostic. GitHub identities and provider billing accounts are separate assignments.
@@ -85,9 +85,9 @@ cargo test --quiet external_url_tests -- --test-threads=1
 cargo test --quiet -- --test-threads=1
 ```
 
-The first Rust test checks usage-link allowlisting. The full suite also covers provider parsing and repository behavior. Tests use fixtures and do not start a real paid agent turn.
+The first Rust test checks usage-link allowlisting. The full suite also covers provider parsing and project behavior. Tests use fixtures and do not start a real paid agent turn.
 
-The Agent pane header includes **Copy checkpoint commit prompt** and an adjacent editor when a repository is selected. The prompt is copied for use with an agent working in an external IDE. Its built-in wording asks the agent to account for all working-tree changes, complete the current task, update affected documentation, run relevant quality checks, inspect staged changes, make a coherent commit without pushing, and report the result. Users can edit the template; the custom text is stored locally under `gitcerberus.checkpointCommitPrompt.v1`. **Restore default** restores the built-in wording in the editor, and Save applies it. The app copies the text only; the user pastes it into the intended agent conversation.
+The Agent pane header includes **Copy checkpoint commit prompt** and an adjacent editor when a project is selected. The prompt is copied for use with an agent working in an external IDE. Its built-in wording asks the agent to account for all working-tree changes, complete the current task, update affected documentation, run relevant quality checks, inspect staged changes, make a coherent commit without pushing, and report the result. Users can edit the template; the custom text is stored locally under `gitcerberus.checkpointCommitPrompt.v1`. **Restore default** restores the built-in wording in the editor, and Save applies it. The app copies the text only; the user pastes it into the intended agent conversation.
 
 ## ChatGPT credential storage on Linux
 

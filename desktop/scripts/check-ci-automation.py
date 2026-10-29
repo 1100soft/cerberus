@@ -1,5 +1,7 @@
 """Exercise GitHub CI automation dispatch in WebKitGTK. Requires Vite on port 3000."""
 import json
+import re
+from pathlib import Path
 import sys
 import urllib.request
 import gi
@@ -10,6 +12,8 @@ from gi.repository import Gtk, WebKit2, GLib
 urllib.request.urlopen('http://127.0.0.1:3000', timeout=5).close()
 script = r"""
 (async()=>{
+ for(let i=0;i<50&&getComputedStyle(document.body).margin!=='0px';i++)await new Promise(resolve=>setTimeout(resolve,40));
+ if(getComputedStyle(document.body).margin!=='0px')throw Error('Fixture stylesheet did not apply');
  window.__ciStage='mount';
  const pause=(ms=40)=>new Promise(resolve=>setTimeout(resolve,ms));
  const wait=async(get)=>{for(let i=0;i<150;i++){const result=get();if(result)return result;await pause();}throw Error('Timed out waiting for CI automation: '+document.querySelector('[aria-label="Add condition"]')?.outerHTML+' / dialogs '+document.querySelectorAll('[role="dialog"]').length);};
@@ -26,14 +30,15 @@ script = r"""
  const conditionOptions=await wait(()=>{const options=[...document.querySelectorAll('[role="option"]')];return options.length?options:null;});
  assert(conditionOptions.some(node=>node.textContent==='When CI passes')&&conditionOptions.some(node=>node.textContent==='When CI fails'),'CI conditions are missing from the dialog');
  conditionOptions.find(node=>node.textContent==='When CI passes').click();await pause();
- assert(!document.querySelector('.automation-repositories').open,'Repository picker expanded by default');document.querySelector('.automation-repositories summary').click();await pause();assert(document.querySelector('.automation-repositories .automation-scope-note').textContent.includes('only where the event occurs'),'CI repository scope is unclear');
+ assert(!document.querySelector('.automation-repositories').open,'Project picker expanded by default');document.querySelector('.automation-repositories summary').click();await pause();assert(document.querySelector('.automation-repositories .automation-scope-note').textContent.includes('only where the event occurs'),'CI project scope is unclear');
  assert(document.querySelector('[aria-label="Branch patterns"]')?.value==='*'&&document.querySelector('[aria-label="All except"]'),'CI branch selector did not default to all branches');
  document.querySelector('[aria-label="Close new automation"]').click();
  window.__ciStage='scheduler setup';
  const source=await (await fetch('/src/lib/conversationCache.ts')).text();
  const apiPath=source.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];
  const {api}=await import(apiPath);
- const automation=await import(apiPath.replace('/lib/api.ts','/lib/savedPrompts.ts'));
+ const panelSource=await(await fetch('/src/components/SavedPromptsPanel.tsx')).text();
+ const automation=await import(panelSource.match(/from ["']([^"'\n]*\/savedPrompts\.ts[^"'\n]*)["']/)[1]);
  for(const job of automation.savedPrompts())automation.removePrompt(job.id);
  const repos=['1','2'].map(id=>({id,displayName:'repo-'+id,localPresent:true,localPath:'/virtual/'+id,canonicalRemote:'https://github.com/example/repo-'+id,identity:{id:'github',providerUsername:'example'}}));
  api.repositories=async()=>repos;
@@ -69,13 +74,13 @@ script = r"""
  automation.recordAutomationCiRuns('2',[run(100,'success')]);
  await pause(100);await automation.checkSavedPromptSchedule();
  await wait(()=>calls.length===1);await wait(()=>automation.savedPrompts().find(job=>job.id===passId)?.state==='completed');
- assert(calls[0].repo==='2','CI event fanned out to another watched repository');
+ assert(calls[0].repo==='2','CI event fanned out to another watched project');
  automation.recordAutomationCiRuns('2',[run(100,'success')]);await pause(100);assert(calls.length===1,'Repeated poll retriggered the same workflow run');
  automation.recordAutomationCiRuns('2',[run(100,'success',2)]);
  await wait(()=>calls.length===2);await wait(()=>automation.savedPrompts().find(job=>job.id===passId)?.state==='completed');
  automation.recordAutomationCiRuns('1',[run(101,'failure')]);
  await wait(()=>calls.length===3);await wait(()=>automation.savedPrompts().find(job=>job.id===failId)?.state==='completed');
- assert(calls[2].repo==='1','Failed CI ran for the wrong repository');
+ assert(calls[2].repo==='1','Failed CI ran for the wrong project');
  automation.recordAutomationCiRuns('1',[run(102,'success',1,new Date(now-5000).toISOString())]);
  await pause(100);assert(calls.length===3,'CI completion before automation creation triggered');
  automation.recordAutomationCiRuns('2',[run(104,'success',1,new Date(now).toISOString(),'release/1')]);await pause(100);
@@ -99,7 +104,7 @@ script = r"""
  window.__ciStage='polling';
  const stop=automation.startSavedPromptScheduler();
  await wait(()=>calls.length===6);stop();
- assert(calls[5].repo==='1'&&polled>0,'Scheduler did not poll GitHub CI for the watched repository');
+ assert(calls[5].repo==='1'&&polled>0,'Scheduler did not poll GitHub CI for the watched project');
  await wait(()=>automation.savedPrompts().find(job=>job.id===passId)?.state==='completed');
  automation.savePrompt({...automation.savedPrompts().find(job=>job.id===passId),enabled:false});
  window.__ciStage='combined conditions';
@@ -111,7 +116,7 @@ script = r"""
  assert(calls.length===beforeCombo,'Push ran before CI was observed');
  automation.recordAutomationCiRuns('2',[run(201,'success',1,new Date(now).toISOString(),'main')]);
  await wait(()=>calls.length===beforeCombo+1);
- assert(calls.at(-1).repo==='2','Combined conditions ran for the wrong repository');
+ assert(calls.at(-1).repo==='2','Combined conditions ran for the wrong project');
  automation.recordAutomationGithubEvents('2',[event(comboId+'-push','a'.repeat(40))]);await pause(80);
  assert(calls.length===beforeCombo+1,'A polled push event repeated');
  const idleId='idle-'+crypto.randomUUID();
@@ -134,17 +139,17 @@ script = r"""
  const healthNow=Date.now(),callsBeforeHealth=calls.length;
  const checking=automation.pollAutomationCi(healthNow);
  await wait(()=>calls.length===callsBeforeHealth+1);
- assert(calls.at(-1).repo==='2','An unavailable repository blocked a healthy repository CI failure');
- assert(requests.includes('5'),'A stalled request blocked healthy repositories beyond the first four');
+ assert(calls.at(-1).repo==='2','An unavailable project blocked a healthy project CI failure');
+ assert(requests.includes('5'),'A stalled request blocked healthy projects beyond the first four');
  releaseSlow();await checking;
- assert(!requests.includes('local')&&!requests.includes('unassigned'),'CI monitoring queried an ineligible live-scope repository');
+ assert(!requests.includes('local')&&!requests.includes('unassigned'),'CI monitoring queried an ineligible live-scope project');
  assert(monitorNotices().length===noticesBefore,'One transient timeout generated monitoring alerts');
  const firstRequests=requests.filter(id=>id==='1').length;
  await automation.pollAutomationCi(healthNow+1000);
  assert(requests.filter(id=>id==='1').length===firstRequests,'CI backoff was ignored');
  await automation.pollAutomationCi(healthNow+60000);await automation.pollAutomationCi(healthNow+180000);
  assert(monitorNotices().length===noticesBefore+1&&monitorNotices()[0].title==='CI checks delayed','Persistent outage did not produce one combined monitoring notice');
- assert(['repo-1','repo-3','repo-4'].every(name=>monitorNotices()[0].message.includes(name)),'Grouped outage notice omitted affected repositories');
+ assert(['repo-1','repo-3','repo-4'].every(name=>monitorNotices()[0].message.includes(name)),'Grouped outage notice omitted affected projects');
  await automation.pollAutomationCi(healthNow+420000);
  assert(monitorNotices().length===noticesBefore+1,'Unchanged outage spammed additional monitoring notices');
  failMonitoring=false;await automation.pollAutomationCi(healthNow+1000000);
@@ -176,7 +181,12 @@ script = r"""
 })().catch(error=>window.__ciCheck={passed:false,error:String(error),stage:window.__ciStage});
 """
 window = Gtk.OffscreenWindow()
-view = WebKit2.WebView()
+manager = WebKit2.UserContentManager()
+# Apply the real stylesheet without waiting for external Google font imports.
+fixture_root=Path(__file__).resolve().parents[1]/"src"
+fixture_css=(fixture_root/"palette.css").read_text()+re.sub(r"""@import\s+(?:url\([^)]*\)|"[^"]*"|'[^']*')\s*;""", "", (fixture_root/"styles.css").read_text())
+script="const fixtureStyle=document.createElement('style');fixtureStyle.textContent="+json.dumps(fixture_css)+";document.head.append(fixtureStyle);\n"+script
+view = WebKit2.WebView(web_context=WebKit2.WebContext.new_ephemeral(),user_content_manager=manager)
 view.set_size_request(900,620)
 window.add(view)
 window.show_all()

@@ -11,8 +11,8 @@ export const inTauri = () => "__TAURI_INTERNALS__" in window;
 export type BranchListEntry={name:string;latestTag?:string;kind:'permanent'|'used'|'retained';worktree?:string;cleanupAt?:number;cleanupNote?:string};
 export type BranchSyncStatus={upstream?:string;ahead:number;behind:number;safe:boolean;reason:string};
 export type AutomationLogEvent={at:number;stream:'stdout'|'stderr'|'response'|'activity'|'status';text:string};
-export type AutomationLog={commitTriggered?:boolean;producedCommits?:string[];title?:string;emittedHandoffs?:string[];events?:AutomationLogEvent[];inputValues?:import('./automationInputs').AutomationInputValues;dismissed?:boolean;automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;conversation?:Partial<AgentChat>&{id:string;prompt:string};retry?:AutomationRetry};
-export type AutomationLogSummary=Pick<AutomationLog,'automationId'|'title'|'commitTriggered'|'producedCommits'|'emittedHandoffs'|'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'> & {conversationId?:string};
+export type AutomationLog={feedback?:import('./feedback').MailRef;commitTriggered?:boolean;producedCommits?:string[];title?:string;emittedHandoffs?:string[];events?:AutomationLogEvent[];inputValues?:import('./automationInputs').AutomationInputValues;dismissed?:boolean;automationId:string;repositoryId:string;runId:string;createdAt:number;branch?:string;commitSha?:string;handoffName?:string;handoffId?:string;kind:'shell'|'agent'|'git'|'notification';status:'running'|'completed'|'error';command:string;stdout:string;stderr:string;response:string;activity:string;conversation?:Partial<AgentChat>&{id:string;prompt:string};retry?:AutomationRetry};
+export type AutomationLogSummary=Pick<AutomationLog,'automationId'|'title'|'feedback'|'commitTriggered'|'producedCommits'|'emittedHandoffs'|'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'> & {conversationId?:string};
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
 const demoAutomationLogs=new Map<string,AutomationLog>();
@@ -235,6 +235,11 @@ export const api = {
     return invoke("codex_messages", { repositoryId, threadId, cursor: cursor ?? null });
   },
   async codexUpdateThread(repositoryId:string, threadId:string, action:string, name?:string):Promise<void> { return invoke("codex_update_thread",{repositoryId,threadId,action,name:name??null}); },
+  async selectLocalFile(title:string,extensions?:string[]):Promise<string|null> {
+    if(!inTauri()) return null;
+    const selected=await open({title,directory:false,multiple:false,...(extensions?.length?{filters:[{name:'Certificate files',extensions}]}:{})});
+    return typeof selected==='string'?selected:null;
+  },
   async selectRepositoryDirectory(title = "Choose a folder"): Promise<string | null> {
     if (!inTauri()) return window.prompt("Absolute path to a local Git repository");
     const selected = await open({
@@ -271,7 +276,7 @@ export const api = {
     if (inTauri()) return invoke("commit_history", { repositoryId, branch: branch ?? null, skip });
     const repo = demoRepositories.find((repo) => repo.id === repositoryId);
     if (!repo?.lastCommitSummary || skip) return [];
-    return [repo.lastCommitSummary, `Update ${branch || "main"}`, "Initialize repository"].map((summary, index) => ({
+    return [repo.lastCommitSummary, `Update ${branch || "main"}`, "Initialize project"].map((summary, index) => ({
       hash: `${repositoryId}${index}a4e9c7b`.padEnd(40, "0"), summary, author: "Alex Morgan", email: "alex@example.com",
       committedAt: new Date(Date.now() - (index + 1) * 3600000).toISOString()
     }));
@@ -312,6 +317,11 @@ export const api = {
     }
     demoIdentities = demoIdentities.map((identity) => identity.id === identityId ? { ...identity, connected: false } : identity);
   },
+  async openProjectWebmail(repositoryId:string,url:string):Promise<void>{
+    if(!inTauri()){window.open(url,'_blank','noopener,noreferrer');return;}
+    await invoke('open_project_webmail',{repositoryId});
+  },
+  async openEmailLink(url:string):Promise<void>{if(!inTauri()){window.open(url,'_blank','noopener,noreferrer');return;}await invoke('open_email_link',{url});},
   async openExternalUrl(url: string): Promise<void> {
     if (!inTauri()) { window.open(url, '_blank', 'noopener,noreferrer'); return; }
     await invoke("open_external_url", { url });
@@ -324,19 +334,19 @@ export const api = {
     const repo = demoRepositories.find((item) => item.id === repositoryId);
     const catalog = (await api.githubRepositories()).repositories;
     if (identityId && repo && !identitiesWithRepositoryAccess(demoIdentities, repo, catalog).some((identity) => identity.id === identityId)) {
-      throw new Error("This account does not have access to that repository.");
+      throw new Error("This account does not have access to that project.");
     }
     const identity = identityId ? demoIdentities.find((item) => item.id === identityId) : undefined;
     demoRepositories = demoRepositories.map((item) => item.id === repositoryId ? { ...item, identity } : item);
   },
   async importRepository(path: string): Promise<ImportResult> {
     if (inTauri()) return invoke("import_repository", { path });
-    throw new Error("Repository import is available in the desktop app.");
+    throw new Error("Project import is available in the desktop app.");
   },
   async createRepository(update: RepositoryUpdate): Promise<ImportResult> {
     if (inTauri()) return invoke("create_repository", { update });
     const identity = update.identityId ? demoIdentities.find((item) => item.id === update.identityId) : undefined;
-    if(update.githubCreate&&(!identity?.providerUsername||!update.canonicalRemote))throw new Error("Choose a GitHub account and repository destination.");
+    if(update.githubCreate&&(!identity?.providerUsername||!update.canonicalRemote))throw new Error("Choose a GitHub account and project destination.");
     const repository: Repository = {
       id: crypto.randomUUID(),
       displayName: update.displayName,

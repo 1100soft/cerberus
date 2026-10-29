@@ -1,3 +1,4 @@
+import {FeedbackMailboxBadge} from './FeedbackMailboxBadge';
 import { assignedExternalIdentity, externalProviders, useExternalIdentities } from '../lib/externalIdentities';
 import { RepositoryAccounts } from './RepositoryAccounts';
 import { ChatgptAccountBadge } from './ChatgptAccountBadge';
@@ -45,7 +46,7 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
   const visibility = repositoryVisibility(repo);
   const account = associatedIdentity(repo, identities);
   const assignable = identitiesWithRepositoryAccess(identities, repo, catalog);
-  const visibilityDetail = repo.github ? `${repo.github.private ? "Private" : "Public"} GitHub repository` : repo.hostType === 'github' ? 'Visibility unverified. Connect an account that can access this repository.' : 'Visibility is not verified for this host.';
+  const visibilityDetail = repo.github ? `${repo.github.private ? "Private" : "Public"} GitHub repository` : repo.hostType === 'github' ? 'Visibility unverified. Connect an account that can access this project.' : 'Visibility is not verified for this host.';
   const icons: Record<string, React.ReactNode> = { chat: <MessageSquare />, editor: <VSCodeIcon />, cursor: <CursorIcon />, hosted: <ExternalLink />, configure: <Settings2 />, clone: <CloudDownload />, locate: <FolderOpen /> };
   useEffect(() => { if (!selected) setAssignOpen(false); }, [selected]);
   return <article {...dragItem} {...dragSource} className={`repo-row ${selected ? "selected" : ""} ${local ? "repo-local" : "repo-remote"} ${dragItem?.className||''}`}
@@ -64,6 +65,7 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
       {assigned && <ChatgptAccountBadge account={chatgptAccount} assignedId={assigned} inherited={!Object.hasOwn(chatgpt.settings.repositories,accountKey)} />}
       {externalProviders.map(({id:provider})=>{const id=assignedExternalIdentity(external.settings,provider,accountKey);const account=external.identities.find(item=>item.id===id);return account?<ProviderIdentityBadge key={provider} provider={provider} id={account.id} label={account.label}/>:null;})}
       <strong className="row-name" title={repo.displayName}>{repo.displayName}</strong>
+      <FeedbackMailboxBadge repositoryId={repo.id}/>
       {agentWorking && <span title="Agent working"><LoaderCircle className="conversation-working repository-working" aria-label="Agent working"/></span>}
       {automationWorking && <span title="Automation running"><Clock3 className="conversation-working automation-working" aria-label="Automation running"/></span>}
     </div>

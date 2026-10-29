@@ -26,7 +26,7 @@ script = r"""
  for(const zoom of [1,1.4,1.5]){document.documentElement.style.setProperty('--ui-zoom',zoom);await pause();const popover=document.querySelector('.notification-popover');assert(popover.getBoundingClientRect().right<=innerWidth+1,'Popover overflow');assert(document.querySelectorAll('.notification-steps li').length===3,'Recovery steps missing');}
  const details=document.querySelector('.notification-details');assert(!details.open,'Raw diagnostics expanded by default');assert(details.textContent.includes('DBus error'),'Diagnostics lost');
  document.querySelector('.notification-help-links a').click();await wait(()=>opened.includes('help.gnome.org'));
- assert(document.querySelector('.notification-item p').textContent.includes('Cerberus, 1100, InDEx, CI'),'Repositories not grouped');
+ assert(document.querySelector('.notification-item p').textContent.includes('Cerberus, 1100, InDEx, CI'),'Projects not grouped');
  window.__savedPromptCheck={passed:true,checks:'readable grouped notification, recovery steps, collapsed diagnostics and external help links'};
 })().catch(e=>{window.__savedPromptCheck={passed:false,error:String(e)}});
 """

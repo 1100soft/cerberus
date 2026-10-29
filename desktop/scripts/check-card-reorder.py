@@ -19,7 +19,7 @@ script = r"""
  await wait(()=>getComputedStyle(document.documentElement).getPropertyValue('--accent-codex-border').trim());
  const rows=await wait(()=>{const nodes=[...document.querySelectorAll('.repo-row.repo-local')];return nodes.length>=2?nodes:null;});
  const source=rows[0],destination=rows[1],sourceId=source.dataset.repositoryId;
- assert(source.draggable,'Repository card is not draggable');
+ assert(source.draggable,'Project card is not draggable');
  const dataTransfer=new DataTransfer();
  source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer}));await pause();
  const box=destination.getBoundingClientRect();
@@ -32,7 +32,7 @@ script = r"""
  const cacheModule=await (await fetch('/src/lib/conversationCache.ts')).text();
  const apiPath=cacheModule.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];
  const {api}=await import(apiPath);
- const repos=await api.repositories();assert(repos.find(repo=>repo.id===sourceId).manualOrder===1,'Saved repository order did not update');
+ const repos=await api.repositories();assert(repos.find(repo=>repo.id===sourceId).manualOrder===1,'Saved project order did not update');
  const originalBranches=api.branches,originalHistory=api.history;
  let branchNames=['main'],historyBranch='';
  api.branches=async()=>branchNames;
@@ -54,7 +54,7 @@ script = r"""
  const originalPlan=api.branchRemovalPlan,originalRemove=api.removeBranch;
  const plan={branch:'private/agent-work',head:'a'.repeat(40),merged:true,worktrees:['/tmp/linked tree'],remote:'origin',remoteHead:'a'.repeat(40)};
  let removalCalls=0;
- api.branchRemovalPlan=async(repo,branch)=>{assert(repo===sourceId&&branch===plan.branch,'Removal plan used another branch or repository');return plan;};
+ api.branchRemovalPlan=async(repo,branch)=>{assert(repo===sourceId&&branch===plan.branch,'Removal plan used another branch or project');return plan;};
  api.removeBranch=async(repo,confirmed)=>{assert(repo===sourceId&&confirmed.head===plan.head,'Confirmation lost the inspected branch tip');removalCalls++;branchNames=branchNames.filter(name=>name!==confirmed.branch);return {completed:true,steps:['Removed worktree: /tmp/linked tree','Deleted local branch: '+confirmed.branch,'Deleted remote branch: origin/'+confirmed.branch],error:null};};
  for(const zoom of [1,1.4,1.5]){
    document.documentElement.style.setProperty('--ui-zoom',zoom);

@@ -5,13 +5,18 @@ export function useZoomTooltips(){
   useEffect(()=>{
     const popup=document.createElement('div');popup.className='zoom-tooltip';popup.setAttribute('role','tooltip');popup.hidden=true;document.body.append(popup);
     let owner:HTMLElement|null=null;
-    const hide=()=>{if(owner){owner.setAttribute('title',owner.dataset.zoomTitle||'');delete owner.dataset.zoomTitle;owner=null;}popup.hidden=true;};
+    const hide=()=>{observer.disconnect();if(owner){owner.setAttribute('title',owner.dataset.zoomTitle||'');delete owner.dataset.zoomTitle;owner=null;}popup.hidden=true;};
+    const observer=new MutationObserver(()=>{
+      if(!owner)return;
+      const title=owner.getAttribute('title');if(title===null)return;
+      owner.dataset.zoomTitle=title;owner.removeAttribute('title');popup.textContent=title;popup.hidden=!title;
+    });
     const show=(target:EventTarget|null,event?:MouseEvent)=>{
       const element=target instanceof Element?target.closest<HTMLElement>('[title], [data-zoom-title]'):null;
       if(element===owner){if(event)position(event);return;}
       hide();if(!element)return;
       const title=element.getAttribute('title')||element.dataset.zoomTitle;if(!title)return;
-      owner=element;element.dataset.zoomTitle=title;element.removeAttribute('title');popup.textContent=title;popup.hidden=false;
+      owner=element;element.dataset.zoomTitle=title;element.removeAttribute('title');popup.textContent=title;popup.hidden=false;observer.observe(element,{attributes:true,attributeFilter:['title']});
       if(event)position(event);else{const rect=element.getBoundingClientRect();position({clientX:rect.left,clientY:rect.bottom} as MouseEvent);}
     };
     const position=(event:MouseEvent)=>{

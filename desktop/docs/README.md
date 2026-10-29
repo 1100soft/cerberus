@@ -2,8 +2,9 @@
 
 - [Architecture and provider capabilities](architecture.md)
 - [Local operations and verification](agent-operations.md)
-- [Repository creation and GitHub accounts](repositories.md)
+- [Project creation and GitHub accounts](projects.md)
 - [Automation](saved-prompts.md)
+- [Project email and automation](email.md)
 - [Current handoff](../../HANDOFF.md)
 - [Desktop UI conventions](../AGENTS.md)
 

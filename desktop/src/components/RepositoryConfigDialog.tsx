@@ -1,3 +1,5 @@
+import {FeedbackMailboxBadge} from './FeedbackMailboxBadge';
+import {FeedbackSettings} from './FeedbackPanel';
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { formToUpdate, RepositoryFields, type RepositoryFormValue } from "./RepositoryFields";
@@ -28,8 +30,12 @@ function fromRepo(repo?: Repository): RepositoryFormValue {
 
 export function RepositoryConfigDialog({ repository: repo, identities, catalog, onClose, onSave, onRemove }: Props) {
   const creating = !repo;
+  const [mailbox,setMailbox]=useState(false);
   const [value, setValue] = useState(() => fromRepo(repo));
   const [createGithub,setCreateGithub]=useState(creating||repo?.hostType==='github'&&!repo.canonicalRemote);
+  const [repositoryName,setRepositoryName]=useState("");
+  const [organization,setOrganization]=useState("");
+  const githubDestination=creating&&value.hostType==='github';
   const [privateGithub,setPrivateGithub]=useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -37,15 +43,17 @@ export function RepositoryConfigDialog({ repository: repo, identities, catalog, 
   const assignable = value.hostType==='github'?identities.filter(identity=>!!identity.providerUsername||identity.id===repo?.identity?.id):identitiesWithRepositoryAccess(identities, { ...repo, canonicalRemote: value.canonicalRemote, github: repo?.github, accessibleIdentityIds: repo?.accessibleIdentityIds, identity: repo?.identity }, catalog);
 
   const selectedIdentity=identities.find(identity=>identity.id===value.identityId);
-  const githubName=value.displayName.trim().replace(/[^A-Za-z0-9_.-]+/g,'-');
-  const proposedRemote=value.canonicalRemote.trim()||(selectedIdentity?.providerUsername&&githubName?`https://github.com/${selectedIdentity.providerUsername}/${githubName}.git`:'');
+  const githubName=githubDestination?repositoryName.trim():value.displayName.trim().replace(/[^A-Za-z0-9_.-]+/g,'-');
+  const githubOwner=organization.trim()||selectedIdentity?.providerUsername;
+  const generatedRemote=githubOwner&&githubName?`https://github.com/${githubOwner}/${githubName}.git`:'';
+  const proposedRemote=githubDestination?generatedRemote:value.canonicalRemote.trim()||generatedRemote;
   const remoteCreation=value.hostType==='github'&&createGithub;
-  useEffect(()=>{if(!remoteCreation)return;setValue(current=>identities.some(identity=>identity.id===current.identityId&&identity.providerUsername)?current:{...current,identityId:identities.find(identity=>identity.providerUsername)?.id||''});},[remoteCreation,identities]);
+  useEffect(()=>{if(!remoteCreation&&!githubDestination)return;setValue(current=>identities.some(identity=>identity.id===current.identityId&&identity.providerUsername)?current:{...current,identityId:identities.find(identity=>identity.providerUsername)?.id||''});},[remoteCreation,githubDestination,identities]);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError("");
-    try { await onSave({...formToUpdate(remoteCreation?{...value,canonicalRemote:proposedRemote}:value),...(remoteCreation?{githubCreate:{private:privateGithub}}:{})}); }
+    try { await onSave({...formToUpdate(remoteCreation||githubDestination?{...value,canonicalRemote:proposedRemote}:value),...(remoteCreation?{githubCreate:{private:privateGithub}}:{})}); }
     catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
@@ -55,12 +63,13 @@ export function RepositoryConfigDialog({ repository: repo, identities, catalog, 
   return <div className="panel-backdrop dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
     <form className="repo-config" onSubmit={submit}>
       <header>
-        <div><p>Repository</p><h2>{creating ? "Create a new repository" : `Configure ${repo.displayName}`}</h2></div>
+        <div><p>Project</p><h2>{creating ? "Create a new project" : `Configure ${repo.displayName}`}</h2></div>
         <button type="button" onClick={onClose}><X /></button>
       </header>
       {creating && <p className="panel-copy">GitCerberus will initialize a Git repository at this path, remember it in your workspace, and, for GitHub, create and link a remote repository.</p>}
-      <RepositoryFields value={value} identities={assignable} identityRequired={!!remoteCreation} onChange={setValue} browseTitle={creating ? "Choose a folder for the new repository" : "Choose folder"} />
-      {value.hostType==='github'&&<section className="github-create-options"><label><input type="checkbox" checked={!!createGithub} onChange={event=>setCreateGithub(event.target.checked)}/>Create remote repository on GitHub</label>{createGithub&&<><Select label="GitHub repository visibility" value={privateGithub?'private':'public'} options={[{value:'private',label:'Private'},{value:'public',label:'Public'}]} onChange={value=>setPrivateGithub(value==='private')}/><p className="panel-copy">{proposedRemote||'Choose a GitHub account to set the destination.'} · Creates an empty remote; files are not pushed. Enter an organization repository URL above to use an organization. Turn this off to link an existing remote.</p></>}</section>}
+      <RepositoryFields value={value} identities={assignable} identityRequired={!!remoteCreation||githubDestination} githubDestination={githubDestination?{name:repositoryName,organization,remote:generatedRemote,onNameChange:setRepositoryName,onOrganizationChange:setOrganization}:undefined} onChange={setValue} browseTitle={creating ? "Choose a folder for the new project" : "Choose folder"} />
+      {value.hostType==='github'&&<section className="github-create-options"><label><input type="checkbox" checked={!!createGithub} onChange={event=>setCreateGithub(event.target.checked)}/>Create remote repository on GitHub</label>{createGithub&&<><Select label="GitHub repository visibility" value={privateGithub?'private':'public'} options={[{value:'private',label:'Private'},{value:'public',label:'Public'}]} onChange={value=>setPrivateGithub(value==='private')}/><p className="panel-copy">{proposedRemote||'Choose a GitHub account to set the destination.'} · Creates an empty remote; files are not pushed. {creating?'Use the organization field to create under an organization.':'Enter an organization repository URL above to use an organization.'} Turn this off to link an existing remote.</p></>}</section>}
+      {repo&&<button type="button" onClick={()=>setMailbox(true)}><FeedbackMailboxBadge repositoryId={repo.id} showEmpty/>Email settings</button>}
       {repo && <section className="config-status">
         <h3>Live Git status</h3>
         <dl>
@@ -77,8 +86,9 @@ export function RepositoryConfigDialog({ repository: repo, identities, catalog, 
       <footer>
         {onRemove && <button type="button" className="danger" onClick={() => void onRemove()}>Remove from workspace</button>}
         <button type="button" onClick={onClose}>Cancel</button>
-        <button type="submit" className="primary" disabled={busy || !value.displayName.trim() || !value.localPath.trim() || remoteCreation&&(!selectedIdentity?.providerUsername||!proposedRemote)}>{creating ? "Create repository" : "Save"}</button>
+        <button type="submit" className="primary" disabled={busy || !value.displayName.trim() || !value.localPath.trim() || (remoteCreation||githubDestination)&&(!selectedIdentity?.providerUsername||!proposedRemote)}>{creating ? "Create project" : "Save"}</button>
       </footer>
     </form>
+    {mailbox&&repo&&<FeedbackSettings repositoryId={repo.id} onClose={()=>setMailbox(false)}/>}
   </div>;
 }

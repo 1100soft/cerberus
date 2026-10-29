@@ -17,7 +17,7 @@ script = r"""
  const cacheSource=await (await fetch('/src/lib/conversationCache.ts')).text();const apiPath=cacheSource.match(/from "([^"]*\/api\.ts[^"]*)"/)[1];const {api}=await import(apiPath);
  const panelSource=await (await fetch('/src/components/SavedPromptsPanel.tsx')).text();const promptPath=panelSource.match(/from "([^"\n]*\/savedPrompts\.ts[^"\n]*)"/)[1];const {savePrompt,savedPrompts,runSavedPrompt,removePrompt}=await import(promptPath);for(const existing of savedPrompts())removePrompt(existing.id);
 
- const repositories=await api.repositories(),repo=repositories.find(item=>item.localPath);assert(repo,'No demo repository');
+ const repositories=await api.repositories(),repo=repositories.find(item=>item.localPath);assert(repo,'No demo project');
  const {recoverNotificationAutomations,currentAutomationRuns:notificationRuns}=await import(promptPath);
  const reminder={id:'notification-recovery',repositoryId:repo.id,repositoryIds:[repo.id],provider:'codex',threadId:'',title:'Reminder',prompt:'Commit reminder',trigger:'interval',minutes:60,nextAt:Date.now()+3600000,enabled:true,editor:'vscode',kind:'notification',state:'running'};
  savePrompt(reminder);
@@ -66,7 +66,7 @@ script = r"""
  const realSetTimeout=window.setTimeout;window.setTimeout=(callback,delay,...args)=>realSetTimeout(callback,delay===30000?30:delay,...args);
  let lateHistory;api.history=()=>new Promise(resolve=>{lateHistory=resolve;});document.querySelector('[aria-label="Run Commit inputs now"]').click();await wait(()=>document.querySelector('.automation-runtime-dialog [role="alert"]')?.textContent.includes('timed out'));
  api.history=async()=>[{hash:'after-retry',summary:'Recovered request',author:'Fixture',email:'fixture@example.test',committedAt:'2026-10-07T09:00:00Z'}];[...document.querySelectorAll('.automation-runtime-dialog button')].find(button=>button.textContent==='Refresh commits').click();await wait(()=>document.querySelector('[aria-label="Trigger commit"]')?.textContent.includes('Recovered request'));lateHistory([{hash:'stale',summary:'Stale response',committedAt:'2026-10-07T10:00:00Z'}]);await pause();assert(!document.querySelector('[aria-label="Trigger commit"]').textContent.includes('Stale response'),'Late timed-out response replaced current commits');window.setTimeout=realSetTimeout;
- window.__savedPromptCheck={passed:true,checks:'error preservation, acknowledgement, menus at 100/140/150%, edit navigation, branch re-selection, timestamped inputs, concurrent contexts, pinned logs, completed-row removal, exact failed-context retry, persisted dismissal, log deletion, bulk deletion across repositories with live-run protection, and concurrent-error acknowledgement'};
+ window.__savedPromptCheck={passed:true,checks:'error preservation, acknowledgement, menus at 100/140/150%, edit navigation, branch re-selection, timestamped inputs, concurrent contexts, pinned logs, completed-row removal, exact failed-context retry, persisted dismissal, log deletion, bulk deletion across projects with live-run protection, and concurrent-error acknowledgement'};
 })().catch(error=>window.__savedPromptCheck={passed:false,error:String(error)});
 
 """

@@ -4,6 +4,7 @@ use std::{fs,path::{Path,PathBuf}};
 #[derive(Clone,Default,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct Context {
+    #[serde(default,skip_serializing_if="Option::is_none")] pub feedback:Option<crate::feedback::MailRef>,
     #[serde(default)] pub commit_triggered:bool,
     #[serde(default,skip_serializing_if="Option::is_none")] pub branch:Option<String>,
     #[serde(default,skip_serializing_if="Option::is_none")] pub commit_sha:Option<String>,

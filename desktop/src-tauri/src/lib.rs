@@ -1,3 +1,6 @@
+mod feedback;
+mod sender_sync;
+pub use feedback::cli_main as feedback_cli_main;
 #[doc(hidden)]
 pub mod commit_provenance;
 pub use commit_provenance::git_proxy_main as tracked_git_main;
@@ -288,7 +291,11 @@ async fn run_new_agent_conversation(repository_id:String,provider:String,identit
     let key=prompt_repository_key(&record);
     let root=state.data_dir.clone();
     if let Some(ref run_id)=automation_run_id{let worktree_root=root.clone();let path=repo.clone();let id=repository_id.clone();let run_id=run_id.clone();repo=tauri::async_runtime::spawn_blocking(move||automation_worktrees::prepare(&worktree_root,&path,&id,&run_id,automation_commit.as_deref())).await.map_err(|error|error.to_string())??;}
-    let tracking=tracking_run_id.as_deref().or(automation_run_id.as_deref()).map(|id|commit_provenance::environment(&root,&repo,&repository_id,id)).transpose()?;
+    let mut tracking=tracking_run_id.as_deref().or(automation_run_id.as_deref()).map(|id|commit_provenance::environment(&root,&repo,&repository_id,id)).transpose()?;
+    let mail_env=feedback::environment(&root,&repository_id,mode=="analyze")?;
+    let has_mail=!mail_env.is_empty();
+    tracking.get_or_insert_with(Default::default).extend(mail_env);
+    let prompt=if has_mail{format!("{prompt}{}",feedback::instructions())}else{prompt};
     let registration=request_id.map(|id|state.drafts.register(id)).transpose()?;
     let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
     if provider=="copilot" {
@@ -319,7 +326,7 @@ async fn run_automation_shell(repository_id:String,script:String,runtime:Option<
     let repository=state.db.repository_path(&repository_id)?;
     let runtime=match runtime{Some(config) if config.preset=="default"=>script_runtime::settings(&state.data_dir)?,Some(config)=>config,None=>script_runtime::Runtime{preset:"bash".into(),..Default::default()}};
     let root=state.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move||{let mut context=context.unwrap_or_default();if let Some(id)=context.get("CERBERUS_RUN_ID").cloned(){context.extend(commit_provenance::environment(&root,&repository,&repository_id,&id)?);}shell_automation::run_stream_with_runtime(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context,&runtime)}).await.map_err(|error|error.to_string())?
+    tauri::async_runtime::spawn_blocking(move||{let mut context=context.unwrap_or_default();if let Some(id)=context.get("CERBERUS_RUN_ID").cloned(){context.extend(commit_provenance::environment(&root,&repository,&repository_id,&id)?);context.extend(feedback::environment(&root,&repository_id,false)?);}shell_automation::run_stream_with_runtime(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context,&runtime)}).await.map_err(|error|error.to_string())?
 }
 #[tauri::command]
 async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
@@ -718,6 +725,18 @@ async fn auto_fast_forward(repository_id:String,app:tauri::AppHandle,state:State
  Ok(updated)
 }
 #[tauri::command]
+async fn sync_email_senders(repository_id:String,config:Option<feedback::Config>,token:Option<String>,push:bool,state:State<'_,AppState>)->Result<feedback::Config,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||sender_sync::synchronize(&root,&repository_id,config,token,push)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+fn feedback_config(repository_id:String,state:State<AppState>)->Result<Option<feedback::Config>,String>{state.db.repository_path(&repository_id)?;feedback::config(&state.data_dir,&repository_id)}
+#[tauri::command]
+async fn save_feedback_config(repository_id:String,config:feedback::Config,password:Option<String>,state:State<'_,AppState>)->Result<(),String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::save(&root,&repository_id,config,password)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn feedback_setup(repository_id:String,config:feedback::Config,password:Option<String>,parent:Option<String>,name:Option<String>,operation:Option<String>,state:State<'_,AppState>)->Result<Vec<feedback::FolderNode>,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::setup_operation(&root,&repository_id,config,password,parent,name,operation)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn feedback_folder_batch(repository_id:String,config:feedback::Config,password:Option<String>,operations:Vec<feedback::FolderOperation>,state:State<'_,AppState>)->Result<feedback::FolderBatch,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::setup_batch(&root,&repository_id,config,password,operations)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn feedback_request(repository_id:String,request:feedback::Request,state:State<'_,AppState>)->Result<serde_json::Value,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::execute(&root,&repository_id,request)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
 async fn repository_commit_origins(repository_id:String,state:State<'_,AppState>)->Result<std::collections::HashMap<String,Vec<String>>,String>{let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||commit_provenance::repository_commits(&root,&repository_id)).await.map_err(|e|e.to_string())}
 #[tauri::command]
 async fn repository_automation_logs(repository_id:String,state:State<'_,AppState>)->Result<Vec<automation_logs::Summary>,String>{
@@ -837,6 +856,19 @@ fn open_local_folder(repository_id: String, state: State<AppState>) -> Result<()
     open_url::that(path.to_string_lossy().into_owned()).map_err(|e| e.to_string())
 }
 
+fn permitted_email_link(value:&str)->bool {
+ if value.chars().any(char::is_control){return false;}
+ let Ok(url)=url::Url::parse(value)else{return false;};
+ matches!(url.scheme(),"http"|"https")&&url.host_str().is_some() || url.scheme()=="mailto"
+}
+#[tauri::command]
+fn open_project_webmail(repository_id:String,state:State<AppState>)->Result<(),String>{
+ state.db.repository_path(&repository_id)?;
+ let config=feedback::config(&state.data_dir,&repository_id)?.ok_or("Configure email for this project first")?;
+ open_url::that(feedback::webmail_url(&config)?).map_err(|error|error.to_string())
+}
+#[tauri::command]
+fn open_email_link(url:String)->Result<(),String>{if !permitted_email_link(&url){return Err("Email link protocol is not permitted".into());}open_url::that(url).map_err(|error|error.to_string())}
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     if !permitted_external_url(&url) {
@@ -846,11 +878,12 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 fn permitted_external_url(url:&str)->bool{
-    permitted_github_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
+    permitted_github_url(url) || feedback::documentation_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
 }
 
 #[cfg(test)]
 mod external_url_tests {
+    #[test] fn email_links_allow_browser_and_mail_only(){for link in ["https://example.org/path","http://example.org","mailto:hello@example.org"]{assert!(super::permitted_email_link(link));}for link in ["javascript:alert(1)","file:///etc/passwd","data:text/html,test","https://example.org\n"]{assert!(!super::permitted_email_link(link));}}
     use super::permitted_external_url;
     #[test]
     fn usage_pages_are_permitted(){
@@ -912,6 +945,7 @@ fn show_dashboard(app: &tauri::AppHandle) {
 
 pub fn run() {
     commit_provenance::detach_inherited_tracking();
+    for key in ["CERBERUS_EMAIL_DATA_DIR","CERBERUS_EMAIL_ROOT_FOLDER","CERBERUS_PROJECT_ID","CERBERUS_PROJECT_NAME","CERBERUS_PROJECT_PATH","CERBERUS_EMAIL_PROJECT","CERBERUS_EMAIL_TOOL","CERBERUS_EMAIL_READ_ONLY","CERBERUS_FEEDBACK_ROOT","CERBERUS_FEEDBACK_REPOSITORY","CERBERUS_FEEDBACK_TOOL","CERBERUS_FEEDBACK_READ_ONLY"] {std::env::remove_var(key);}
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -978,7 +1012,7 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_platform, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, repository_automation_logs, repository_commit_origins, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_platform, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, repository_automation_logs, repository_commit_origins, sync_email_senders, feedback_config, save_feedback_config, feedback_setup, feedback_folder_batch, feedback_request, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,
@@ -1020,7 +1054,7 @@ pub fn run() {
             open_in_editor,
             open_hosted_repository,
             open_local_folder,
-            open_external_url
+            open_external_url, open_email_link, open_project_webmail
         ])
         .build(tauri::generate_context!())
         .expect("error while building GitCerberus")
