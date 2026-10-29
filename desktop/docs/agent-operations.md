@@ -4,7 +4,7 @@
 
 From `desktop/`, run `npm run dev` for the browser demo or `npm run tauri dev` for native Git, SQLite, credentials, and provider commands. `npm run build` checks TypeScript, the dropdown convention, and the production bundle.
 
-The Project view lists local and GitHub repositorys. Select a local checkout to read its enabled provider conversations in the Agent pane. Use the VS Code or Cursor button to continue interactive work. The Agents view is for provider setup and accounts; the Agent conversation pane currently has no composer or model selector.
+The Project view lists local and GitHub repositories. Select a local checkout to read its enabled provider conversations in the Agent pane. Use the VS Code or Cursor button to continue interactive work. The Agents view is for provider setup and accounts; the Agent conversation pane currently has no composer or model selector.
 
 The Identity page manages ChatGPT, GitHub, Cursor, and Claude identities. Each identity icon carries editable initials beside the account name. ChatGPT rate limits display on its account card when available. GitHub cards try Copilot CLI quota and always offer a web usage link. Cursor and Claude cards link to their web usage pages. A web link uses the browser's current login, which may differ from the card's account.
 

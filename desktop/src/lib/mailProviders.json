@@ -16,7 +16,8 @@
       "smtpHost": "",
       "smtpPort": 465,
       "smtpSecurity": "tls"
-    }
+    },
+    "webmail": ""
   },
   {
     "id": "gmail",
@@ -35,7 +36,8 @@
       "smtpHost": "smtp.gmail.com",
       "smtpPort": 465,
       "smtpSecurity": "tls"
-    }
+    },
+    "webmail": "https://mail.google.com/"
   },
   {
     "id": "icloud",
@@ -54,7 +56,8 @@
       "smtpHost": "smtp.mail.me.com",
       "smtpPort": 587,
       "smtpSecurity": "starttls"
-    }
+    },
+    "webmail": "https://www.icloud.com/mail/"
   },
   {
     "id": "outlook",
@@ -73,7 +76,8 @@
       "smtpHost": "smtp-mail.outlook.com",
       "smtpPort": 587,
       "smtpSecurity": "starttls"
-    }
+    },
+    "webmail": "https://outlook.live.com/mail/"
   },
   {
     "id": "microsoft365",
@@ -92,7 +96,8 @@
       "smtpHost": "smtp.office365.com",
       "smtpPort": 587,
       "smtpSecurity": "starttls"
-    }
+    },
+    "webmail": "https://outlook.office.com/mail/"
   },
   {
     "id": "yahoo",
@@ -111,7 +116,8 @@
       "smtpHost": "smtp.mail.yahoo.com",
       "smtpPort": 465,
       "smtpSecurity": "tls"
-    }
+    },
+    "webmail": "https://mail.yahoo.com/"
   },
   {
     "id": "fastmail",
@@ -131,7 +137,8 @@
       "smtpPort": 465,
       "smtpSecurity": "tls"
     },
-    "identityDocumentation": "https://www.fastmail.com/dev/"
+    "identityDocumentation": "https://www.fastmail.com/dev/",
+    "webmail": "https://app.fastmail.com/"
   },
   {
     "id": "zoho",
@@ -150,7 +157,8 @@
       "smtpHost": "smtp.zoho.com",
       "smtpPort": 465,
       "smtpSecurity": "tls"
-    }
+    },
+    "webmail": "https://mail.zoho.com/"
   },
   {
     "id": "zohoOrganization",
@@ -169,7 +177,8 @@
       "smtpHost": "smtppro.zoho.com",
       "smtpPort": 465,
       "smtpSecurity": "tls"
-    }
+    },
+    "webmail": "https://mail.zoho.com/"
   },
   {
     "id": "purelymail",
@@ -188,7 +197,8 @@
       "smtpHost": "smtp.purelymail.com",
       "smtpPort": 465,
       "smtpSecurity": "tls"
-    }
+    },
+    "webmail": "https://inbox.purelymail.com/"
   },
   {
     "id": "proton",
@@ -207,6 +217,7 @@
       "smtpHost": "127.0.0.1",
       "smtpPort": 1025,
       "smtpSecurity": "starttls"
-    }
+    },
+    "webmail": "https://mail.proton.me/"
   }
 ]

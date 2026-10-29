@@ -862,6 +862,12 @@ fn permitted_email_link(value:&str)->bool {
  matches!(url.scheme(),"http"|"https")&&url.host_str().is_some() || url.scheme()=="mailto"
 }
 #[tauri::command]
+fn open_project_webmail(repository_id:String,state:State<AppState>)->Result<(),String>{
+ state.db.repository_path(&repository_id)?;
+ let config=feedback::config(&state.data_dir,&repository_id)?.ok_or("Configure email for this project first")?;
+ open_url::that(feedback::webmail_url(&config)?).map_err(|error|error.to_string())
+}
+#[tauri::command]
 fn open_email_link(url:String)->Result<(),String>{if !permitted_email_link(&url){return Err("Email link protocol is not permitted".into());}open_url::that(url).map_err(|error|error.to_string())}
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
@@ -1048,7 +1054,7 @@ pub fn run() {
             open_in_editor,
             open_hosted_repository,
             open_local_folder,
-            open_external_url, open_email_link
+            open_external_url, open_email_link, open_project_webmail
         ])
         .build(tauri::generate_context!())
         .expect("error while building GitCerberus")

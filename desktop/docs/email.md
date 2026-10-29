@@ -1,5 +1,17 @@
 # Project email and automation
 
+Cerberus prioritizes email automation and consistent folder structures and rules
+across projects. Provider-level account management belongs in the provider web UI;
+basic reading and replying are supporting features.
+
+The Email header’s **Open webmail** icon opens the provider in your default
+browser. It reuses that browser’s session, which may belong to a different
+account or require sign-in. Cerberus never transfers mailbox or Bridge passwords
+or API tokens to the browser. Built-in providers have webmail destinations. For
+other servers, set **Webmail URL** in Email settings; connection customization
+also exposes an override for regional or organization-specific webmail. Only
+HTTPS URLs without embedded credentials are accepted.
+
 Each linked project can use its own email mailbox. Open **Email**, choose
 its project, and use the configuration icon. Project configuration also has
 **Email settings**. Configure IMAP and SMTP hosts, ports, TLS or

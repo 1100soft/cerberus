@@ -64,3 +64,10 @@ approval before executing. Use fixed provider commands and no privilege elevatio
 
 - Use consistent functional ordering for standard mail folders and a shared remembered first-seen order for custom folder names; do not alphabetize them. Display folder structure independently of slow per-folder counts and reuse/coalesce read-only discovery snapshots. Keep folder containers isolated from sidebar navigation styles. Reply controls must remain reachable independently of long message content, including the minimum window at 140/150% zoom.
 - Custom tooltips must follow live title changes while hovered/focused and must not restore an obsolete title after the control changes state.
+
+- Email product boundary: delegate provider-level email/account management (account
+  security, billing, domains and authorized sender administration) to the provider
+  web UI. Cerberus prioritizes automation, cross-project folder organization and
+  synchronization of folder structures and rules. Basic mail reading/replying is
+  secondary. Webmail links use the default browser session; never forward IMAP,
+  SMTP, Bridge passwords or API tokens, or claim browser account authentication.

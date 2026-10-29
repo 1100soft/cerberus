@@ -1,10 +1,10 @@
 # Desktop architecture
 
-The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-tauri/src/`). `App.tsx` owns project selection and the Project, Identity, and Agents views. The Agent pane is `components/CodexHistory.tsx`; it currently reads history and delegates interactive work to VS Code or Cursor. The old composer and local runner code still exists but is not presented in that pane.
+The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-tauri/src/`). `App.tsx` owns project selection and the Projects, Identities, Agents, Automation and Email views. The Agent pane is `components/CodexHistory.tsx`; it currently reads history and delegates interactive work to VS Code or Cursor. The old composer and local runner code still exists but is not presented in that pane.
 
 ## Data flow
 
-1. Rust lists local projects from SQLite and GitHub repositorys through the assigned GitHub identity. `lib/repositories.ts` merges these into the visible project list.
+1. Rust lists local projects from SQLite and GitHub repositories through the assigned GitHub identity. `lib/repositories.ts` merges these into the visible project list.
 2. `components/RepositoryCard.tsx` renders project status, assigned provider badges, and available agent activity. Local app-run status comes from `lib/agentChats.ts`; loaded provider status comes from `lib/conversationCache.ts`.
 3. `components/CodexHistory.tsx` requests only enabled providers. `lib/conversationCache.ts` caches thread lists and messages, deduplicates requests, and refreshes the selected project on focus and a timer. `lib/conversationDisplay.ts` folds consecutive assistant updates under one final response; `components/AgentActivity.tsx` opens all updates with one disclosure.
 4. `components/IdentitiesPanel.tsx` renders GitHub identities and provider identity cards. `components/IdentitySignIn.tsx` is the single sign-in control used there and in the Agent header. Account initials are chosen and persisted by `lib/identityInitials.ts`, with the editor in `components/IdentityCard.tsx`.
@@ -40,3 +40,11 @@ GitHub's [Copilot SDK quota documentation](https://docs.github.com/en/copilot/ho
 Conversation order is newest change first. Codex rollout files also move when settings are rewritten; `conversation_updated_at` uses the last message or task boundary so that rewrite does not sort an idle conversation above a later one. Cursor editor times and Codex times may be seconds or milliseconds; `updatedMillis` compares both as milliseconds.
 
 The working spinner uses the provider color in the Agent pane (`--provider-codex`, `--provider-cursor`, `--provider-copilot`, `--provider-claude`) and the app accent (`--accent-codex`) on the project row. On Linux, `cursor_notifications.rs` watches the session bus for Cursor's completion notification (`Done • …`, `Agent complete`, or `Cloud agent complete`). That event clears the spinner immediately. The composer database can otherwise keep an unfinished checkpoint for up to three minutes after the task ends.
+
+
+Email uses one IMAP/SMTP mailbox per project. The provider web UI owns account
+administration; Cerberus prioritizes shared folder structures and automation
+rules across projects. `feedback.rs` owns server-backed operations and scoped
+agent tools; `sender_sync.rs` handles supported provider identity APIs. Mail
+content stays on the server, while configuration and reference-only automation
+context remain local. See [Email](email.md) for synchronization and client limits.

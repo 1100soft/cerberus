@@ -110,3 +110,14 @@ assert.deepEqual(folderCache.automaticMailFolders(settings,specialNodes),{drafts
 assert.deepEqual(folderCache.automaticMailFolders({...settings,drafts:'Personal drafts',sent:'Outbound'},[node('Personal drafts'),node('Outbound'),node('Drafts')]),{drafts:'Personal drafts',sent:'Outbound'});
 assert.deepEqual(folderCache.automaticMailFolders(settings,[node('INBOX.Drafts','.'),node('INBOX.Sent Items','.')]),{drafts:'INBOX.Drafts',sent:'INBOX.Sent Items'});
 console.log('Automatic special-use folder detection, delimiter fallbacks, preserved assignments and same-address server identities passed');
+
+const providerSource=(await readFile(new URL('../src/lib/mailProviders.ts',import.meta.url),'utf8')).replace("import catalog from './mailProviders.json';",'const catalog='+await readFile(new URL('../src/lib/mailProviders.json',import.meta.url),'utf8')+';');
+const providerCompiled=ts.transpileModule(providerSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const providerLinks=await import(`data:text/javascript;base64,${Buffer.from(providerCompiled).toString('base64')}`);
+assert.equal(providerLinks.mailboxWebmail({...settings,provider:'proton'}),'https://mail.proton.me/');
+assert.equal(providerLinks.mailboxWebmail({...settings,provider:'purelymail'}),'https://inbox.purelymail.com/');
+assert.equal(providerLinks.mailboxWebmail({...settings,provider:'custom'}),'');
+assert.equal(providerLinks.mailboxWebmail({...settings,provider:'custom',webmailUrl:'https://webmail.example.org/'}),'https://webmail.example.org/');
+for(const webmailUrl of ['javascript:alert(1)','http://example.org/','https://user:secret@example.org/']){assert(providerLinks.webmailUrlProblem(webmailUrl));assert.equal(providerLinks.mailboxWebmail({...settings,webmailUrl}),'');}
+assert.equal(providerLinks.selectMailProvider({...settings,webmailUrl:'https://old.example.org/'},'proton').webmailUrl,'');
+console.log('Provider webmail destinations, custom overrides, unsafe URL rejection and provider-switch reset passed');

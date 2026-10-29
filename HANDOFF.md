@@ -1353,3 +1353,46 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
   contrast; native suite 180 passed + 3 integration tests, 5 ignored. Native
   sync tests cover endpoint trust, guarded patches and protected identities.
   No live mailbox identities or email messages were modified for validation.
+
+
+## 2026-10-29 — provider webmail and email product boundary
+
+- Email header has an icon-only Open webmail action. Built-in provider catalog
+  supplies destinations; optional per-project webmailUrl supports custom servers
+  and regional/organization overrides under connection customization.
+- Native open_project_webmail resolves the saved project's destination and
+  validates HTTPS, no embedded credentials/control characters. Does not fetch
+  mailbox secrets or forward account/password/token values to the browser.
+- Browser session controls authentication and selected account; tooltip/help
+  explain this distinction. No automatic web login or account guarantee.
+- Product direction is recorded in desktop/AGENTS.md and email docs: delegate
+  provider account administration to webmail; prioritize cross-project folder/rule
+  organization and synchronization and automations. Basic mail client is secondary.
+
+- Validation: production build (dropdown/style checks, TypeScript, Vite), provider
+  URL/override logic checks, full native suite (181 passed, 5 ignored, plus 3
+  integration tests), and WebKit email fixtures at minimum/wide windows with
+  100/140/150% zoom passed. Webmail action tested with mocked browser opening;
+  no browser sign-in, live mailbox modification, commit or push was performed.
+
+
+## 2026-10-29 — email/project checkpoint review
+
+- Accounted for the complete pending tree: email mailbox/client/tools, folder
+  management/copy/undo, email conditions and recovery, sender sync, webmail,
+  Projects terminology, identity-first GitHub creation, file browsing, tooltip
+  updates, tests, dependency lockfiles and documentation are intended together.
+- Corrected Email page navigation when global identity/automation events fire;
+  added the browser event stub required by the provider preset Node fixture.
+  Updated agent tool instructions for whole-mailbox scope and configured senders,
+  fixed renamed-document typos, and formatted the new Rust modules/tests.
+- Validation: production build (style/dropdown/TypeScript checks), all 15 JS CI
+  regressions, release-tooling tests, checksum-verified actionlint, full locked
+  native suite (181 passed, 5 ignored, plus 3 integration tests), and the WebKit
+  CI fixture set. One zoom-sensitive automation-menu check passed on isolated
+  rerun. No credentials/generated artifacts were found; private-key scan hits
+  are deliberate invalid-input test strings. No push is requested.
+
+- Final project UI matrix passed at 900×620, 1100×700, 1720×1080 and 2200×700,
+  each at 100/140/150% zoom. Final email fixture also passed. All 89 intended
+  files are included; staged whitespace/conflict/generated-file checks are clean.

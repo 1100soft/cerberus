@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import ts from 'typescript';
+globalThis.window=new EventTarget();
 const catalog=JSON.parse(await readFile(new URL('../src/lib/mailProviders.json',import.meta.url),'utf8'));
 const load=async(path,replace=source=>source)=>{
  const source=replace(await readFile(new URL(path,import.meta.url),'utf8'));

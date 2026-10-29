@@ -146,7 +146,7 @@ export function App() {
   const [showAgents, setShowAgents] = useState(false);
   const [showAutomation, setShowAutomation] = useState(false);
   const [automationDraft,setAutomationDraft]=useState<AutomationDraft>();
-  useEffect(()=>{const open=(event:Event)=>{setAutomationDraft((event as CustomEvent<AutomationDraft>).detail);setShowAutomation(true);setShowAgents(false);setShowIdentities(false);};window.addEventListener('new-automation-from-prompt',open);return()=>window.removeEventListener('new-automation-from-prompt',open);},[]);
+  useEffect(()=>{const open=(event:Event)=>{setShowFeedback(false);setAutomationDraft((event as CustomEvent<AutomationDraft>).detail);setShowAutomation(true);setShowAgents(false);setShowIdentities(false);};window.addEventListener('new-automation-from-prompt',open);return()=>window.removeEventListener('new-automation-from-prompt',open);},[]);
   const [showIdentities, setShowIdentities] = useState(false);
   const [startGithubLogin, setStartGithubLogin] = useState(false);
   const [startExternalLogin, setStartExternalLogin] = useState<'cursor'|'claude'>();
@@ -319,7 +319,7 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [sidebarOpen, showShortcuts, providerSetup, visible, selectedIndex, actionIndex, showIdentities, showAgents, showAutomation, showFeedback, configRepo, menu, addRepo, busy]);
 
-  useEffect(()=>{const show=(event:Event)=>{const detail=(event as CustomEvent<{githubLogin?:boolean;externalLogin?:'cursor'|'claude'}>).detail;setProviderSetup(undefined);setStartGithubLogin(!!detail?.githubLogin);setStartExternalLogin(detail?.externalLogin);setShowIdentities(true);setShowAgents(false);setShowAutomation(false);};window.addEventListener('show-identities',show);return()=>window.removeEventListener('show-identities',show);},[]);
+  useEffect(()=>{const show=(event:Event)=>{const detail=(event as CustomEvent<{githubLogin?:boolean;externalLogin?:'cursor'|'claude'}>).detail;setShowFeedback(false);setProviderSetup(undefined);setStartGithubLogin(!!detail?.githubLogin);setStartExternalLogin(detail?.externalLogin);setShowIdentities(true);setShowAgents(false);setShowAutomation(false);};window.addEventListener('show-identities',show);return()=>window.removeEventListener('show-identities',show);},[]);
   async function action(repo: Repository, name: string) {
     if (busy) return;
     if (name === 'chat') { requestAnimationFrame(() => document.querySelector<HTMLElement>('.codex-thread-list button.active, .codex-thread-list button.provider-codex, .codex-thread-list button, .conversation-search input')?.focus()); return; }

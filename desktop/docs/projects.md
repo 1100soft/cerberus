@@ -19,7 +19,7 @@ If remote creation fails after local initialization, the local project and
 files remain available, and the app displays a warning. Open its configuration
 to retry. If the request's outcome was uncertain, check GitHub first; if the
 remote exists, turn off remote creation and enter its URL to link it. Existing
-remote repositorys are never overwritten or automatically adopted.
+remote repositories are never overwritten or automatically adopted.
 
 GitHub accounts remain available in the assignment list even when a project
 is new or absent from the cached GitHub catalog. Assignment checks access with
