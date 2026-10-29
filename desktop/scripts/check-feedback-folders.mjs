@@ -121,3 +121,27 @@ assert.equal(providerLinks.mailboxWebmail({...settings,provider:'custom',webmail
 for(const webmailUrl of ['javascript:alert(1)','http://example.org/','https://user:secret@example.org/']){assert(providerLinks.webmailUrlProblem(webmailUrl));assert.equal(providerLinks.mailboxWebmail({...settings,webmailUrl}),'');}
 assert.equal(providerLinks.selectMailProvider({...settings,webmailUrl:'https://old.example.org/'},'proton').webmailUrl,'');
 console.log('Provider webmail destinations, custom overrides, unsafe URL rejection and provider-switch reset passed');
+
+const dragSource=await readFile(new URL('../src/lib/mailDrag.ts',import.meta.url),'utf8');
+const drag=await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(dragSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`);
+const dragNodes=['Old','Old/Child','Target','Target/Occupied'].map(p=>node(p));
+assert.equal(drag.folderMoveTarget(dragNodes,'Old','Target'),'Target/Old');
+for(const parent of ['Old','Old/Child','Missing'])assert.equal(drag.folderMoveTarget(dragNodes,'Old',parent),null);
+assert.equal(drag.folderMoveTarget(dragNodes,'INBOX','Target'),null);
+assert.equal(drag.folderMoveTarget([...dragNodes,node('Target/Old')],'Old','Target'),null);
+const fakeData=(projectId,message)=>({types:[drag.mailDragType],getData:()=>JSON.stringify({projectId,message})});
+const reference={folder:'INBOX',validity:7,uid:2,messageId:'fixture'};
+assert.deepEqual(drag.readMailDrop(fakeData('one',reference),'one'),{message:reference});
+assert.equal(drag.readMailDrop(fakeData('other',reference),'one'),null);
+assert.equal(drag.readMailDrop(fakeData('one',{...reference,uid:0}),'one'),null);
+const operationSource=await readFile(new URL('../src/lib/mailFolderOperations.ts',import.meta.url),'utf8');
+const operations=await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(operationSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`);
+assert.deepEqual(operations.planProjectFolderCreate(['Shared','Reports'],[node('INBOX','.')]),[{operation:'create',parent:'',name:'Shared'},{operation:'create',parent:'Shared',name:'Reports'}]);
+assert.equal(operations.projectFolderPath(['Shared','Reports'],[node('Shared','.'),node('Shared.Reports','.')]),'Shared.Reports');
+assert.throws(()=>operations.planProjectFolderCreate(['Flat','Child'],[node('Flat',null)]));
+assert.throws(()=>operations.planProjectFolderCreate(['a/b'],[node('INBOX')]));
+console.log('Folder drag cycles/collisions, project-scoped mail references, cross-delimiter creation and flat namespace protections passed');
+
+assert(operations.sameMailAccount(settings,{...settings,notes:'Other notes'}));
+assert(!operations.sameMailAccount(settings,{...settings,username:'different'}));
+assert(!operations.sameMailAccount(settings,{...settings,imapPort:12345}));

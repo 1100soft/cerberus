@@ -6,7 +6,7 @@ export function senderIdentityProblem(config:MailboxConfig){if(/[\x00-\x1f\x7f]/
 export type MailboxConfig={webmailUrl?:string;autoSpecialFolders?:boolean;senderSync?:{enabled:boolean;accountId:string;state:string;baseline:{id:string;email:string;name:string;mayDelete:boolean}[]}|null;senderName?:string;senderIdentities?:SenderIdentity[];provider?:string;enabled:boolean;address:string;username:string;imapHost:string;imapPort:number;imapSecurity:string;smtpHost:string;smtpPort:number;smtpSecurity:string;inbox:string;drafts:string;sent:string;notes:string;metadata:string;certificatePath:string;allowSend:boolean};
 export type MailFolder={role?:string|null;path:string;delimiter:string|null;selectable:boolean;label?:string;coverage?:number;total?:number;detail?:string};
 export type FolderOverview=MailFolder&{count?:number|null;unread?:number|null;error?:string|null;trash?:boolean};
-export type FolderOperation={operation:'create'|'rename'|'delete';parent:string;name?:string|null};
+export type FolderOperation={operation:'create'|'rename'|'delete'|'move';parent:string;name?:string|null};
 export type FolderChange={forward:FolderOperation;inverse:FolderOperation};
 export type FolderBatch={nodes:MailFolder[];changes:FolderChange[];processed:number;error?:string|null};
 export type MailRef={folder:string;validity:number;uid:number;messageId:string};

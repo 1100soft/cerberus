@@ -1396,3 +1396,30 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
 - Final project UI matrix passed at 900×620, 1100×700, 1720×1080 and 2200×700,
   each at 100/140/150% zoom. Final email fixture also passed. All 89 intended
   files are included; staged whitespace/conflict/generated-file checks are clean.
+
+
+## 2026-10-29 — Email organization and cross-project folder actions
+
+- Email page supports project-scoped mail-to-folder and folder-to-parent drag/drop,
+  including mailbox-level folder placement. Folder moves preserve subtrees through
+  IMAP RENAME; cycles, name collisions and reserved-source moves are rejected.
+- Message menus offer read/star, move/archive/Trash and keyboard access. Folder
+  menus add Move; creation/deletion choose this/all/custom configured projects.
+- Nonempty deletion pauses, navigates to the affected project/folder, and offers
+  moving the emails, keeping the folder, or retrying after manual organization.
+  Bulk moves validate the inspected UIDVALIDITY and require UID MOVE. No force
+  deletion or purge was added. Native empty/assigned/child protections remain.
+- Header copy icons copy structure outward to projects or inward from one project,
+  preserving account settings, mail and purpose assignments. Successful folder
+  edits (including partial batches and cross-project copies) support session undo/
+  redo and shortcuts; undo will not remove newly nonempty folders. Renamed/moved
+  automation folder paths are not silently rewritten across other project scopes.
+- Refresh returns to INBOX when the selected folder has disappeared. New WebKit
+  fixture check-mail-organization.py is included in CI; native and JS checks cover
+  subtree moves/inverses, UID-validity protection, drag scopes and path translation.
+
+- Validation passed: build/type/style/dropdown checks, folder planning/drag scope
+  logic, full locked native suite (183 unit + 3 integration tests, 5 ignored),
+  existing email regression fixture, and organization fixture at 900×620 and
+  1720×1080 with 100/140/150% zoom. Tests used isolated fixtures only, without
+  changing live mailboxes. No commit/push was requested for this implementation.

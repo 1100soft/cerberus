@@ -1255,6 +1255,56 @@ pub fn setup_operation(
     }
     Ok(result.nodes)
 }
+fn folder_move_destination(
+    nodes: &[FolderNode],
+    source: &str,
+    parent: &str,
+) -> Result<String, String> {
+    let node = nodes
+        .iter()
+        .find(|n| n.path == source)
+        .ok_or("Folder no longer exists")?;
+    if source.eq_ignore_ascii_case("INBOX") {
+        return Err("The inbox cannot be moved".into());
+    }
+    if parent == source
+        || node
+            .delimiter
+            .as_deref()
+            .is_some_and(|d| parent.starts_with(&format!("{source}{d}")))
+    {
+        return Err("A folder cannot be moved into itself or its descendants".into());
+    }
+    let leaf = node
+        .delimiter
+        .as_deref()
+        .and_then(|d| source.rsplit_once(d).map(|(_, name)| name))
+        .unwrap_or(source);
+    let destination = if parent.is_empty() {
+        leaf.into()
+    } else {
+        let target = nodes
+            .iter()
+            .find(|n| n.path == parent)
+            .ok_or("Destination folder no longer exists")?;
+        let delimiter = target
+            .delimiter
+            .as_deref()
+            .ok_or("Destination does not support child folders")?;
+        if leaf.contains(delimiter) {
+            return Err("The destination cannot represent this folder name".into());
+        }
+        format!("{parent}{delimiter}{leaf}")
+    };
+    if destination == source {
+        return Err("The folder is already in that location".into());
+    }
+    if nodes.iter().any(|n| n.path == destination) {
+        return Err("A folder with that name already exists".into());
+    }
+    folder(&destination)?;
+    Ok(destination)
+}
 fn apply_folder_operation(
     root: &Path,
     id: &str,
@@ -1313,26 +1363,44 @@ fn apply_folder_operation(
         return Err("The inbox cannot be renamed or deleted".into());
     }
     match op.operation.as_str() {
-        "rename" => {
-            let name = op.name.as_deref().ok_or("Enter a folder name")?;
-            folder(name)?;
-            if name.trim() != name
-                || name.contains(['/', '\\'])
-                || node.delimiter.as_deref().is_some_and(|d| name.contains(d))
-            {
-                return Err("Enter a folder name, not a path".into());
-            }
-            let destination = node
-                .delimiter
-                .as_deref()
-                .and_then(|d| source.rsplit_once(d).map(|(p, _)| format!("{p}{d}{name}")))
-                .unwrap_or_else(|| name.to_owned());
-            folder(&destination)?;
-            if nodes.iter().any(|n| n.path == destination) {
-                return Err("A folder with that name already exists".into());
-            }
+        "rename" | "move" => {
+            let destination = if op.operation == "move" {
+                if [&c.drafts, &c.sent, &c.notes, &c.metadata].iter().any(|p| {
+                    p.as_str() == source
+                        || node
+                            .delimiter
+                            .as_deref()
+                            .is_some_and(|d| p.starts_with(&format!("{source}{d}")))
+                }) {
+                    return Err("Reassign configured folders before moving this folder".into());
+                }
+                folder_move_destination(
+                    nodes,
+                    source,
+                    op.name.as_deref().ok_or("Choose a destination folder")?,
+                )?
+            } else {
+                let name = op.name.as_deref().ok_or("Enter a folder name")?;
+                folder(name)?;
+                if name.trim() != name
+                    || name.contains(['/', '\\'])
+                    || node.delimiter.as_deref().is_some_and(|d| name.contains(d))
+                {
+                    return Err("Enter a folder name, not a path".into());
+                }
+                let destination = node
+                    .delimiter
+                    .as_deref()
+                    .and_then(|d| source.rsplit_once(d).map(|(p, _)| format!("{p}{d}{name}")))
+                    .unwrap_or_else(|| name.into());
+                folder(&destination)?;
+                if nodes.iter().any(|n| n.path == destination) {
+                    return Err("A folder with that name already exists".into());
+                }
+                destination
+            };
             s.rename(wire_folder(source), wire_folder(&destination))
-                .map_err(|_| "Cannot rename folder. Check mailbox permissions.")?;
+                .map_err(|_| "Cannot move or rename folder. Check mailbox permissions.")?;
         }
         "delete" => {
             let stored = config(root, id)?;
@@ -1375,22 +1443,25 @@ fn apply_folder_operation(
         _ => return Err("Unknown folder operation".into()),
     }
 
-    let inverse = if op.operation == "rename" {
+    let inverse = if matches!(op.operation.as_str(), "rename" | "move") {
         let old_name = node
             .delimiter
             .as_deref()
             .and_then(|d| source.rsplit_once(d).map(|(_, n)| n))
             .unwrap_or(source);
         let new_name = op.name.as_deref().unwrap();
-        let destination = node
-            .delimiter
-            .as_deref()
-            .and_then(|d| {
-                source
-                    .rsplit_once(d)
-                    .map(|(p, _)| format!("{p}{d}{new_name}"))
-            })
-            .unwrap_or_else(|| new_name.into());
+        let destination = if op.operation == "move" {
+            folder_move_destination(nodes, source, new_name)?
+        } else {
+            node.delimiter
+                .as_deref()
+                .and_then(|d| {
+                    source
+                        .rsplit_once(d)
+                        .map(|(p, _)| format!("{p}{d}{new_name}"))
+                })
+                .unwrap_or_else(|| new_name.into())
+        };
         for entry in nodes.iter_mut() {
             if entry.path == source
                 || node
@@ -1402,9 +1473,17 @@ fn apply_folder_operation(
             }
         }
         FolderOperation {
-            operation: "rename".into(),
+            operation: op.operation.clone(),
             parent: destination,
-            name: Some(old_name.into()),
+            name: Some(if op.operation == "move" {
+                node.delimiter
+                    .as_deref()
+                    .and_then(|d| source.rsplit_once(d).map(|(p, _)| p))
+                    .unwrap_or("")
+                    .into()
+            } else {
+                old_name.into()
+            }),
         }
     } else {
         nodes.retain(|entry| entry.path != source);
@@ -1629,6 +1708,46 @@ fn mailbox_status(s: &mut Session, inbox: &str) -> Result<serde_json::Value, Str
     Ok(serde_json::json!({"connected":true,"count":mailbox.exists}))
 }
 
+fn folder_content_status(s: &mut Session, name: &str) -> Result<serde_json::Value, String> {
+    folder(name)?;
+    let mailbox = s
+        .examine(wire_folder(name))
+        .map_err(|_| "Cannot inspect this folder")?;
+    Ok(
+        serde_json::json!({"count":mailbox.exists,"validity":mailbox.uid_validity.ok_or("Server omitted UIDVALIDITY")?}),
+    )
+}
+fn move_folder_emails(
+    s: &mut Session,
+    c: &Config,
+    name: &str,
+    destination: &str,
+    reference: &MailRef,
+) -> Result<serde_json::Value, String> {
+    folder(name)?;
+    folder(destination)?;
+    if reference.validity == 0
+        || reference.folder != name
+        || name == c.metadata
+        || destination == c.metadata
+        || destination == name
+    {
+        return Err(
+            "Choose a different, non-reserved destination and inspect the source first".into(),
+        );
+    }
+    ensure(s, destination)?;
+    let mailbox = s
+        .select(wire_folder(name))
+        .map_err(|_| "Cannot select folder")?;
+    if mailbox.uid_validity != Some(reference.validity) {
+        return Err("This mailbox was reset. Inspect it again before moving emails".into());
+    }
+    if mailbox.exists > 0 {
+        s.uid_mv("1:*",wire_folder(destination)).map_err(|_|"Moving emails failed. The server must support UID MOVE; no unsafe delete fallback is used")?;
+    }
+    Ok(serde_json::json!({"moved":mailbox.exists}))
+}
 pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json::Value, String> {
     let lock = mailbox_lock(root, id)?;
     let _guard = lock.lock().map_err(|_| "Mailbox is busy")?;
@@ -1673,6 +1792,8 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
             "test" | "status" => mailbox_status(&mut s, "INBOX"),
             "folders" => Ok(serde_json::json!(available_folders(&mut s)?)),
             "folderTree" => Ok(serde_json::json!(folder_overview(&mut s, &c)?)),
+            "folderStatus" => folder_content_status(&mut s,name),
+            "moveAll" => move_folder_emails(&mut s,&c,name,&request.destination,request.message.as_ref().ok_or("Inspect this folder before moving its emails")?),
             "flag" => update_flag(
                 &mut s,
                 request.message.as_ref().ok_or("Choose an email")?,
@@ -1776,7 +1897,7 @@ pub fn cli_main() -> Option<i32> {
             .any(|name| std::env::var(name).as_deref() == Ok("true"))
             && !matches!(
                 request.action.as_str(),
-                "folders" | "folderTree" | "list" | "read"
+                "folders" | "folderTree" | "folderStatus" | "list" | "read"
             )
         {
             return Err("Analyze mode permits only reading email; use an edit automation for mailbox changes.".into());
@@ -2320,6 +2441,83 @@ mod wire_tests {
             uid: 2,
             message_id: "<feedback@example.org>".into(),
         }
+    }
+    #[test]
+    fn folder_moves_preserve_subtrees_and_generate_working_inverse() {
+        let listing="* LIST () \"/\" \"Old\"\r\n* LIST () \"/\" \"Old/Child\"\r\n* LIST () \"/\" \"Target\"\r\n";
+        let moved = listing.replace("Old", "Target/Old");
+        let (root, port, server) = fixture(vec![
+            ("LIST", listing.into()),
+            ("RENAME \"Old\" \"Target/Old\"", String::new()),
+            ("LIST", moved),
+        ]);
+        let c = management_config(root.path(), port);
+        let result = setup_batch(
+            root.path(),
+            "fixture",
+            c,
+            Some("fixture-secret".into()),
+            vec![FolderOperation {
+                operation: "move".into(),
+                parent: "Old".into(),
+                name: Some("Target".into()),
+            }],
+        )
+        .unwrap();
+        assert!(result.error.is_none());
+        assert!(result.nodes.iter().any(|n| n.path == "Target/Old/Child"));
+        assert_eq!(result.changes[0].inverse.operation, "move");
+        assert_eq!(result.changes[0].inverse.parent, "Target/Old");
+        assert_eq!(result.changes[0].inverse.name.as_deref(), Some(""));
+        assert_eq!(
+            folder_move_destination(&result.nodes, "Target/Old", "").unwrap(),
+            "Old"
+        );
+        for destination in ["Target/Old", "Target/Old/Child", "Missing"] {
+            assert!(folder_move_destination(&result.nodes, "Target/Old", destination).is_err());
+        }
+        server.join().unwrap();
+    }
+    #[test]
+    fn bulk_email_move_checks_validity_and_uses_uid_move_without_deletion_fallback() {
+        let (root, port, server) = fixture(vec![
+            ("EXAMINE \"Ready\"", SELECT.into()),
+            ("EXAMINE \"Target\"", SELECT.into()),
+            ("SELECT \"Ready\"", SELECT.into()),
+            ("UID MOVE 1:* \"Target\"", String::new()),
+        ]);
+        let c = config_for(root.path(), port);
+        let mut s = connect(&c, "fixture-secret").unwrap();
+        assert_eq!(folder_content_status(&mut s, "Ready").unwrap()["count"], 1);
+        let reference = MailRef {
+            folder: "Ready".into(),
+            validity: 7,
+            ..Default::default()
+        };
+        assert_eq!(
+            move_folder_emails(&mut s, &c, "Ready", "Target", &reference).unwrap()["moved"],
+            1
+        );
+        s.logout().unwrap();
+        server.join().unwrap();
+        let (root, port, server) =
+            fixture(vec![("EXAMINE", SELECT.into()), ("SELECT", SELECT.into())]);
+        let c = config_for(root.path(), port);
+        let mut s = connect(&c, "fixture-secret").unwrap();
+        assert!(move_folder_emails(
+            &mut s,
+            &c,
+            "Ready",
+            "Target",
+            &MailRef {
+                validity: 8,
+                ..reference
+            }
+        )
+        .unwrap_err()
+        .contains("reset"));
+        s.logout().unwrap();
+        server.join().unwrap();
     }
     #[test]
     fn saved_certificate_is_independent_of_export_and_replacement_is_isolated() {

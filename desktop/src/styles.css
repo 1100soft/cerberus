@@ -1298,3 +1298,14 @@ input[type="number"] { text-align: right; }
 .mailbox-folder-assignments button[aria-pressed=true] small {color:var(--text-secondary)}
 .sender-sync-settings {display:grid;gap:6px;margin-top:8px}
 .mail-folder-options {margin-bottom:6px}
+
+.mail-folder-drop {background:var(--surface-control);outline:2px solid var(--accent-codex-border);outline-offset:-2px;border-radius:4px}
+.mail-folder-root-drop {padding:4px 8px;color:var(--text-secondary);font-size:12px}
+.mail-organize-dialog {width:min(560px,100%)}
+.mail-organize-dialog footer>div {flex:1;min-width:0;white-space:pre-wrap}
+.mail-organize-dialog label {display:flex;flex-direction:column;gap:5px}
+.mail-project-targets {display:grid;gap:6px;margin:8px 0}
+.mail-project-targets label {flex-direction:row;align-items:center}
+.mail-folder-inspection {display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid var(--status-warning);border-radius:6px}
+.mail-folder-inspection span {flex:1 1 240px;min-width:0;overflow-wrap:anywhere}
+.mail-action-menu {max-width:calc(100% - 16px)}

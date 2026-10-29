@@ -1,0 +1,9 @@
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
+export type MailMenuAction={label:string;run:()=>void;disabled?:boolean};
+export function MailActionMenu({x,y,actions,onClose}:{x:number;y:number;actions:MailMenuAction[];onClose:()=>void}){
+ const ref=useRef<HTMLDivElement>(null),origin=useRef(document.activeElement as HTMLElement|null),[position,setPosition]=useState({left:0,top:0});
+ useLayoutEffect(()=>{const node=ref.current;if(!node)return;const zoom=parseFloat(getComputedStyle(document.body).zoom)||1,rect=node.getBoundingClientRect();setPosition({left:Math.max(8,Math.min(x,innerWidth-rect.width-8))/zoom,top:Math.max(8,Math.min(y,innerHeight-rect.height-8))/zoom});node.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({preventScroll:true});},[x,y]);
+ useEffect(()=>{const close=(e:MouseEvent)=>{if(!ref.current?.contains(e.target as Node))onClose();};window.addEventListener('mousedown',close);return()=>window.removeEventListener('mousedown',close);},[onClose]);
+ return createPortal(<div ref={ref} className="context-menu mail-action-menu" role="menu" aria-label="Email actions" style={position} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();onClose();origin.current?.focus();}if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const items=[...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')],index=items.indexOf(document.activeElement as HTMLButtonElement);items[event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:items.length-1))%items.length]?.focus();}}}>{actions.map(action=><button type="button" key={action.label} role="menuitem" disabled={action.disabled} onClick={()=>{onClose();action.run();}}>{action.label}</button>)}</div>,document.body);
+}

@@ -371,3 +371,41 @@ Bridge does not expose address-editing operations, and Purelymail's public API
 manages routing rather than webmail sender identities. These and other providers
 keep manual identity configuration; there is no promise of two-way synchronization
 where the provider cannot support it.
+
+
+### Organizing mail across projects
+
+On the Email page, drag an email onto a folder to move it within the current
+project. Drag a folder onto another folder (or the Mailbox strip for top level)
+to move its entire subtree. Cross-project drags, collisions, and moves into the
+folder's own descendants are rejected. Folder moves use IMAP RENAME; email moves
+require UID MOVE, without a copy/delete fallback.
+
+Right-click an email for read/unread, star, Move, Archive (when available) or
+Trash. Shift+F10 opens the same menu; Delete moves an email to Trash. Folder menus
+provide New folder, Rename (F2), Move and Delete. Ctrl/Cmd+Shift+N creates a child
+of the focused folder. Creating and deleting folders opens a project scope choice:
+this project, every configured project, or checked projects. Paths translate each
+server's hierarchy delimiter. Unconfigured projects are not mutation targets.
+
+Deletion never removes email silently. If a selected folder contains messages,
+Cerberus switches to that project and folder and pauses deletion. Move emails
+opens a destination tree and explicitly moves all emails currently in that folder;
+Keep folder leaves it alone and continues with the remaining projects. Retry
+deletion checks the contents again after manual organization. The native backend
+rechecks emptiness before DELETE. INBOX, assigned folders and folders with children
+are protected; delete children first. Nothing is permanently purged by these actions.
+
+The header's outward/inward copy icons copy the current tree to other projects or
+copy another project's tree into the current project. They create missing folders;
+existing mail, identities, account credentials and assigned folder purposes stay
+unchanged. Each destination is applied in one authenticated folder batch. Partial
+failures are reported per project and successful changes remain undoable.
+
+Undo/Redo buttons and Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z (or Ctrl+Y) cover this page's folder
+creation, deletion, rename, move and copy actions while the Email page stays open, including
+successful parts of multi-project operations. Email moves are not part of folder
+undo. Undo refuses to delete folders that have subsequently received mail. Text
+fields retain their own editing shortcuts. Existing automation rules and saved
+message references keep their old folder paths after rename/move; update those
+rules explicitly if their watched folder changed.
