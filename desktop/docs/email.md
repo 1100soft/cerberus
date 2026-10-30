@@ -94,7 +94,7 @@ required. The Email page opens at Inbox and covers the entire mailbox. Its tree 
 mailbox folders and shows each folder’s total and unread count. Siblings follow
 the server’s returned order; Cerberus does not alphabetize them. The configured
 email address appears in the page header. Nonselectable
-namespace parents remain expandable; internal automation receipt folders are hidden. Folder creation
+namespace parents remain expandable; automation receipt folders are visible and marked with their purpose. Folder creation
 is available in mailbox settings and automation trigger setup. Proton custom folders use full
 names such as `Folders/Reports`, while labels use `Labels/Reports`. Existing short
 Proton names are matched only against a confirmed server folder; exact names are
@@ -403,7 +403,7 @@ unchanged. Each destination is applied in one authenticated folder batch. Partia
 failures are reported per project and successful changes remain undoable.
 
 Undo/Redo buttons and Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z (or Ctrl+Y) cover this page's folder
-creation, deletion, rename, move and copy actions while the Email page stays open, including
+creation, deletion, rename, move, ordering and copy actions while the Email page stays open, including
 successful parts of multi-project operations. Email moves are not part of folder
 undo. Undo refuses to delete folders that have subsequently received mail. Text
 fields retain their own editing shortcuts. Existing automation rules and saved
@@ -413,7 +413,7 @@ rules explicitly if their watched folder changed.
 
 ### Shared automation sender identities
 
-Give the default sender or any additional address an **Automation identity** name
+Give the default sender or any additional address an **Identity name**
 in Email settings. Suggestions include names defined in other projects. For
 example, assign **Support** to `support@projectA.com` in project A and
 `support@projectB.com` in project B. The automation can use the same name in both
@@ -422,11 +422,11 @@ Names are case-insensitive, unique within a project, and limited to 64 character
 without `@` or control characters. A missing name fails instead of choosing
 another sender. An unnamed identity remains usable by its address or provider ID.
 
-Automation identity names are local mappings, separate from the display name
+Identity names are local mappings, separate from the display name
 shown to recipients. Provider identity synchronization preserves these mappings;
 editing a local name does not rename the provider identity. Suggestions reuse the
 name, never another project's address or credentials. The reply composer's From
-menu shows the automation name alongside its current project address.
+menu shows the identity name alongside its current project address.
 
 Agent prompt example: “Read the incoming email and save a reply draft using the
 Support sender identity.” Agents can pass `"sender":"Support"` to draft or send.
@@ -444,3 +444,24 @@ printf '{"action":"draft","sender":"Support","message":%s,"text":"Thanks. We are
 For Proton Bridge, a new top-level custom folder is created inside the server's
 `Folders` namespace. Newly created folders are selected and their ancestors
 expanded, so they are visible even when the parent was collapsed.
+
+
+Folder menus float above the tree without changing its layout. Drop a folder on
+another folder to change its parent, or on the line between rows to place it
+beside a sibling. Explicit sibling order is stored locally per project (IMAP does
+not synchronize folder order); untouched folders retain the functional ordering.
+Folder mutations show provisional dimmed rows with spinners while the server
+works. Server results replace the preview, and failures restore the confirmed
+state. Tree expansion and browsing remain available. Folder batches reuse their
+returned structure instead of waiting for another discovery before rendering.
+
+An existing folder is selected rather than created again. In particular, a
+folder assigned to Automation receipts is shown in the Email tree; it is not a
+missing folder. Its assignment still protects it from folder deletion/movement
+and from moving receipt emails. To use it for regular mail, assign a different
+Automation receipts folder in Email settings first.
+
+Email settings group provider, sign-in, connection, sender identities and folder
+purposes. Every sender row uses Email address, Identity name and Display name in
+the same order. Identity names such as Support are shared vocabulary for agents;
+display names are the names recipients see.

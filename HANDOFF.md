@@ -1453,3 +1453,36 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
   email/folder fixtures at minimum and wide sizes with 100/140/150% zoom. Live
   Proton inspection was read-only (folder names/status only); all mutation tests
   used isolated fixtures. No commit or push was requested for these changes.
+
+
+## 2026-10-30 — visible receipts, responsive folder organization and email settings
+
+- Confirmed the reported Proton path Folders/Cerberus/Receipts already exists and
+  is the configured automation metadata folder. Both discovery rendering and the
+  counted tree were hiding it. Mailbox browsing now shows it and marks its purpose;
+  reserved-folder safeguards remain, including protection against moving receipt
+  messages out. Existing-folder creation selects/reveals it without another CREATE.
+- Folder context menus now use the same zoom-aware floating body portal as message
+  menus. Escape, outside dismissal and keyboard movement do not rearrange the tree.
+  New folder fields and target selectors have separate spacing.
+- Gap drop targets support local sibling ordering and parent changes. Order is
+  project-scoped and persisted locally because IMAP has no ordering command;
+  default functional/shared custom ordering remains until explicitly overridden.
+  Reordering is undoable; reparenting plus placement uses one undo entry.
+- Folder mutations preview dimmed rows/spinners, keep navigation/expansion usable,
+  apply authoritative batch snapshots immediately, and roll back errors/partial
+  failures correctly. Create/copy modals close while background work proceeds.
+  Reuse batch discovery in the cache and merge snapshots by path maps instead of
+  quadratic scans. Explicit order is loaded once per project and indexed by rank.
+- Email settings now group sign-in, connection, senders and folder purposes, with
+  consistent sender fields (Email address, Identity name, Display name), spacing
+  and input heights. Cross-project name suggestions and provider sync are preserved.
+
+- Validation: production build/type/style/dropdown checks, folder/provider logic,
+  full locked Rust suite (186 unit + 3 integration passed, 5 ignored), and WebKit
+  settings/organization fixtures at 900×620 and 1720×700 with 100/140/150% zoom.
+  Organization tests cover the exact existing Receipts case, body-portal menu
+  bounds/layout, gap reparenting/local-order undo/redo, pending navigation and
+  rollback. All commands exited zero; the settings harness still emits its known
+  WebKit child-process teardown allocator diagnostic after passing assertions.
+  No live mailbox mutations, commit or push were performed.

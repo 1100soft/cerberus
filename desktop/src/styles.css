@@ -1311,3 +1311,33 @@ input[type="number"] { text-align: right; }
 .mail-action-menu {max-width:calc(100% - 16px)}
 
 @media (max-width:620px) {.feedback-fields.mail-sender-row {grid-template-columns:minmax(0,1fr) auto}.mail-sender-row>label {grid-column:1}.mail-sender-row>button {grid-column:2;grid-row:1 / span 3}}
+
+/* Floating menus share the zoomed body and escape trees and dialog clipping. */
+.mail-action-menu {z-index:180;min-width:160px}
+.mail-organize-dialog .automation-dialog-content {display:flex;flex-direction:column;gap:16px;padding-block:16px}
+.mail-organize-dialog .automation-dialog-content>label {margin-bottom:2px}
+.mail-folder-tree [data-folder-path] {position:relative}
+.mail-folder-gap {position:absolute;inset-inline:0;top:0;height:5px;z-index:1}
+.mail-folder-gap[data-edge=after] {top:auto;bottom:0}
+.mail-folder-gap-active::after {content:'';position:absolute;inset:1px 0;background:var(--accent-codex-border);border-radius:2px;pointer-events:none}
+.mail-folder-row[aria-busy=true] {opacity:.55}
+.mail-folder-purpose {font-size:10px;color:var(--text-secondary);max-width:85px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mail-settings-content {display:flex;flex-direction:column;gap:14px}
+.mail-settings-content>section {display:flex;flex-direction:column;gap:8px;padding-block:12px;border-top:1px solid var(--border-control)}
+.mail-settings-content .feedback-provider-help {margin:0}
+.mail-settings-content .feedback-fields {margin:0;gap:12px}
+.mail-settings-content input:not([type=checkbox]),.mail-settings-content .app-select {height:36px;box-sizing:border-box}
+.mail-settings-content .feedback-fields>label,.mail-settings-content .sender-sync-settings>label {display:flex;flex-direction:column;gap:6px;min-width:0}
+.mail-settings-content fieldset {gap:10px;padding:12px}
+.mail-default-sender::after {content:'Default';font-size:11px;color:var(--text-secondary);align-self:center}
+.mail-section-title {font-size:13px}
+
+.mail-settings-content .mail-sender-row {grid-template-columns:repeat(3,minmax(0,1fr)) 40px}
+.mail-settings-content .mail-sender-row>button {justify-self:center}
+@media (max-width:620px) {.mail-settings-content .mail-sender-row {grid-template-columns:minmax(0,1fr) 40px}}
+
+.mail-action-menu kbd {margin-inline-start:auto;font-size:10px;color:var(--text-secondary)}
+
+.mail-folder-name>span {min-width:0;flex:1 1 auto}
+.mail-folder-name>svg {flex-shrink:0}
+.mail-folder-purpose {min-width:0;flex:0 1 auto}

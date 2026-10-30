@@ -1,31 +1,36 @@
+import {positionMailFolder,setMailFolderOrder} from '../lib/mailFolderTree';
+import {previewMailFolders} from '../lib/mailFolderPreview';
 import {partsFor,projectFolderPath,planProjectFolderCreate,sameMailAccount} from '../lib/mailFolderOperations';
 import {useRef,useState} from 'react';
-import {Copy,CopyPlus,Undo2,Redo2,X,FolderPlus} from 'lucide-react';
+import {Copy,CopyPlus,Undo2,Redo2,X,FolderPlus,LoaderCircle} from 'lucide-react';
 import type {Repository} from '../types';
-import {feedback,type MailboxConfig,type MailFolder,type FolderOperation,type MailRef} from '../lib/feedback';
+import {feedback,type MailboxConfig,type MailFolder,type FolderOperation,type FolderBatch,type MailRef} from '../lib/feedback';
 import {folderMoveTarget} from '../lib/mailDrag';
 import {planMailFolderCopy} from '../lib/mailFolderCopy';
 import {Select} from './Select';
 import {MailMoveDialog} from './MailMoveDialog';
 type Project={id:string;label:string;config:MailboxConfig};
 type Request={kind:'create'|'delete'|'copyTo'|'copyFrom';parts:string[]};
-type Step={project:Project;operations:FolderOperation[]};
+type Step={project:Project;operations:FolderOperation[];placement?:{parent:string;paths:string[]}};
 type Edit={label:string;steps:Step[]};
 type Inspection={project:Project;parts:string[];path:string;reference:MailRef;count:number;remaining:Project[]};
-export function useMailOrganization({projects,projectId,config,nodes,onRefresh,onInspect}:{projects:Repository[];projectId:string;config:MailboxConfig|null;nodes:MailFolder[];onRefresh:()=>void;onInspect:(project:string,path:string)=>void}){
+export function useMailOrganization({projects,projectId,config,nodes,onSnapshot,onRefresh,onInspect}:{projects:Repository[];projectId:string;config:MailboxConfig|null;nodes:MailFolder[];onSnapshot:(id:string,nodes:MailFolder[])=>void;onRefresh:()=>void;onInspect:(project:string,path:string)=>void}){
  const [request,setRequest]=useState<Request|null>(null),[available,setAvailable]=useState<Project[]>([]),[mode,setMode]=useState('this'),[selected,setSelected]=useState<string[]>([]),[source,setSource]=useState(''),[name,setName]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState(''),[inspection,setInspection]=useState<Inspection|null>(null),[movingAll,setMovingAll]=useState(false);
+ const [pendingPaths,setPendingPaths]=useState<string[]>([]);
  const history=useRef<{undo:Edit[];redo:Edit[]}>({undo:[],redo:[]}),locked=useRef(false);const [,renderHistory]=useState(0),openGeneration=useRef(0);
  const notify=(id:string)=>window.dispatchEvent(new CustomEvent('feedback-mail-changed',{detail:id}));
  const record=(label:string,steps:Step[])=>{if(steps.length){history.current.undo.push({label,steps:[...steps].reverse()});history.current.undo=history.current.undo.slice(-50);history.current.redo=[];renderHistory(v=>v+1);}};
- const execute=async(project:Project,operations:FolderOperation[])=>{
+ const execute=async(project:Project,operations:FolderOperation[],placement?:Step['placement']):Promise<{result:FolderBatch;inverse:Step}>=>{
   const current=await feedback.config(project.id);if(!current?.enabled)throw Error(`${project.label}: mailbox is no longer configured.`);if(!sameMailAccount(current,project.config))throw Error(`${project.label}: mailbox account changed. Reopen this action before continuing.`);
-  const result=await feedback.batch(project.id,current,'',operations);notify(project.id);
+  if(placement){const previous=setMailFolderOrder(project.id,placement.parent,placement.paths);onSnapshot(project.id,nodes);return {result:{nodes,changes:[],processed:0,error:null},inverse:{project,operations:[],placement:{parent:placement.parent,paths:previous}} as Step};}
+  const before=project.id===projectId?nodes:[];if(project.id===projectId){const preview=previewMailFolders(before,operations);onSnapshot(project.id,preview.nodes);setPendingPaths(preview.pending);}
+  let result;try{result=await feedback.batch(project.id,current,'',operations);onSnapshot(project.id,result.nodes);}catch(reason){if(project.id===projectId)onSnapshot(project.id,before);throw reason;}finally{setPendingPaths([]);}notify(project.id);
   return {result,inverse:{project,operations:[...result.changes].reverse().map(change=>change.inverse)}};
  };
  const refresh=()=>{onRefresh();renderHistory(v=>v+1);};
  const run=async(action:()=>Promise<void>)=>{if(locked.current)throw Error('A folder operation is already running.');locked.current=true;setBusy(true);setError('');try{await action();}catch(reason){setError(String(reason));throw reason;}finally{locked.current=false;setBusy(false);refresh();}};
  const open=async(kind:Request['kind'],path='')=>{
-  if(busy)return;const generation=++openGeneration.current;setRequest({kind,parts:partsFor(path,nodes)});setMode(kind==='copyTo'?'all':'this');setSelected([projectId]);setName('');setError('');setStatus('');setBusy(true);setAvailable([]);
+  if(busy)return;const generation=++openGeneration.current;setRequest({kind,parts:partsFor(path,nodes)});setMode(kind==='copyTo'?'all':'this');setSelected([projectId]);setName('');setError('');setStatus('');setBusy(true);setAvailable(config?[{id:projectId,label:projects.find(p=>p.id===projectId)?.displayName||projectId,config}]:[]);
   const found:Project[]=[],errors:string[]=[];
   await Promise.all(projects.filter(p=>p.localPath).map(async p=>{try{const c=p.id===projectId?config:await feedback.config(p.id);if(c?.enabled)found.push({id:p.id,label:p.displayName,config:c});}catch(reason){errors.push(`${p.displayName}: ${String(reason)}`);}}));
   if(generation!==openGeneration.current)return;
@@ -51,6 +56,7 @@ export function useMailOrganization({projects,projectId,config,nodes,onRefresh,o
  };
  const targets=available.filter(p=>request?.kind==='copyFrom'?p.id===projectId:mode==='this'?p.id===projectId:mode==='all'?request?.kind==='copyTo'?p.id!==projectId:true:selected.includes(p.id));
  const submit=async()=>{if(!request)return;const job=request;await run(async()=>{
+  setRequest(null);
   if(job.kind==='delete'){await applyDeletion(targets,job.parts);return;}
   const inverses:Step[]=[],errors:string[]=[];
   try{
@@ -65,7 +71,7 @@ export function useMailOrganization({projects,projectId,config,nodes,onRefresh,o
     if(operations.length){const {result,inverse}=await execute(project,operations);if(inverse.operations.length)inverses.push(inverse);if(result.error)throw Error(result.error);if(job.kind==='create'&&project.id===projectId){const created=result.changes.filter(change=>change.forward.operation==='create').at(-1)?.inverse.parent;if(created)onInspect(project.id,created);}}else if(job.kind==='create'&&project.id===projectId){const last=[...job.parts,name.trim()];if(last.length===1&&current.provider==='proton'&&tree.some(n=>n.path==='Folders'))last.unshift('Folders');onInspect(project.id,projectFolderPath(last,tree));}
    }catch(reason){errors.push(`${project.label}: ${String(reason)}`);}}
   }finally{record(job.kind==='create'?'Create folders':'Copy folder structure',inverses);}
-  if(errors.length)throw Error(errors.join('\n'));setStatus(job.kind==='create'?'Folders created.':'Folder structure copied.');setRequest(null);
+  if(errors.length)throw Error(errors.join('\n'));setStatus(job.kind==='create'?(inverses.length?'Folders created.':'Folder already exists.'): 'Folder structure copied.');setRequest(null);
  });};
  const edit=async(path:string,operation:'rename'|'move',value:string)=>run(async()=>{
   if(!config)throw Error('Mailbox is not configured.');const node=nodes.find(n=>n.path===path);
@@ -76,9 +82,16 @@ export function useMailOrganization({projects,projectId,config,nodes,onRefresh,o
   const destination=operation==='move'?folderMoveTarget(nodes,path,value)!:parent+ (parent?node!.delimiter:'')+value;
   onInspect(projectId,destination);setStatus('Folder updated. Existing automation rules and saved email references keep their previous paths.');
  });
+ const position=(next:MailFolder[],path:string,anchor:string,after:boolean,moved:boolean)=>{
+  if(!config)return;const placement=positionMailFolder(projectId,next,path,anchor,after);if(!placement)return;
+  const step:Step={project:{id:projectId,label:projects.find(p=>p.id===projectId)?.displayName||projectId,config},operations:[],placement:{parent:placement.parent,paths:placement.previous}},last=history.current.undo.at(-1);
+  // Reparenting plus placement is one drag gesture and one undo entry.
+  if(moved&&last?.label==='Move folder'&&last.steps.some(s=>s.project.id===projectId&&s.operations.some(op=>op.parent===path))){last.steps.unshift(step);history.current.redo=[];renderHistory(v=>v+1);}else record('Reorder folder',[step]);
+  onSnapshot(projectId,next);
+ };
  const replay=async(direction:'undo'|'redo')=>run(async()=>{
   const entry=history.current[direction].pop();if(!entry)return;const inverse:Step[]=[],remaining:Step[]=[];const errors:string[]=[];
-  for(const step of entry.steps){try{const next=await execute(step.project,step.operations);if(next.inverse.operations.length)inverse.unshift(next.inverse);if(next.result.error){remaining.push({...step,operations:step.operations.slice(next.result.processed)});errors.push(`${step.project.label}: ${next.result.error}`);}}catch(reason){remaining.push(step);errors.push(String(reason));}}
+  for(const step of entry.steps){try{const next=await execute(step.project,step.operations,step.placement);if(next.inverse.operations.length||next.inverse.placement)inverse.unshift(next.inverse);if(next.result.error){remaining.push({...step,operations:step.operations.slice(next.result.processed)});errors.push(`${step.project.label}: ${next.result.error}`);}}catch(reason){remaining.push(step);errors.push(String(reason));}}
   if(remaining.length)history.current[direction].push({...entry,steps:remaining});if(inverse.length)history.current[direction==='undo'?'redo':'undo'].push({...entry,steps:inverse});
   setStatus(`${direction==='undo'?'Undid':'Redid'}: ${entry.label}`);if(errors.length)throw Error(errors.join('\n'));
  });
@@ -87,7 +100,7 @@ export function useMailOrganization({projects,projectId,config,nodes,onRefresh,o
  const close=()=>{openGeneration.current++;setRequest(null);};
  const controls=<><button type="button" aria-label="New email folder" title="New folder" disabled={busy||!config} onClick={()=>void open('create')}><FolderPlus size={16}/></button><button type="button" aria-label="Copy folder structure to projects" title="Copy folder structure to projects" disabled={busy||!config} onClick={()=>void open('copyTo')}><CopyPlus size={16}/></button><button type="button" aria-label="Copy folder structure from project" title="Copy folder structure from project" disabled={busy||!config} onClick={()=>void open('copyFrom')}><Copy size={16}/></button><button type="button" aria-label="Undo email folder action" title="Undo folder action" disabled={busy||!history.current.undo.length} onClick={()=>void replay('undo').catch(()=>{})}><Undo2 size={16}/></button><button type="button" aria-label="Redo email folder action" title="Redo folder action" disabled={busy||!history.current.redo.length} onClick={()=>void replay('redo').catch(()=>{})}><Redo2 size={16}/></button></>;
  const dialogs=<>{request&&<div className="automation-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)close();}}><section className="automation-dialog mail-organize-dialog" role="dialog" aria-modal="true" aria-label={request.kind==='create'?'Create email folder':request.kind==='delete'?'Delete email folder':'Copy email folders'} onKeyDown={event=>{if(event.key==='Escape'&&!busy){event.stopPropagation();close();}}}><header><h2>{request.kind==='create'?'New folder':request.kind==='delete'?'Delete folder':'Copy folder structure'}</h2><button type="button" disabled={busy} aria-label="Close folder organization" onClick={close}><X size={16}/></button></header><div className="automation-dialog-content">{request.kind==='create'?<label>Folder name<input aria-label="Email folder name" autoFocus value={name} disabled={busy} onChange={e=>setName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&name.trim()&&targets.length){e.preventDefault();void submit().catch(()=>{});}}}/></label>:request.kind==='delete'?<p>{request.parts.join(' / ')}</p>:<p>Creates missing folders. Emails, account settings and assigned folder purposes stay unchanged.</p>}{request.kind==='copyFrom'?(available.some(p=>p.id!==projectId)?<Select label="Source email project" value={source} disabled={busy} onChange={setSource} options={available.filter(p=>p.id!==projectId).map(p=>({value:p.id,label:p.label}))}/>:<p>No other configured projects.</p>):<><Select label="Target email projects" disabled={busy} value={mode} onChange={setMode} options={[...(request.kind==='copyTo'?[]:[{value:'this',label:'Only this project'}]),{value:'all',label:request.kind==='copyTo'?'All other projects':'All projects'},{value:'custom',label:'Choose projects'}]}/>{mode==='custom'&&<div className="mail-project-targets">{available.filter(p=>request.kind!=='copyTo'||p.id!==projectId).map(p=><label key={p.id}><input type="checkbox" disabled={busy} checked={selected.includes(p.id)} onChange={e=>setSelected(current=>e.target.checked?[...current,p.id]:current.filter(id=>id!==p.id))}/>{p.label}</label>)}</div>}<small>{targets.length} configured {targets.length===1?'project':'projects'}</small></>}</div><footer><div aria-live="polite">{error&&<p className="config-error" role="alert">{error}</p>}{busy&&<p role="status">{status||'Loading projects…'}</p>}</div><button type="button" disabled={busy||!targets.length||request.kind==='create'&&!name.trim()||request.kind==='copyFrom'&&!source} onClick={()=>void submit().catch(()=>{})}>{request.kind==='create'?'Create':request.kind==='delete'?'Delete':'Copy'}</button></footer></section></div>}{movingAll&&inspection&&<MailMoveDialog title="Move folder emails" nodes={nodes.filter(n=>n.selectable&&n.path!==inspection.path&&n.path!==config?.metadata)} onClose={()=>setMovingAll(false)} onMove={async destination=>{const current=inspection;if(projectId!==current.project.id)throw Error('Open the inspected project first.');await run(async()=>{const latest=await feedback.config(current.project.id);if(!latest||!sameMailAccount(latest,current.project.config))throw Error('Mailbox account changed. Inspect this folder again before moving email.');await feedback.request(current.project.id,{action:'moveAll',folder:current.path,message:current.reference,destination});notify(current.project.id);setMovingAll(false);await applyDeletion([current.project,...current.remaining],current.parts);});}}/>}</>;
- const notices=<>{!request&&error&&<p role="alert" className="config-error">{error}</p>}{!request&&!inspection&&status&&<p role="status">{status}</p>}{inspection&&<div className="mail-folder-inspection" role="status"><span>{inspection.project.label} · {inspection.path}: {inspection.count} emails. Move them before deleting this folder, or keep it.</span><button type="button" disabled={busy||projectId!==inspection.project.id} onClick={()=>setMovingAll(true)}>Move emails</button><button type="button" disabled={busy} onClick={inspectAgain}>Retry deletion</button><button type="button" disabled={busy} onClick={keepFolder}>Keep folder</button></div>}</>;
+ const notices=<>{!request&&error&&<p role="alert" className="config-error">{error}</p>}{!request&&!inspection&&(status||busy)&&<p role="status">{busy&&<LoaderCircle size={14} className="spin"/>}{status||'Updating folders…'}</p>}{inspection&&<div className="mail-folder-inspection" role="status"><span>{inspection.project.label} · {inspection.path}: {inspection.count} emails. Move them before deleting this folder, or keep it.</span><button type="button" disabled={busy||projectId!==inspection.project.id} onClick={()=>setMovingAll(true)}>Move emails</button><button type="button" disabled={busy} onClick={inspectAgain}>Retry deletion</button><button type="button" disabled={busy} onClick={keepFolder}>Keep folder</button></div>}</>;
  const onKeyDown=(event:React.KeyboardEvent)=>{if(busy||(event.target as HTMLElement).closest('input,textarea,[contenteditable=true],[role=dialog]')||!event.ctrlKey&&!event.metaKey)return;const key=event.key.toLowerCase();if(key!=='z'&&key!=='y')return;const direction=key==='y'||event.shiftKey?'redo':'undo';if(!history.current[direction].length)return;event.preventDefault();event.stopPropagation();void replay(direction).catch(()=>{});};
- return {controls,dialogs,notices,busy,onKeyDown,create:(parent:string)=>open('create',parent),remove:(path:string)=>open('delete',path),rename:(path:string,name:string)=>edit(path,'rename',name),move:(path:string,parent:string)=>edit(path,'move',parent)};
+ return {controls,dialogs,notices,busy,pendingPaths,onKeyDown,position,create:(parent:string)=>open('create',parent),remove:(path:string)=>open('delete',path),rename:(path:string,name:string)=>edit(path,'rename',name),move:(path:string,parent:string)=>edit(path,'move',parent)};
 }

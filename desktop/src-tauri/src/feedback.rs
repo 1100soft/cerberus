@@ -1689,7 +1689,7 @@ fn folder_counts(s: &mut Session, path: &str) -> Result<(u32, u32), String> {
         unread.ok_or("Server omitted unread count")?,
     ))
 }
-fn folder_overview(s: &mut Session, c: &Config) -> Result<Vec<FolderOverview>, String> {
+fn folder_overview(s: &mut Session, _c: &Config) -> Result<Vec<FolderOverview>, String> {
     let names = s
         .list(None, Some("*"))
         .map_err(|_| "Cannot list mail folders")?;
@@ -1697,13 +1697,6 @@ fn folder_overview(s: &mut Session, c: &Config) -> Result<Vec<FolderOverview>, S
     for name in names.iter() {
         let path = display_folder(name.name());
         let delimiter = name.delimiter().map(str::to_owned);
-        if path == c.metadata
-            || delimiter
-                .as_deref()
-                .is_some_and(|d| path.starts_with(&format!("{}{d}", c.metadata)))
-        {
-            continue;
-        }
         let selectable = !name
             .attributes()
             .contains(&imap::types::NameAttribute::NoSelect);
@@ -1875,7 +1868,7 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
                 let r = request.message.as_ref().ok_or("Choose an email")?;
                 message_header(&mut s, r)?;
                 folder(&request.destination)?;
-                if request.destination == c.metadata {
+                if request.destination == c.metadata || r.folder == c.metadata {
                     return Err("Automation receipt folder is reserved".into());
                 }
                 ensure(&mut s, &request.destination)?;
@@ -2934,10 +2927,12 @@ mod wire_tests {
     }
     #[test]
     fn overview_uses_status_counts_and_preserves_containers_and_errors() {
-        let (root,port,server)=fixture(vec![("LIST","* LIST (\\Noselect) \"/\" \"Folders\"\r\n* LIST () \"/\" \"Folders/Reports\"\r\n* LIST (\\Trash) \"/\" \"Trash\"\r\n* LIST () \"/\" \"Receipts\"\r\n".into()),("STATUS \"Folders/Reports\"","* STATUS \"Folders/Reports\" (MESSAGES 63 UNSEEN 5)\r\n".into()),("STATUS_FAIL",String::new())]);
+        let (root,port,server)=fixture(vec![("LIST","* LIST (\\Noselect) \"/\" \"Folders\"\r\n* LIST () \"/\" \"Folders/Reports\"\r\n* LIST (\\Trash) \"/\" \"Trash\"\r\n* LIST () \"/\" \"Receipts\"\r\n".into()),("STATUS \"Folders/Reports\"","* STATUS \"Folders/Reports\" (MESSAGES 63 UNSEEN 5)\r\n".into()),("STATUS_FAIL",String::new()),("STATUS \"Receipts\"","* STATUS \"Receipts\" (MESSAGES 2 UNSEEN 0)\r\n".into())]);
         let mut session = connect(&config_for(root.path(), port), "fixture-secret").unwrap();
         let rows = folder_overview(&mut session, &config_for(root.path(), port)).unwrap();
-        assert_eq!(rows.len(), 3);
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[3].node.path, "Receipts");
+        assert_eq!(rows[3].count, Some(2));
         assert_eq!(rows[0].count, None);
         assert_eq!(rows[1].count, Some(63));
         assert_eq!(rows[1].unread, Some(5));

@@ -66,7 +66,7 @@ history.reset();const assigned={...sourceConfig,inbox:'Other'};history.record('A
 history.record('Different edit',{nodes:[],changes:[],processed:0},sourceConfig,assigned);assert.equal(history.redo.length,0);
 const rememberedOrder=new Map();globalThis.localStorage={getItem:key=>rememberedOrder.get(key)||null,setItem:(key,value)=>rememberedOrder.set(key,value)};
 const treeSource=await readFile(new URL('../src/lib/mailFolderTree.ts',import.meta.url),'utf8');const treeCompiled=ts.transpileModule(treeSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {indexMailFolders}=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled).toString('base64')}`);
+const {indexMailFolders,positionMailFolder}=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled).toString('base64')}`);
 const large=indexMailFolders(Array.from({length:2000},(_,i)=>node(`Root/Group${i}/Leaf`)));assert.equal(large.rows.size,4001);assert.equal(large.children.size,2001);assert.equal(large.ordered.length,4001);
 assert.deepEqual(indexMailFolders([node('A/Z'),node('A-Other'),node('A/B')]).ordered.map(n=>n.path),['A','A/Z','A/B','A-Other']);
 console.log('Batched folder plans, delimiter mapping, retry deduplication, partial undo/redo, assignment history and large tree indexing passed');
@@ -76,6 +76,17 @@ assert.deepEqual(indexMailFolders([node('Z/First'),node('A'),node('Z/Second')]).
 assert.deepEqual(indexMailFolders(['Trash','Archive','Inbox','Drafts','Sent','Custom'].map(path=>node(path))).ordered.map(n=>n.path),['Inbox','Drafts','Sent','Archive','Custom','Trash']);
 const reloadedTree=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled+'\n// reload persisted order').toString('base64')}`);
 assert.deepEqual(reloadedTree.indexMailFolders([node('Z/First'),node('A'),node('Z/Second')]).ordered.map(n=>n.path),['A','Z','Z/Second','Z/First']);
+const positionNodes=[node('Parent/One'),node('Parent/Two'),node('Parent/Three')];
+positionMailFolder('project-one',positionNodes,'Parent/Three','Parent/One',false);
+assert.deepEqual(indexMailFolders([...positionNodes].reverse(),'project-one').ordered.map(n=>n.path),['Parent','Parent/Three','Parent/One','Parent/Two']);
+assert.deepEqual(indexMailFolders(positionNodes,'project-two').ordered.map(n=>n.path),['Parent','Parent/One','Parent/Two','Parent/Three']);
+assert.deepEqual(reloadedTree.indexMailFolders(positionNodes,'project-one').ordered.map(n=>n.path),['Parent','Parent/Three','Parent/One','Parent/Two']);
+const previewSource=await readFile(new URL('../src/lib/mailFolderPreview.ts',import.meta.url),'utf8'),previewCompiled=ts.transpileModule(previewSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {previewMailFolders}=await import(`data:text/javascript;base64,${Buffer.from(previewCompiled).toString('base64')}`);
+assert.deepEqual(previewMailFolders([node('Parent')],[{operation:'create',parent:'Parent',name:'New'}]).pending,['Parent/New']);
+assert.deepEqual(previewMailFolders([node('Parent'),node('Parent/Child')],[{operation:'move',parent:'Parent',name:'Dest'}]).nodes.map(n=>n.path),['Dest/Parent','Dest/Parent/Child']);
+assert.deepEqual(previewMailFolders([node('Parent')],[{operation:'delete',parent:'Parent'}]).nodes.map(n=>n.path),['Parent']);
+console.log('Project-scoped explicit folder placement survives refresh, and pending create/move/delete previews preserve safe rows');
 const siblingMailbox={id:'sibling',label:'Sibling',config:config('INBOX'),nodes:[node('INBOX'),node('Reports'),node('Reports/Bugs')]};
 assert.equal(relativeFolder(siblingMailbox.config,siblingMailbox.nodes,[mailboxFolderScope,'Reports','Bugs']),'Reports/Bugs');
 assert(mergedFolderTree([siblingMailbox]).some(n=>n.path===folderKey([mailboxFolderScope,'Reports'])&&n.selectable));
