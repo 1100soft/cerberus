@@ -16,6 +16,8 @@ GitCerberus is a Tauri desktop workspace for projects, GitHub identities, and lo
 
 Start with [the documentation index](docs/README.md) for current behavior. [HANDOFF.md](HANDOFF.md) records the present working tree, verification, and unresolved integration limits.
 
+Icon sources and regeneration are documented in [Application icon](desktop/docs/branding.md).
+
 ## Development
 
 Prerequisites: Node.js 20+, Rust stable, Git, and the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/). On Debian/Ubuntu, WebKitGTK and appindicator development packages are needed for the desktop build.

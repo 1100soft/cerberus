@@ -1486,3 +1486,23 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
   rollback. All commands exited zero; the settings harness still emits its known
   WebKit child-process teardown allocator diagnostic after passing assertions.
   No live mailbox mutations, commit or push were performed.
+
+
+## 2026-11-03 — approved ice-blue application icon
+
+- Adopted the contoured ice-blue Night watch design, preserving the large
+  overlapping head and the same vector at all sizes. Canonical editable source:
+  desktop/src-tauri/app-icon.svg. The original Downloads drafts are unchanged.
+- Regenerated Tauri desktop/Windows/macOS/Android/iOS icon assets and added
+  standalone 16/24/48/256/512/1024px PNGs alongside existing sizes. Explicit bundle
+  icon paths select the generated assets. iOS icons use an opaque dark background.
+- Desktop navigation/brand/favicon and the static site's logo/favicon use copies
+  of the same SVG. npm --prefix desktop run icons regenerates platform exports
+  and synchronizes these copies; see desktop/docs/branding.md.
+
+- Validation passed: icon regeneration, PNG dimensions/transparency, matching SVG
+  copies, ICO/ICNS readability, iOS RGB/no-alpha exports, production frontend
+  build/type/style/dropdown checks, locked cargo check and whitespace checks.
+  Tauri's generated iOS images had residual alpha=254; regeneration now strips
+  their alpha channel with ImageMagick 7 to meet App Store requirements. Other
+  platforms retain transparency. No commit or push was requested.

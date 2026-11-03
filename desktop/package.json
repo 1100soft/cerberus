@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "check:dropdowns": "node scripts/check-dropdowns.mjs",
-    "check:styles": "node scripts/check-styles.mjs"
+    "check:styles": "node scripts/check-styles.mjs",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
