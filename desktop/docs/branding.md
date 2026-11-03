@@ -33,3 +33,8 @@ The platform icons are generated assets and should be committed with the source.
 Do not edit them separately. A packaged app rebuild is needed to update installed
 launcher/tray icons; desktop environments may cache old icons until the app or
 session is restarted.
+
+The sidebar head renders at a fixed 280 CSS pixels, centered at 65% of the sidebar
+height. Its placement is independent of page content. The shared sidebar uses
+250px on larger windows and 192px at widths up to 1100px, with the same width and
+padding across every page at a given window size.

@@ -87,3 +87,8 @@ approval before executing. Use fixed provider commands and no privilege elevatio
   receipt folders from mailbox browsing or allow their records to be moved away.
   Keep sender field names/order/heights consistent (Email address, Identity name,
   Display name), separate from sign-in and connection fields.
+
+- Sidebar geometry belongs to the shared shell. Do not set its width, padding or
+  decoration sizing through page-specific selectors. Keep page switches stable;
+  responsive width changes may depend on the window size only. Viewport checks
+  must compare the sidebar across Projects, Identities, Agents, Automation and Email.

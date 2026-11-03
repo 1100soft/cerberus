@@ -8,8 +8,8 @@ button, input, select, option { font: inherit; color-scheme: dark; }
 button { color: inherit; }
 select { background-color: var(--surface-raised); color: var(--text-primary); }
 option, optgroup { background-color: var(--surface-raised); color: var(--text-primary); }
-.shell { display: grid; grid-template-columns: 228px 1fr; min-height: 100vh; }
-aside { position: fixed; inset: 0 auto 0 0; width: 228px; display: flex; flex-direction: column; border-right: 1px solid var(--color-29272f); background: var(--color-rgba-20-19-25-94); padding: 25px 16px; }
+.shell { display: grid; }
+aside { display: flex; flex-direction: column; border-right: 1px solid var(--color-29272f); background: var(--color-rgba-20-19-25-94); padding: 25px 16px; }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 9px 29px; }
 .brand b { display: block; font: 700 16px Manrope; letter-spacing: -.3px; }
 .brand span { color: var(--color-76727f); font-size: 10px; text-transform: uppercase; letter-spacing: .8px; }
@@ -201,14 +201,11 @@ main:has(.repository-workspace) { max-width: 1800px; }
 .commit-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: var(--color-7e758a); font-size: 10px; }
 .commit-meta code { color: var(--color-a295bd); }
 .history-more { width: 100%; font-size: 11px; }
-@media (max-width: 1200px) { .shell:has(.repository-workspace) { grid-template-columns: 185px 1fr; } .shell:has(.repository-workspace) > aside { width: 185px; } main:has(.repository-workspace) { padding: 28px 18px 75px; } .repository-workspace { gap: 12px; grid-template-columns: minmax(450px, 1fr) 240px; } }
+@media (max-width: 1200px) { main:has(.repository-workspace) { padding: 28px 18px 75px; } .repository-workspace { gap: 12px; grid-template-columns: minmax(450px, 1fr) 240px; } }
 
 /* Fit the available width at both window and application zoom levels. */
 body { min-width: 0; }
-.shell { grid-template-columns: 185px minmax(0, 1fr); }
-.shell > aside { width: 185px; }
 main { min-width: 0; container-type: inline-size; }
-.shell:has(.repository-workspace) { grid-template-columns: 185px minmax(0, 1fr); }
 .repository-workspace { grid-template-columns: minmax(500px, 1fr) minmax(300px, 360px); }
 .repository-workspace .repo-grid { min-width: 0; padding-bottom: 75px; }
 .repository-workspace .repo-row { min-width: 0; height: auto; min-height: 42px; padding-block: 8px; }
@@ -364,8 +361,6 @@ main:has(.repository-workspace) .summary { font-size: 11px; }
 
 /* Layout contract: window edges own size; pane content owns scrolling. */
 body { min-width: 0; }
-.shell:has(.repository-workspace) { grid-template-columns: clamp(120px, 15vw, 185px) minmax(0, 1fr); }
-.shell:has(.repository-workspace) > aside { position: relative; width: auto; min-width: 0; min-height: 0; overflow: auto; padding: 14px 8px; }
 main:has(.repository-workspace) { min-width: 0; min-height: 0; padding: 8px 10px; grid-template-rows: auto auto minmax(min(120px, 25%), var(--pane-top, 50fr)) 8px minmax(min(150px, 35%), var(--pane-bottom, 50fr)); }
 .repository-workspace { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 10px; }
 .repository-workspace .repo-grid { container-type: inline-size; container-name: repositories; }
@@ -472,7 +467,6 @@ main:has(.repository-workspace) .summary { flex-wrap: wrap; gap: 6px 16px; max-h
 .toolbar-popover .owner-checks label { display: flex; white-space: normal; overflow-wrap: anywhere; font-size: 12px; padding: 6px 4px 6px 16px; gap: 7px; }
 .toolbar-popover .owner-checks .owner-select-all { padding-left: 4px; border-bottom: 1px solid var(--color-423b4e); margin-bottom: 3px; }
 .owner-checks input { flex: none; }
-.shell:has(.repository-workspace) > aside { overflow-x: hidden; }
 aside nav button { gap: 7px; padding-inline: 6px; min-width: 0; }
 aside nav button > svg { flex: none; width: 18px; }
 aside nav button .nav-label { min-width: 0; margin: 0; font-size: 12px; overflow-wrap: anywhere; text-align: left; }
@@ -495,8 +489,6 @@ aside .watch-state { overflow-wrap: anywhere; }
 aside nav button .nav-label { padding: 0; background: var(--color-transparent); border-radius: 0; }
 .agents-panel > header, .agent-run > header { display: block; }
 .agents-panel > header p, .agents-panel .agent-page-status { text-transform: none; letter-spacing: 0; font-size: 13px; line-height: 1.5; max-width: 72ch; }
-.shell:has(.agents-panel:not([hidden])) { position: fixed; inset: 0; min-height: 0; grid-template-columns: clamp(120px, 15vw, 185px) minmax(0, 1fr); overflow: hidden; }
-.shell:has(.agents-panel:not([hidden])) > aside { position: relative; width: auto; min-width: 0; min-height: 0; overflow: auto; padding: 14px 8px; }
 .shell:has(.agents-panel:not([hidden])) > main { min-width: 0; min-height: 0; height: 100%; overflow: auto; padding: 20px; margin: 0; }
 .agents-panel button { border: 1px solid var(--color-514460); border-radius: 6px; background: var(--color-282131); padding: 7px 10px; cursor: pointer; }
 .agents-panel button:disabled { opacity: .5; cursor: default; }
@@ -551,11 +543,11 @@ aside nav button .nav-label { padding: 0; background: var(--color-transparent); 
 .agent-composer { border-top: 1px solid var(--color-62506e); padding-top: 12px; }
 
 /* Navigation occupies its own grid column and stays open across pages. */
-.shell, .shell:has(.repository-workspace), .shell:has(.agents-panel:not([hidden])) { position: fixed; inset: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
-.shell.sidebar-open, .shell.sidebar-open:has(.repository-workspace), .shell.sidebar-open:has(.agents-panel:not([hidden])) { grid-template-columns: minmax(0, 250px) minmax(0, 1fr); }
+.shell { --sidebar-width: 250px; position: fixed; inset: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+.shell.sidebar-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
 .shell > main { grid-column: 1; min-width: 0; min-height: 0; max-width: none; }
 .shell.sidebar-open > main { grid-column: 2; }
-.shell > aside, .shell:has(.repository-workspace) > aside, .shell:has(.agents-panel:not([hidden])) > aside { position: relative; grid-column: 1; grid-row: 1; min-width: 0; padding: 54px 16px 16px; overflow: auto; background: var(--color-1d1925); }
+.shell > aside { position: relative; grid-column: 1; grid-row: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 54px 16px 16px; overflow: auto; overflow-x: hidden; background: var(--color-1d1925); }
 .shell > aside[hidden] { display: none; }
 .app-menu-toggle { position: absolute; z-index: 82; top: 16px; left: 16px; width: 32px; height: 32px; display: grid; place-items: center; padding: 5px; border: 1px solid var(--color-807098); border-radius: 8px; background: var(--color-423653); color: var(--color-ede4ff); cursor: pointer; }
 .app-menu-toggle svg { display: block; width: 22px; height: 22px; }
@@ -821,7 +813,7 @@ input[type="number"] { text-align: right; }
 .identity-sign-in-trigger svg:last-child { width: 11px; height: 11px; }
 .shell.sidebar-open .app-menu-toggle { left: 16px; }
 .shell.sidebar-open > aside { border-right: 1px solid var(--color-34303e); }
-@media (max-width: 1100px) { .shell.sidebar-open, .shell.sidebar-open:has(.repository-workspace), .shell.sidebar-open:has(.agents-panel:not([hidden])) { grid-template-columns: minmax(0, 192px) minmax(0, 1fr); } .shell.sidebar-open > aside { padding-inline: 8px; } }
+@media (max-width: 1100px) { .shell { --sidebar-width: 192px; } .shell > aside { padding-inline: 8px; } }
 .copilot-limits { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .repository-accounts { margin-top: 8px; padding: 9px; border: 1px solid var(--color-393541); border-radius: 7px; background: var(--color-201e29); }
@@ -1341,4 +1333,4 @@ input[type="number"] { text-align: right; }
 
 /* Decorative head stays behind navigation and never captures pointer events. */
 .shell > aside {isolation:isolate}
-.shell > aside::before {content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:url('/cerberus-head.svg') center 65% / calc(100% + 56px) auto no-repeat;opacity:.16}
+.shell > aside::before {content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:url('/cerberus-head.svg') center 65% / 280px auto no-repeat;opacity:.16}

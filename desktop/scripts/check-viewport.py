@@ -37,6 +37,26 @@ script = """JSON.stringify([false, true].flatMap(open => [0.75, 1, 1.4, 1.5].map
    bottomGap: innerHeight - ai.bottom,
    expectedGap: parseFloat(getComputedStyle(main).paddingBottom) * zoom};
 })))"""
+# Also exercise page switches: page selectors must not alter the shared sidebar.
+script = script.replace("JSON.stringify(", "const viewportChecks = ", 1).rstrip()[:-1] + ";" + """
+const sidebarChecks = [];
+const main = document.querySelector('main'), original = main.innerHTML;
+for (const zoom of [0.75, 1, 1.4, 1.5]) {
+ document.documentElement.style.setProperty('--ui-zoom', zoom);
+ document.querySelector('.shell').classList.add('sidebar-open');
+ document.querySelector('aside').hidden = false;
+ for (const page of ['repository-workspace','identities-page','agents-panel','automation-page','feedback-page']) {
+  main.innerHTML = `<section class="${page}">Page content</section>`;
+  const aside = document.querySelector('aside'), rect = aside.getBoundingClientRect();
+  const style = getComputedStyle(aside), head = getComputedStyle(aside, '::before');
+  sidebarChecks.push({zoom,page,width:rect.width,height:rect.height,left:rect.left,top:rect.top,
+   padding:style.padding,headSize:head.backgroundSize,headPosition:head.backgroundPosition,
+   headWidth:head.width,headHeight:head.height,mainLeft:main.getBoundingClientRect().left,right:rect.right});
+ }
+}
+main.innerHTML = original;
+JSON.stringify({viewportChecks,sidebarChecks});
+"""
 window = Gtk.OffscreenWindow()
 view = WebKit2.WebView()
 view.set_size_request(int(sys.argv[1]), int(sys.argv[2]))
@@ -47,7 +67,14 @@ exit_code = 1
 def finished(webview, result):
     global exit_code
     try:
-        rows = json.loads(webview.evaluate_javascript_finish(result).to_string())
+        checks = json.loads(webview.evaluate_javascript_finish(result).to_string())
+        rows = checks["viewportChecks"]
+        reference = {}
+        for sidebar in checks["sidebarChecks"]:
+            expected = reference.setdefault(sidebar["zoom"], sidebar)
+            for field in ["width", "height", "left", "top", "padding", "headSize", "headPosition", "headWidth", "headHeight"]:
+                assert sidebar[field] == expected[field], (field, expected, sidebar)
+            assert abs(sidebar["right"] - sidebar["mainLeft"]) < 2, sidebar
         for row in rows:
             for pane in row["panes"]:
                 assert pane["left"] >= 0 and pane["right"] <= row["width"] + 2, (row["zoom"], pane)

@@ -1520,3 +1520,17 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
 - Validation passed: production build/type/style/dropdown checks, icon-generator
   syntax and whitespace checks, plus WebKit viewport matrix at 900×620,
   1100×700, 1720×1080 and 2200×700 with 75/100/140/150% zoom, sidebar open/closed.
+
+
+## 2026-11-04 — consistent sidebar across pages
+
+- Removed conflicting historical sidebar widths and page-specific overrides.
+  Projects/Agents used auto width while other pages retained 185px inside the
+  shared 192/250px column. All pages now fill the same shared sidebar column,
+  with identical height/padding; responsive widths depend only on window size.
+- Fixed the head background at 280 CSS pixels and the same center/65% placement,
+  instead of sizing it from the page-dependent sidebar width.
+- Extended the WebKit viewport regression to switch through all five page types
+  and compare sidebar bounds, padding, watermark geometry and the main boundary.
+  Matrix passed at 900×620, 1100×700, 1720×1080 and 2200×700 with 75/100/140/150%
+  zoom, alongside existing pane bounds/filling checks.
