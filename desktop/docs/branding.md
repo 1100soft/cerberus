@@ -20,8 +20,10 @@ The Tauri CLI regenerates:
 - `desktop/src-tauri/icons/`: standalone PNGs at 16, 24, 32, 48, 64, 128, 256,
   512 and 1024 pixels, plus the default `icon.png` and `128x128@2x.png`.
 - Windows ICO and Store assets, macOS ICNS, and Android/iOS assets in their
-  existing platform directories. iOS assets use an opaque `#17141F` background. ImageMagick removes their
-  alpha channel to meet App Store requirements.
+  existing platform directories. Android uses a `#17141F` launcher background.
+  iOS assets use the same opaque background; ImageMagick removes their alpha
+  channel to meet App Store requirements and strips timestamp metadata so the
+  exports remain reproducible.
 - `desktop/public/app-icon.svg`: browser favicon. The native window/launcher
   keeps the full app icon; the sidebar uses a menu glyph and a subdued decorative
   head instead of repeated app badges.

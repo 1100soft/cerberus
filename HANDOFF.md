@@ -1534,3 +1534,27 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
   and compare sidebar bounds, padding, watermark geometry and the main boundary.
   Matrix passed at 900×620, 1100×700, 1720×1080 and 2200×700 with 75/100/140/150%
   zoom, alongside existing pane bounds/filling checks.
+
+
+## 2026-11-04 — checkpoint review
+
+- Accounted for all pending email organization/sender-name work, branding sources
+  and generated platform assets, sidebar changes, tests and documentation. No
+  unrelated files or real credentials found; pre-existing dummy private-key PEM
+  strings are certificate-rejection test cases. No temporary build/log artifacts
+  are included. Updated stale folder-order documentation to match the implementation.
+- Checkpoint validation found remote font loading could race the organization
+  fixture's menu-position measurements; that fixture now uses a stable local
+  font. Folder labels also use single-line ellipsis with the full path retained
+  in their tooltip, avoiding tall rows at narrow widths. Repeated organization
+  runs pass after these changes.
+- Passed: production build (TypeScript, dropdown/style checks), Rust format check,
+  full locked native suite (186 unit + 3 integration, 5 intentionally ignored),
+  folder/provider logic, email and organization WebKit fixtures, handoffs, saved
+  prompts, card reorder, and the four-window/sidebar/page/zoom viewport matrix.
+  Organization was also checked at 1720×700. All final commands exited zero;
+  some WebKit child processes still print their known allocator teardown messages
+  after passing assertions. Verified generated PNG sizes/transparency, RGB iOS
+  output, ICO/ICNS readability and synchronized SVG copies. Icon generation strips
+  timestamp metadata for reproducible iOS files. No live mailbox mutations or
+  push were performed.

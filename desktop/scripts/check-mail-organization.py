@@ -84,6 +84,8 @@ manager.add_script(WebKit2.UserScript.new("let fixtureClipboard='';Object.define
 # Apply the real stylesheet without waiting for external Google font imports.
 fixture_root=Path(__file__).resolve().parents[1]/"src"
 fixture_css=(fixture_root/"palette.css").read_text()+re.sub(r"""@import\s+(?:url\([^)]*\)|"[^"]*"|'[^']*')\s*;""", "", (fixture_root/"styles.css").read_text())
+# Keep late remote font swaps from masquerading as context-menu layout changes.
+fixture_css += "\n* { font-family: 'DejaVu Sans', sans-serif !important; }"
 script="const fixtureStyle=document.createElement('style');fixtureStyle.textContent="+json.dumps(fixture_css)+";document.head.append(fixtureStyle);\n"+script
 view=WebKit2.WebView(web_context=WebKit2.WebContext.new_ephemeral(),user_content_manager=manager)
 view.set_size_request(*(map(int,sys.argv[1:3]) if len(sys.argv)>2 else (900,620)))

@@ -91,11 +91,12 @@ Folder hierarchy separators are server-defined and read from IMAP LIST. Settings
 show the discovered tree before saving, including nonselectable parent containers.
 Choose a purpose, then its destination in the tree; no mailbox path entry is
 required. The Email page opens at Inbox and covers the entire mailbox. Its tree browses the
-mailbox folders and shows each folder’s total and unread count. Siblings follow
-the server’s returned order; Cerberus does not alphabetize them. The configured
+mailbox folders and shows each folder’s total and unread count. Standard folders use a consistent functional order, with a shared remembered
+order for custom names. Explicit drag ordering overrides sibling order locally
+per project; Cerberus does not alphabetize folders. The configured
 email address appears in the page header. Nonselectable
 namespace parents remain expandable; automation receipt folders are visible and marked with their purpose. Folder creation
-is available in mailbox settings and automation trigger setup. Proton custom folders use full
+is available on the Email page, in mailbox settings and in automation trigger setup. Proton custom folders use full
 names such as `Folders/Reports`, while labels use `Labels/Reports`. Existing short
 Proton names are matched only against a confirmed server folder; exact names are
 preserved. A missing name remains unassigned until you select or create a folder.

@@ -1327,7 +1327,7 @@ input[type="number"] { text-align: right; }
 
 .mail-action-menu kbd {margin-inline-start:auto;font-size:10px;color:var(--text-secondary)}
 
-.mail-folder-name>span {min-width:0;flex:1 1 auto}
+.mail-folder-name>span {min-width:0;flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mail-folder-name>svg {flex-shrink:0}
 .mail-folder-purpose {min-width:0;flex:0 1 auto}
 

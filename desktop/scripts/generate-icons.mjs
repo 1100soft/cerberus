@@ -18,7 +18,7 @@ generate(['--ios-color', '#17141f']);
 // Tauri's compositing can leave alpha=254 at antialiased edges. App Store icons
 // must have no alpha channel, even when that difference is visually imperceptible.
 const ios = resolve(output, 'ios');
-const opaque = spawnSync('magick', ['mogrify', '-alpha', 'off', '-define', 'png:color-type=2',
+const opaque = spawnSync('magick', ['mogrify', '-alpha', 'off', '-strip', '-define', 'png:color-type=2',
   ...readdirSync(ios).filter(name => name.endsWith('.png')).map(name => resolve(ios, name))], {stdio: 'inherit'});
 if (opaque.error) throw new Error('Icon generation requires ImageMagick 7 (magick).', {cause: opaque.error});
 if (opaque.status !== 0) process.exit(opaque.status ?? 1);
