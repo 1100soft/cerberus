@@ -1506,3 +1506,17 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
   Tauri's generated iOS images had residual alpha=254; regeneration now strips
   their alpha channel with ImageMagick 7 to meet App Store requirements. Other
   platforms retain transparency. No commit or push was requested.
+
+
+## 2026-11-04 — sidebar branding
+
+- Replaced the repeated app-logo toggle with a three-bar menu icon and contextual
+  Open/Close navigation tooltip. Removed the sidebar brand badge; retained name
+  and tagline. Full app identity remains in native window/launcher and favicon.
+- Added a large monochrome head watermark at 16% opacity behind sidebar content,
+  isolated from layout and pointer events. It uses a transparent eye cutout and
+  is regenerated from the approved SVG's head/eye paths by npm run icons.
+
+- Validation passed: production build/type/style/dropdown checks, icon-generator
+  syntax and whitespace checks, plus WebKit viewport matrix at 900×620,
+  1100×700, 1720×1080 and 2200×700 with 75/100/140/150% zoom, sidebar open/closed.

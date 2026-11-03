@@ -1,4 +1,4 @@
-import {copyFileSync, mkdirSync, readdirSync} from 'node:fs';
+import {copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {dirname, resolve} from 'node:path';
@@ -27,3 +27,10 @@ generate([16, 24, 48, 256, 512, 1024].flatMap(size => ['--png', String(size)]));
 mkdirSync(resolve(desktop, 'public'), {recursive: true});
 copyFileSync(source, resolve(desktop, 'public/app-icon.svg'));
 copyFileSync(source, resolve(desktop, '../website/assets/logo.svg'));
+
+// The source ends with the foreground head and eye. Use their compound silhouette
+// as a monochrome decoration, keeping it synchronized without another app badge.
+const paths = [...readFileSync(source, 'utf8').matchAll(/<path\b[^>]*\/>/g)].slice(-2);
+const silhouette = paths.map(([path]) => path.match(/\bd="([^"]+)"/)[1]).join(' ');
+writeFileSync(resolve(desktop, 'public/cerberus-head.svg'),
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="#B7A7FF" fill-rule="evenodd" d="${silhouette}"/></svg>\n`);

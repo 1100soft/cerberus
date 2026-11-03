@@ -11,8 +11,6 @@ option, optgroup { background-color: var(--surface-raised); color: var(--text-pr
 .shell { display: grid; grid-template-columns: 228px 1fr; min-height: 100vh; }
 aside { position: fixed; inset: 0 auto 0 0; width: 228px; display: flex; flex-direction: column; border-right: 1px solid var(--color-29272f); background: var(--color-rgba-20-19-25-94); padding: 25px 16px; }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 9px 29px; }
-.brand-mark { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; }
-.brand-mark img { display: block; width: 36px; height: 36px; }
 .brand b { display: block; font: 700 16px Manrope; letter-spacing: -.3px; }
 .brand span { color: var(--color-76727f); font-size: 10px; text-transform: uppercase; letter-spacing: .8px; }
 nav { display: grid; gap: 5px; }
@@ -480,7 +478,6 @@ aside nav button > svg { flex: none; width: 18px; }
 aside nav button .nav-label { min-width: 0; margin: 0; font-size: 12px; overflow-wrap: anywhere; text-align: left; }
 aside nav button .nav-count { flex: none; margin-left: auto; }
 aside .brand { padding-inline: 0; gap: 6px; min-width: 0; }
-aside .brand-mark { flex: none; width: 25px; height: 30px; }
 aside .brand > div:last-child { min-width: 0; overflow-wrap: anywhere; }
 aside .brand b { font-size: 13px; }
 aside .brand span { font-size: 10px; }
@@ -561,7 +558,7 @@ aside nav button .nav-label { padding: 0; background: var(--color-transparent); 
 .shell > aside, .shell:has(.repository-workspace) > aside, .shell:has(.agents-panel:not([hidden])) > aside { position: relative; grid-column: 1; grid-row: 1; min-width: 0; padding: 54px 16px 16px; overflow: auto; background: var(--color-1d1925); }
 .shell > aside[hidden] { display: none; }
 .app-menu-toggle { position: absolute; z-index: 82; top: 16px; left: 16px; width: 32px; height: 32px; display: grid; place-items: center; padding: 5px; border: 1px solid var(--color-807098); border-radius: 8px; background: var(--color-423653); color: var(--color-ede4ff); cursor: pointer; }
-.app-menu-toggle img { display: block; width: 22px; height: 22px; }
+.app-menu-toggle svg { display: block; width: 22px; height: 22px; }
 .sidebar-backdrop { position: absolute; inset: 54px 0 0; z-index: 80; border: 0; background: var(--color-0007); }
 main:has(.repository-workspace) .toolbar { padding-left: 44px; min-height: 34px; }
 .shell:has(.agents-panel:not([hidden])) > main { padding-top: 60px; }
@@ -1341,3 +1338,7 @@ input[type="number"] { text-align: right; }
 .mail-folder-name>span {min-width:0;flex:1 1 auto}
 .mail-folder-name>svg {flex-shrink:0}
 .mail-folder-purpose {min-width:0;flex:0 1 auto}
+
+/* Decorative head stays behind navigation and never captures pointer events. */
+.shell > aside {isolation:isolate}
+.shell > aside::before {content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:url('/cerberus-head.svg') center 65% / calc(100% + 56px) auto no-repeat;opacity:.16}

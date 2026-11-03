@@ -8,7 +8,7 @@ import { useWorkspaceFocus } from './lib/workspaceFocus';
 import { matchesShortcut, shortcuts } from './lib/shortcuts';
 import { ProviderSetup, type Provider } from "./components/ProviderSetup";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownWideNarrow, Bell, Clock3, FolderGit2, Mail, ListFilter, Plus, Search, Settings, ShieldCheck } from "lucide-react";
+import { ArrowDownWideNarrow, Bell, Clock3, FolderGit2, Mail, ListFilter, Menu, Plus, Search, Settings, ShieldCheck } from "lucide-react";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { SavedPromptsPanel } from "./components/SavedPromptsPanel";
 import { Select } from "./components/Select";
@@ -431,9 +431,9 @@ export function App() {
 
   return <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
     <NotificationCenter repositories={repositories}/>
-    <button className="app-menu-toggle" aria-label="Toggle navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)} title="GitCerberus navigation"><img src="/app-icon.svg" alt="" /></button>
+    <button className="app-menu-toggle" aria-label="Toggle navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)} title={sidebarOpen ? "Close navigation" : "Open navigation"}><Menu /></button>
     <aside hidden={!sidebarOpen}>
-      <div className="brand"><div className="brand-mark"><img src="/app-icon.svg" alt="" /></div><div><b>GitCerberus</b><span>Project guardian</span></div></div>
+      <div className="brand"><div><b>GitCerberus</b><span>Project guardian</span></div></div>
       <nav>
         <button className={!showFeedback && !showIdentities && !showAgents && !showAutomation ? "active" : ""} onClick={() => { setShowFeedback(false); setShowIdentities(false); setShowAgents(false); setShowAutomation(false); setIdentityPrompt(undefined); }}><FolderGit2 /><span className="nav-label">Projects</span><span className="nav-count">{repositories.length}</span></button>
         <button className={showIdentities ? "active" : ""} onClick={() => { setShowFeedback(false); setShowAgents(false); setShowAutomation(false); setShowIdentities(true); }}><ShieldCheck /><span className="nav-label">Identities</span><span className="nav-count">{identities.length}</span></button>

@@ -22,7 +22,11 @@ The Tauri CLI regenerates:
 - Windows ICO and Store assets, macOS ICNS, and Android/iOS assets in their
   existing platform directories. iOS assets use an opaque `#17141F` background. ImageMagick removes their
   alpha channel to meet App Store requirements.
-- `desktop/public/app-icon.svg`: desktop UI logo and browser favicon.
+- `desktop/public/app-icon.svg`: browser favicon. The native window/launcher
+  keeps the full app icon; the sidebar uses a menu glyph and a subdued decorative
+  head instead of repeated app badges.
+- `desktop/public/cerberus-head.svg`: monochrome head silhouette derived from the
+  source head/eye paths for the sidebar background.
 - `website/assets/logo.svg`: website logo and favicon.
 
 The platform icons are generated assets and should be committed with the source.
