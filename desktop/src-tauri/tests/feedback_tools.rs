@@ -74,7 +74,7 @@ fn request(modern: bool, read_only: bool, action: &str) -> std::process::Output 
 }
 #[test]
 fn analyze_tools_refuse_writes_for_public_and_legacy_names() {
-    for action in ["draft", "flag"] {
+    for action in ["draft", "flag", "moveAll"] {
         for modern in [true, false] {
             let output = request(modern, true, action);
             assert!(!output.status.success());

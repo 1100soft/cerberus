@@ -91,11 +91,12 @@ Folder hierarchy separators are server-defined and read from IMAP LIST. Settings
 show the discovered tree before saving, including nonselectable parent containers.
 Choose a purpose, then its destination in the tree; no mailbox path entry is
 required. The Email page opens at Inbox and covers the entire mailbox. Its tree browses the
-mailbox folders and shows each folder’s total and unread count. Siblings follow
-the server’s returned order; Cerberus does not alphabetize them. The configured
+mailbox folders and shows each folder’s total and unread count. Standard folders use a consistent functional order, with a shared remembered
+order for custom names. Explicit drag ordering overrides sibling order locally
+per project; Cerberus does not alphabetize folders. The configured
 email address appears in the page header. Nonselectable
-namespace parents remain expandable; internal automation receipt folders are hidden. Folder creation
-is available in mailbox settings and automation trigger setup. Proton custom folders use full
+namespace parents remain expandable; automation receipt folders are visible and marked with their purpose. Folder creation
+is available on the Email page, in mailbox settings and in automation trigger setup. Proton custom folders use full
 names such as `Folders/Reports`, while labels use `Labels/Reports`. Existing short
 Proton names are matched only against a confirmed server folder; exact names are
 preserved. A missing name remains unassigned until you select or create a folder.
@@ -371,3 +372,97 @@ Bridge does not expose address-editing operations, and Purelymail's public API
 manages routing rather than webmail sender identities. These and other providers
 keep manual identity configuration; there is no promise of two-way synchronization
 where the provider cannot support it.
+
+
+### Organizing mail across projects
+
+On the Email page, drag an email onto a folder to move it within the current
+project. Drag a folder onto another folder (or the Mailbox strip for top level)
+to move its entire subtree. Cross-project drags, collisions, and moves into the
+folder's own descendants are rejected. Folder moves use IMAP RENAME; email moves
+require UID MOVE, without a copy/delete fallback.
+
+Right-click an email for read/unread, star, Move, Archive (when available) or
+Trash. Shift+F10 opens the same menu; Delete moves an email to Trash. Folder menus
+provide New folder, Rename (F2), Move and Delete. Ctrl/Cmd+Shift+N creates a child
+of the focused folder. Creating and deleting folders opens a project scope choice:
+this project, every configured project, or checked projects. Paths translate each
+server's hierarchy delimiter. Unconfigured projects are not mutation targets.
+
+Deletion never removes email silently. If a selected folder contains messages,
+Cerberus switches to that project and folder and pauses deletion. Move emails
+opens a destination tree and explicitly moves all emails currently in that folder;
+Keep folder leaves it alone and continues with the remaining projects. Retry
+deletion checks the contents again after manual organization. The native backend
+rechecks emptiness before DELETE. INBOX, assigned folders and folders with children
+are protected; delete children first. Nothing is permanently purged by these actions.
+
+The header's outward/inward copy icons copy the current tree to other projects or
+copy another project's tree into the current project. They create missing folders;
+existing mail, identities, account credentials and assigned folder purposes stay
+unchanged. Each destination is applied in one authenticated folder batch. Partial
+failures are reported per project and successful changes remain undoable.
+
+Undo/Redo buttons and Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z (or Ctrl+Y) cover this page's folder
+creation, deletion, rename, move, ordering and copy actions while the Email page stays open, including
+successful parts of multi-project operations. Email moves are not part of folder
+undo. Undo refuses to delete folders that have subsequently received mail. Text
+fields retain their own editing shortcuts. Existing automation rules and saved
+message references keep their old folder paths after rename/move; update those
+rules explicitly if their watched folder changed.
+
+
+### Shared automation sender identities
+
+Give the default sender or any additional address an **Identity name**
+in Email settings. Suggestions include names defined in other projects. For
+example, assign **Support** to `support@projectA.com` in project A and
+`support@projectB.com` in project B. The automation can use the same name in both
+projects; the email tool resolves it against the project running the action.
+Names are case-insensitive, unique within a project, and limited to 64 characters
+without `@` or control characters. A missing name fails instead of choosing
+another sender. An unnamed identity remains usable by its address or provider ID.
+
+Identity names are local mappings, separate from the display name
+shown to recipients. Provider identity synchronization preserves these mappings;
+editing a local name does not rename the provider identity. Suggestions reuse the
+name, never another project's address or credentials. The reply composer's From
+menu shows the identity name alongside its current project address.
+
+Agent prompt example: “Read the incoming email and save a reply draft using the
+Support sender identity.” Agents can pass `"sender":"Support"` to draft or send.
+`CERBERUS_EMAIL_SENDERS` lists each configured `identityName`, `address`, display
+`name` and optional provider ID, including the default sender. Sending permission
+and confirmation/idempotency rules remain unchanged.
+
+Bash example for an email-triggered script:
+
+```bash
+printf '{"action":"draft","sender":"Support","message":%s,"text":"Thanks. We are reviewing your report."}\n' \
+  "$CERBERUS_EMAIL_MESSAGE" | "$CERBERUS_EMAIL_TOOL" --cerberus-email
+```
+
+For Proton Bridge, a new top-level custom folder is created inside the server's
+`Folders` namespace. Newly created folders are selected and their ancestors
+expanded, so they are visible even when the parent was collapsed.
+
+
+Folder menus float above the tree without changing its layout. Drop a folder on
+another folder to change its parent, or on the line between rows to place it
+beside a sibling. Explicit sibling order is stored locally per project (IMAP does
+not synchronize folder order); untouched folders retain the functional ordering.
+Folder mutations show provisional dimmed rows with spinners while the server
+works. Server results replace the preview, and failures restore the confirmed
+state. Tree expansion and browsing remain available. Folder batches reuse their
+returned structure instead of waiting for another discovery before rendering.
+
+An existing folder is selected rather than created again. In particular, a
+folder assigned to Automation receipts is shown in the Email tree; it is not a
+missing folder. Its assignment still protects it from folder deletion/movement
+and from moving receipt emails. To use it for regular mail, assign a different
+Automation receipts folder in Email settings first.
+
+Email settings group provider, sign-in, connection, sender identities and folder
+purposes. Every sender row uses Email address, Identity name and Display name in
+the same order. Identity names such as Support are shared vocabulary for agents;
+display names are the names recipients see.

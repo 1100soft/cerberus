@@ -66,7 +66,7 @@ history.reset();const assigned={...sourceConfig,inbox:'Other'};history.record('A
 history.record('Different edit',{nodes:[],changes:[],processed:0},sourceConfig,assigned);assert.equal(history.redo.length,0);
 const rememberedOrder=new Map();globalThis.localStorage={getItem:key=>rememberedOrder.get(key)||null,setItem:(key,value)=>rememberedOrder.set(key,value)};
 const treeSource=await readFile(new URL('../src/lib/mailFolderTree.ts',import.meta.url),'utf8');const treeCompiled=ts.transpileModule(treeSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const {indexMailFolders}=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled).toString('base64')}`);
+const {indexMailFolders,positionMailFolder}=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled).toString('base64')}`);
 const large=indexMailFolders(Array.from({length:2000},(_,i)=>node(`Root/Group${i}/Leaf`)));assert.equal(large.rows.size,4001);assert.equal(large.children.size,2001);assert.equal(large.ordered.length,4001);
 assert.deepEqual(indexMailFolders([node('A/Z'),node('A-Other'),node('A/B')]).ordered.map(n=>n.path),['A','A/Z','A/B','A-Other']);
 console.log('Batched folder plans, delimiter mapping, retry deduplication, partial undo/redo, assignment history and large tree indexing passed');
@@ -76,6 +76,17 @@ assert.deepEqual(indexMailFolders([node('Z/First'),node('A'),node('Z/Second')]).
 assert.deepEqual(indexMailFolders(['Trash','Archive','Inbox','Drafts','Sent','Custom'].map(path=>node(path))).ordered.map(n=>n.path),['Inbox','Drafts','Sent','Archive','Custom','Trash']);
 const reloadedTree=await import(`data:text/javascript;base64,${Buffer.from(treeCompiled+'\n// reload persisted order').toString('base64')}`);
 assert.deepEqual(reloadedTree.indexMailFolders([node('Z/First'),node('A'),node('Z/Second')]).ordered.map(n=>n.path),['A','Z','Z/Second','Z/First']);
+const positionNodes=[node('Parent/One'),node('Parent/Two'),node('Parent/Three')];
+positionMailFolder('project-one',positionNodes,'Parent/Three','Parent/One',false);
+assert.deepEqual(indexMailFolders([...positionNodes].reverse(),'project-one').ordered.map(n=>n.path),['Parent','Parent/Three','Parent/One','Parent/Two']);
+assert.deepEqual(indexMailFolders(positionNodes,'project-two').ordered.map(n=>n.path),['Parent','Parent/One','Parent/Two','Parent/Three']);
+assert.deepEqual(reloadedTree.indexMailFolders(positionNodes,'project-one').ordered.map(n=>n.path),['Parent','Parent/Three','Parent/One','Parent/Two']);
+const previewSource=await readFile(new URL('../src/lib/mailFolderPreview.ts',import.meta.url),'utf8'),previewCompiled=ts.transpileModule(previewSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {previewMailFolders}=await import(`data:text/javascript;base64,${Buffer.from(previewCompiled).toString('base64')}`);
+assert.deepEqual(previewMailFolders([node('Parent')],[{operation:'create',parent:'Parent',name:'New'}]).pending,['Parent/New']);
+assert.deepEqual(previewMailFolders([node('Parent'),node('Parent/Child')],[{operation:'move',parent:'Parent',name:'Dest'}]).nodes.map(n=>n.path),['Dest/Parent','Dest/Parent/Child']);
+assert.deepEqual(previewMailFolders([node('Parent')],[{operation:'delete',parent:'Parent'}]).nodes.map(n=>n.path),['Parent']);
+console.log('Project-scoped explicit folder placement survives refresh, and pending create/move/delete previews preserve safe rows');
 const siblingMailbox={id:'sibling',label:'Sibling',config:config('INBOX'),nodes:[node('INBOX'),node('Reports'),node('Reports/Bugs')]};
 assert.equal(relativeFolder(siblingMailbox.config,siblingMailbox.nodes,[mailboxFolderScope,'Reports','Bugs']),'Reports/Bugs');
 assert(mergedFolderTree([siblingMailbox]).some(n=>n.path===folderKey([mailboxFolderScope,'Reports'])&&n.selectable));
@@ -121,3 +132,36 @@ assert.equal(providerLinks.mailboxWebmail({...settings,provider:'custom',webmail
 for(const webmailUrl of ['javascript:alert(1)','http://example.org/','https://user:secret@example.org/']){assert(providerLinks.webmailUrlProblem(webmailUrl));assert.equal(providerLinks.mailboxWebmail({...settings,webmailUrl}),'');}
 assert.equal(providerLinks.selectMailProvider({...settings,webmailUrl:'https://old.example.org/'},'proton').webmailUrl,'');
 console.log('Provider webmail destinations, custom overrides, unsafe URL rejection and provider-switch reset passed');
+
+const dragSource=await readFile(new URL('../src/lib/mailDrag.ts',import.meta.url),'utf8');
+const drag=await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(dragSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`);
+const dragNodes=['Old','Old/Child','Target','Target/Occupied'].map(p=>node(p));
+assert.equal(drag.folderMoveTarget(dragNodes,'Old','Target'),'Target/Old');
+for(const parent of ['Old','Old/Child','Missing'])assert.equal(drag.folderMoveTarget(dragNodes,'Old',parent),null);
+assert.equal(drag.folderMoveTarget(dragNodes,'INBOX','Target'),null);
+assert.equal(drag.folderMoveTarget([...dragNodes,node('Target/Old')],'Old','Target'),null);
+const fakeData=(projectId,message)=>({types:[drag.mailDragType],getData:()=>JSON.stringify({projectId,message})});
+const reference={folder:'INBOX',validity:7,uid:2,messageId:'fixture'};
+assert.deepEqual(drag.readMailDrop(fakeData('one',reference),'one'),{message:reference});
+assert.equal(drag.readMailDrop(fakeData('other',reference),'one'),null);
+assert.equal(drag.readMailDrop(fakeData('one',{...reference,uid:0}),'one'),null);
+const operationSource=await readFile(new URL('../src/lib/mailFolderOperations.ts',import.meta.url),'utf8');
+const operations=await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(operationSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`);
+assert.deepEqual(operations.planProjectFolderCreate(['Shared','Reports'],[node('INBOX','.')]),[{operation:'create',parent:'',name:'Shared'},{operation:'create',parent:'Shared',name:'Reports'}]);
+assert.equal(operations.projectFolderPath(['Shared','Reports'],[node('Shared','.'),node('Shared.Reports','.')]),'Shared.Reports');
+assert.throws(()=>operations.planProjectFolderCreate(['Flat','Child'],[node('Flat',null)]));
+assert.throws(()=>operations.planProjectFolderCreate(['a/b'],[node('INBOX')]));
+console.log('Folder drag cycles/collisions, project-scoped mail references, cross-delimiter creation and flat namespace protections passed');
+
+assert(operations.sameMailAccount(settings,{...settings,notes:'Other notes'}));
+assert(!operations.sameMailAccount(settings,{...settings,username:'different'}));
+assert(!operations.sameMailAccount(settings,{...settings,imapPort:12345}));
+
+assert.deepEqual(operations.planProjectFolderCreate(['New'],[node('Folders','/',false),node('INBOX')],{provider:'proton'}),[{operation:'create',parent:'Folders',name:'New'}]);
+const namesSource=await readFile(new URL('../src/lib/senderIdentityNames.ts',import.meta.url),'utf8');
+const senderNames=await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(namesSource,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`);
+assert.deepEqual(senderNames.senderIdentityNames([{senderIdentityName:'General',senderIdentities:[{identityName:'Support'}]},{senderIdentities:[{identityName:'support'},{identityName:'Billing'}]}]),['Billing','General','Support']);
+assert(senderNames.identityNameProblem({senderIdentityName:'Support',senderIdentities:[{identityName:' SUPPORT '}]}));
+assert.equal(senderNames.identityNameProblem({senderIdentityName:'Support',senderIdentities:[{identityName:'Billing'}]}),'');
+assert(senderNames.identityNameProblem({senderIdentities:[{identityName:'wrong@example.org'}]}));
+console.log('Proton namespace creation, shared sender-name suggestions, uniqueness and validation passed');

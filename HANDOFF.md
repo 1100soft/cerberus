@@ -1396,3 +1396,165 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
 - Final project UI matrix passed at 900×620, 1100×700, 1720×1080 and 2200×700,
   each at 100/140/150% zoom. Final email fixture also passed. All 89 intended
   files are included; staged whitespace/conflict/generated-file checks are clean.
+
+
+## 2026-10-29 — Email organization and cross-project folder actions
+
+- Email page supports project-scoped mail-to-folder and folder-to-parent drag/drop,
+  including mailbox-level folder placement. Folder moves preserve subtrees through
+  IMAP RENAME; cycles, name collisions and reserved-source moves are rejected.
+- Message menus offer read/star, move/archive/Trash and keyboard access. Folder
+  menus add Move; creation/deletion choose this/all/custom configured projects.
+- Nonempty deletion pauses, navigates to the affected project/folder, and offers
+  moving the emails, keeping the folder, or retrying after manual organization.
+  Bulk moves validate the inspected UIDVALIDITY and require UID MOVE. No force
+  deletion or purge was added. Native empty/assigned/child protections remain.
+- Header copy icons copy structure outward to projects or inward from one project,
+  preserving account settings, mail and purpose assignments. Successful folder
+  edits (including partial batches and cross-project copies) support session undo/
+  redo and shortcuts; undo will not remove newly nonempty folders. Renamed/moved
+  automation folder paths are not silently rewritten across other project scopes.
+- Refresh returns to INBOX when the selected folder has disappeared. New WebKit
+  fixture check-mail-organization.py is included in CI; native and JS checks cover
+  subtree moves/inverses, UID-validity protection, drag scopes and path translation.
+
+- Validation passed: build/type/style/dropdown checks, folder planning/drag scope
+  logic, full locked native suite (183 unit + 3 integration tests, 5 ignored),
+  existing email regression fixture, and organization fixture at 900×620 and
+  1720×1080 with 100/140/150% zoom. Tests used isolated fixtures only, without
+  changing live mailboxes. No commit/push was requested for this implementation.
+
+
+## 2026-10-29 — folder creation repair and shared sender names
+
+- Read-only inspection of the configured Proton mailbox confirmed explicit
+  Folders/Labels namespaces. Root CREATE previously submitted a bare name, which
+  Bridge rejects. Project folder creation now targets Folders for Proton and
+  records canonical paths for undo. Created folders are selected/revealed under
+  collapsed parents; tree reveal scrolls only its own container.
+- Added optional senderIdentityName for the default address and identityName on
+  aliases. Suggested text inputs reuse the union of saved project names, with
+  zoom-aware body portals. Per-project names are case-insensitive and unique;
+  @/control characters and overlong names are rejected. Recipient display names
+  remain separate. Composer labels show local name/address; provider IDs use an
+  explicit UI token to avoid name collisions, with legacy raw IDs still accepted.
+- Agent/Script requests can use sender:"Support"; native resolution maps it to the
+  executing project's address and errors if undefined. CERBERUS_EMAIL_SENDERS now
+  includes the default mapping too. Provider refresh preserves local role names
+  by stable ID or an unambiguous address match; role edits never patch provider
+  display names. Existing unnamed identities keep address/ID compatibility.
+- Fixtures cover project-specific lookup, missing/duplicate names, sync preservation,
+  Proton canonical CREATE and collapsed-parent reveal, and cross-project name
+  suggestions/validation at 100/140/150% zoom. No live mailbox mutations were used.
+
+- Validation passed: production build (TypeScript/style/dropdown checks), provider
+  and folder/name logic checks, full locked native suite (186 unit + 3 integration
+  tests passed, 5 ignored), sender-sync regression tests, handoff UI fixture, and
+  email/folder fixtures at minimum and wide sizes with 100/140/150% zoom. Live
+  Proton inspection was read-only (folder names/status only); all mutation tests
+  used isolated fixtures. No commit or push was requested for these changes.
+
+
+## 2026-10-30 — visible receipts, responsive folder organization and email settings
+
+- Confirmed the reported Proton path Folders/Cerberus/Receipts already exists and
+  is the configured automation metadata folder. Both discovery rendering and the
+  counted tree were hiding it. Mailbox browsing now shows it and marks its purpose;
+  reserved-folder safeguards remain, including protection against moving receipt
+  messages out. Existing-folder creation selects/reveals it without another CREATE.
+- Folder context menus now use the same zoom-aware floating body portal as message
+  menus. Escape, outside dismissal and keyboard movement do not rearrange the tree.
+  New folder fields and target selectors have separate spacing.
+- Gap drop targets support local sibling ordering and parent changes. Order is
+  project-scoped and persisted locally because IMAP has no ordering command;
+  default functional/shared custom ordering remains until explicitly overridden.
+  Reordering is undoable; reparenting plus placement uses one undo entry.
+- Folder mutations preview dimmed rows/spinners, keep navigation/expansion usable,
+  apply authoritative batch snapshots immediately, and roll back errors/partial
+  failures correctly. Create/copy modals close while background work proceeds.
+  Reuse batch discovery in the cache and merge snapshots by path maps instead of
+  quadratic scans. Explicit order is loaded once per project and indexed by rank.
+- Email settings now group sign-in, connection, senders and folder purposes, with
+  consistent sender fields (Email address, Identity name, Display name), spacing
+  and input heights. Cross-project name suggestions and provider sync are preserved.
+
+- Validation: production build/type/style/dropdown checks, folder/provider logic,
+  full locked Rust suite (186 unit + 3 integration passed, 5 ignored), and WebKit
+  settings/organization fixtures at 900×620 and 1720×700 with 100/140/150% zoom.
+  Organization tests cover the exact existing Receipts case, body-portal menu
+  bounds/layout, gap reparenting/local-order undo/redo, pending navigation and
+  rollback. All commands exited zero; the settings harness still emits its known
+  WebKit child-process teardown allocator diagnostic after passing assertions.
+  No live mailbox mutations, commit or push were performed.
+
+
+## 2026-11-03 — approved ice-blue application icon
+
+- Adopted the contoured ice-blue Night watch design, preserving the large
+  overlapping head and the same vector at all sizes. Canonical editable source:
+  desktop/src-tauri/app-icon.svg. The original Downloads drafts are unchanged.
+- Regenerated Tauri desktop/Windows/macOS/Android/iOS icon assets and added
+  standalone 16/24/48/256/512/1024px PNGs alongside existing sizes. Explicit bundle
+  icon paths select the generated assets. iOS icons use an opaque dark background.
+- Desktop navigation/brand/favicon and the static site's logo/favicon use copies
+  of the same SVG. npm --prefix desktop run icons regenerates platform exports
+  and synchronizes these copies; see desktop/docs/branding.md.
+
+- Validation passed: icon regeneration, PNG dimensions/transparency, matching SVG
+  copies, ICO/ICNS readability, iOS RGB/no-alpha exports, production frontend
+  build/type/style/dropdown checks, locked cargo check and whitespace checks.
+  Tauri's generated iOS images had residual alpha=254; regeneration now strips
+  their alpha channel with ImageMagick 7 to meet App Store requirements. Other
+  platforms retain transparency. No commit or push was requested.
+
+
+## 2026-11-04 — sidebar branding
+
+- Replaced the repeated app-logo toggle with a three-bar menu icon and contextual
+  Open/Close navigation tooltip. Removed the sidebar brand badge; retained name
+  and tagline. Full app identity remains in native window/launcher and favicon.
+- Added a large monochrome head watermark at 16% opacity behind sidebar content,
+  isolated from layout and pointer events. It uses a transparent eye cutout and
+  is regenerated from the approved SVG's head/eye paths by npm run icons.
+
+- Validation passed: production build/type/style/dropdown checks, icon-generator
+  syntax and whitespace checks, plus WebKit viewport matrix at 900×620,
+  1100×700, 1720×1080 and 2200×700 with 75/100/140/150% zoom, sidebar open/closed.
+
+
+## 2026-11-04 — consistent sidebar across pages
+
+- Removed conflicting historical sidebar widths and page-specific overrides.
+  Projects/Agents used auto width while other pages retained 185px inside the
+  shared 192/250px column. All pages now fill the same shared sidebar column,
+  with identical height/padding; responsive widths depend only on window size.
+- Fixed the head background at 280 CSS pixels and the same center/65% placement,
+  instead of sizing it from the page-dependent sidebar width.
+- Extended the WebKit viewport regression to switch through all five page types
+  and compare sidebar bounds, padding, watermark geometry and the main boundary.
+  Matrix passed at 900×620, 1100×700, 1720×1080 and 2200×700 with 75/100/140/150%
+  zoom, alongside existing pane bounds/filling checks.
+
+
+## 2026-11-04 — checkpoint review
+
+- Accounted for all pending email organization/sender-name work, branding sources
+  and generated platform assets, sidebar changes, tests and documentation. No
+  unrelated files or real credentials found; pre-existing dummy private-key PEM
+  strings are certificate-rejection test cases. No temporary build/log artifacts
+  are included. Updated stale folder-order documentation to match the implementation.
+- Checkpoint validation found remote font loading could race the organization
+  fixture's menu-position measurements; that fixture now uses a stable local
+  font. Folder labels also use single-line ellipsis with the full path retained
+  in their tooltip, avoiding tall rows at narrow widths. Repeated organization
+  runs pass after these changes.
+- Passed: production build (TypeScript, dropdown/style checks), Rust format check,
+  full locked native suite (186 unit + 3 integration, 5 intentionally ignored),
+  folder/provider logic, email and organization WebKit fixtures, handoffs, saved
+  prompts, card reorder, and the four-window/sidebar/page/zoom viewport matrix.
+  Organization was also checked at 1720×700. All final commands exited zero;
+  some WebKit child processes still print their known allocator teardown messages
+  after passing assertions. Verified generated PNG sizes/transparency, RGB iOS
+  output, ICO/ICNS readability and synchronized SVG copies. Icon generation strips
+  timestamp metadata for reproducible iOS files. No live mailbox mutations or
+  push were performed.
