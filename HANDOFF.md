@@ -1645,3 +1645,48 @@ All seven live templates/configurations were verified after reload; Publish is
 the only release-ready emitter and the consumer requires both release flags.
 Existing enabled settings are unchanged. New workflow edits remain uncommitted;
 no live release, tag mutation or push was performed for this configuration change.
+
+
+## 2026-11-04 — Project navigation responsiveness
+
+The successful Mountlet Review was on correction/release-v0.7.4-b577849a, not the
+primary wip branch. Its integrate handoff therefore matches the temporary-branch
+contract; review outcome does not determine publication destination by itself.
+No routing change was needed for that run.
+
+Projects now reuse bounded session snapshots for history, branches and activity,
+paint cached content during background refresh, and share pending reads across
+remounts. Explicit refresh wins races with older reads, failures preserve usable
+data, and existing event/poll refreshes remain in place. Native refresh/import
+Git scans and branch listing moved off the UI thread. Regression validation:
+production build; 187 Rust unit tests plus 3 integration tests (5 ignored); WebKit
+history refresh including navigation under a stalled backend, coalescing,
+eviction, failure preservation and forced-refresh races; repository activity
+including log streaming/linkage and zoom 100/140/150. All passed. Existing build
+warnings remain. No push/commit performed for this task.
+
+## 2026-11-04 — Retain expensive pages and eliminate UI-thread I/O
+
+The earlier data snapshots still remounted heavy Projects/Email DOM. Projects now
+stays mounted; Email is retained after first visit, including reader/mailbox
+selection, folder state and reply text. Hidden keyboard handlers/provider/activity
+polling are suspended; active-wrapper layout selectors keep page geometry isolated.
+Email lists/discovery run in parallel and background refresh preserves usable
+content/drafts. Added bounded per-project folder/message snapshots, cached and
+coalesced config/count reads with force refresh and mutation invalidation. Mail
+content remains transient in memory. Sender-only sync no longer reloads mail.
+
+The shell now subscribes to running presence instead of every agent token; heavy
+views are memoized. Streaming fallback serialization is batched at idle rather
+than rebuilding all chats for each output event, preserving immediate completion
+and exit recovery. Remaining project/config reads, Git operations and GitHub
+credential/network/CLI commands in these paths moved to native workers. Added
+standing responsiveness/cache rules to desktop/AGENTS.md.
+
+Validation: production build; 187 Rust unit + 3 integration tests (5 ignored);
+WebKit cached-history/navigation tests; complete Email fixture including retained
+reader/mailbox/draft under a stalled backend and all prior folder/mail workflows;
+activity/streaming fixture; four viewport sizes at 75/100/140/150% zoom; email-cache
+coalescing/account isolation/forced refresh/invalidation/race checks; chat-backup
+batching/completion/exit checks. All passed. Existing build warnings remain. No
+live mailbox mutation, new release, commit or push performed for this task.

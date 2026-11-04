@@ -15,6 +15,7 @@ export type AutomationLog={feedback?:import('./feedback').MailRef;commitTriggere
 export type AutomationLogSummary=Pick<AutomationLog,'automationId'|'title'|'feedback'|'commitTriggered'|'producedCommits'|'emittedHandoffs'|'repositoryId'|'runId'|'createdAt'|'kind'|'status'|'branch'|'commitSha'|'handoffName'|'handoffId'> & {conversationId?:string};
 export type GithubCiRun={id:number;runAttempt:number;name:string;headBranch?:string|null;headSha:string;conclusion?:string|null;updatedAt:string;htmlUrl:string};
 export type GithubRepositoryEvent={id:string;kind:'push'|'pullRequest';branch:string;sha?:string|null;action?:string|null;createdAt:string;htmlUrl:string};
+let repositoryRead:Promise<Repository[]>|undefined;
 const demoAutomationLogs=new Map<string,AutomationLog>();
 const demoHandoffs=new Map<string,{id:string;path:string;claimed:boolean}[]>();
 
@@ -253,7 +254,9 @@ export const api = {
     return inTauri() ? invoke('sync_repository_remotes') : [...demoRepositories];
   },
   async repositories(): Promise<Repository[]> {
-    return inTauri() ? invoke("list_repositories") : [...demoRepositories];
+    if(repositoryRead)return repositoryRead;
+    const read=(inTauri()?invoke<Repository[]>("list_repositories"):Promise.resolve([...demoRepositories])).finally(()=>{if(repositoryRead===read)repositoryRead=undefined;});
+    repositoryRead=read;return read;
   },
   async branches(repositoryId: string): Promise<string[]> {
     if (inTauri()) return invoke("list_branches", { repositoryId });

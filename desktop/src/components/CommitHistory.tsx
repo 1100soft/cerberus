@@ -1,3 +1,4 @@
+import {PageSnapshots} from '../lib/pageSnapshots';
 import { useAutomationRuns } from '../lib/savedPrompts';
 import { requestTimeout } from '../lib/requestTimeout';
 import { matchesShortcut } from '../lib/shortcuts';
@@ -7,10 +8,14 @@ import { api, inTauri, type BranchListEntry, type BranchSyncStatus, type BranchR
 import { listen } from "@tauri-apps/api/event";
 import type { Commit, Repository } from "../types";
 
+const historySnapshots=new PageSnapshots<Commit[]>(40);
+const branchSnapshots=new PageSnapshots<BranchListEntry[]>();
+const historyKey=(id:string,branch:string)=>JSON.stringify([id,branch]);
+
 export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = true }: { repository?: Repository; unlinkedName?: string; shortcutsEnabled?: boolean }) {
   const [branch, setBranch] = useState(repository?.branch ?? "");
-  const [branches, setBranches] = useState<string[]>([]);
-  const [branchDetails,setBranchDetails]=useState<BranchListEntry[]>([]);
+  const [branches, setBranches] = useState<string[]>(()=>repository?branchSnapshots.peek(repository.id)?.map(item=>item.name)||[]:[]);
+  const [branchDetails,setBranchDetails]=useState<BranchListEntry[]>(()=>repository?branchSnapshots.peek(repository.id)||[]:[]);
   const activeRuns=useAutomationRuns().filter(run=>run.repositoryId===repository?.id);
   const activeRunKey=activeRuns.map(run=>run.id).join(',');
   const [branchError, setBranchError] = useState("");
@@ -26,7 +31,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   useEffect(()=>{if(removalOpen)requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.branch-removal-dialog footer button')?.focus());},[removalOpen]);
   const removalRequest=useRef(0);
   const removalRepository=useRef(repository?.id);removalRepository.current=repository?.id;
-  useEffect(()=>{removalRequest.current++;setBranch(repository?.branch||'');setBranches([]);setBranchDetails([]);setRemovalOpen(false);setRemovalBusy(false);setRemovalExecuting(false);setRemovalPlan(null);setRemovalError('');setRemovalSteps([]);},[repository?.id]);
+  useEffect(()=>{removalRequest.current++;setBranch(repository?.branch||'');setBranches(repository?branchSnapshots.peek(repository.id)?.map(item=>item.name)||[]:[]);setBranchDetails(repository?branchSnapshots.peek(repository.id)||[]:[]);setRemovalOpen(false);setRemovalBusy(false);setRemovalExecuting(false);setRemovalPlan(null);setRemovalError('');setRemovalSteps([]);},[repository?.id]);
 
   const [selectedCommit, setSelectedCommit] = useState(-1);
   const panelId = useId();
@@ -35,7 +40,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   const branchKind=(name:string)=>{const item=branchDetails.find(item=>item.name===name);if(activeRuns.some(run=>name===`private/automation-${run.id}`)||item?.kind==='retained'&&name===repository?.branch)return 'used';return item?.kind||'permanent';};
   const groups=[{kind:'permanent',label:'Permanent'},{kind:'used',label:'Temporary · in use'},{kind:'retained',label:'Temporary · retained for reruns'}];
   const tabs=groups.flatMap(group=>names.filter(name=>branchKind(name)===group.kind));
-  const [commits, setCommits] = useState<Commit[]>([]);
+  const [commits, setCommits] = useState<Commit[]>(()=>repository?historySnapshots.peek(historyKey(repository.id,repository.branch||''))||[]:[]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
@@ -52,9 +57,10 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
   useEffect(() => {
     const request = ++generation.current;
     setSelectedCommit(-1);
-    setCommits([]); setError(""); setHasMore(false); setLoading(!!repository);
+    const cached=repository?historySnapshots.peek(historyKey(repository.id,branch)):undefined;
+    setCommits(cached||[]); setError(""); setHasMore((cached?.length||0)===50); setLoading(!!repository&&!cached);
     if (repository) {
-      requestTimeout(api.history(repository.id, branch || undefined),'Commit loading').then((items) => {
+      historySnapshots.load(historyKey(repository.id,branch),()=>requestTimeout(api.history(repository.id, branch || undefined),'Commit loading'),revision>0).then((items) => {
         if (request !== generation.current) return;
         setCommits(items); setHasMore(items.length === 50);
       }).catch((error) => { if (request === generation.current) setError(String(error)); })
@@ -68,22 +74,23 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     if(!repository)return;
     let active=true,inFlight=false;
     const refresh=async()=>{
-      if(document.hidden||inFlight)return;
+      if(document.hidden||!panel.current?.getClientRects().length||inFlight)return;
       inFlight=true;const request=generation.current;
       try{
         const count=Math.max(50,visibleCommitCount.current);
         const pages=await Promise.all(Array.from({length:Math.ceil(count/50)},(_,index)=>requestTimeout(api.history(repository.id,branch||undefined,index*50),'Commit refresh')));
         if(!active||request!==generation.current)return;
         const items=pages.flat();
+        historySnapshots.set(historyKey(repository.id,branch),items.slice(0,50));
         setCommits(current=>JSON.stringify(current)===JSON.stringify(items)?current:items);
         setHasMore(pages.at(-1)?.length===50);setError('');
       }catch(reason){if(active&&request===generation.current)setError(String(reason));}
       finally{inFlight=false;}
     };
     const onVisible=()=>void refresh();
-    window.addEventListener('focus',onVisible);document.addEventListener('visibilitychange',onVisible);
+    window.addEventListener('focus',onVisible);window.addEventListener('projects-page-visible',onVisible);document.addEventListener('visibilitychange',onVisible);
     const timer=window.setInterval(onVisible,15000);
-    return()=>{active=false;window.clearInterval(timer);window.removeEventListener('focus',onVisible);document.removeEventListener('visibilitychange',onVisible);};
+    return()=>{active=false;window.clearInterval(timer);window.removeEventListener('focus',onVisible);window.removeEventListener('projects-page-visible',onVisible);document.removeEventListener('visibilitychange',onVisible);};
   },[repository?.id,branch]);
 
   useEffect(() => {
@@ -94,16 +101,16 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     let debounce: number | undefined;
     const refreshBranches = () => {
       const generation = ++request;
-      void api.branchListing(repository.id).then(details => {
+      void branchSnapshots.load(repository.id,()=>api.branchListing(repository.id),revision>0).then(details => {
         const items=details.map(item=>item.name);
         if (!active || generation !== request) return;
         setBranches(current => current.length === items.length && current.every((value,index) => value === items[index]) ? current : items);
         setBranchDetails(details);setBranchError("");
       }).catch(error => { if (active && generation === request) setBranchError(String(error)); });
     };
-    const onVisible = () => { if (!document.hidden) refreshBranches(); };
+    const onVisible = () => { if (!document.hidden&&panel.current?.getClientRects().length) refreshBranches(); };
     refreshBranches();
-    window.addEventListener('focus', onVisible);
+    window.addEventListener('focus', onVisible);window.addEventListener('projects-page-visible',onVisible);
     document.addEventListener('visibilitychange', onVisible);
     const timer = window.setInterval(onVisible, 15000);
     if (inTauri()) void listen<{repositoryId:string}>('automation-git-change', event => {
@@ -113,7 +120,7 @@ export function CommitHistory({ repository, unlinkedName, shortcutsEnabled = tru
     }).then(stop => { if (active) unlisten = stop; else stop(); });
     return () => {
       active = false; unlisten?.(); window.clearInterval(timer); window.clearTimeout(debounce);
-      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('focus', onVisible);window.removeEventListener('projects-page-visible',onVisible);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [repository?.id, revision, activeRunKey]);

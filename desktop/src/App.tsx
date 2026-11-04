@@ -1,5 +1,5 @@
 import {FeedbackPanel} from './components/FeedbackPanel';
-import { initializeAgentChats, useAgentChats } from './lib/agentChats';
+import { initializeAgentChats, useAgentsRunning } from './lib/agentChats';
 import { useAutomationRuns } from './lib/savedPrompts';
 import { subscribe as subscribeConversationCache, repositoryHistoryWorking } from './lib/conversationCache';
 import { ChatgptLoginDialog } from './components/ChatgptIdentities';
@@ -39,7 +39,7 @@ function sameRepositoryList(current:Repository[],next:Repository[]){
 }
 
 export function App() {
-  const liveChats=useAgentChats(),liveAutomationRuns=useAutomationRuns();
+  const agentsRunning=useAgentsRunning(),liveAutomationRuns=useAutomationRuns();
   useEffect(()=>{void initializeAgentChats();},[]);
   const [conversationStorageError,setConversationStorageError]=useState('');
   useEffect(()=>{const notice=(event:Event)=>setConversationStorageError(String((event as CustomEvent).detail));window.addEventListener('chat-storage-error',notice);return()=>window.removeEventListener('chat-storage-error',notice);},[]);
@@ -102,10 +102,10 @@ export function App() {
   const catalogRefreshQueued = useRef(false);
   const repositories = useMemo(() => mergeRepositories(localRepositories, githubRepositories), [localRepositories, githubRepositories]);
   useEffect(()=>{
-    const update=()=>{void api.localActivityPresence(liveChats.some(chat=>chat.running)||liveAutomationRuns.length>0||repositories.some(repo=>repositoryHistoryWorking(repo.id))).catch(error=>console.warn('Sleep protection:',error));};
+    const update=()=>{void api.localActivityPresence(agentsRunning||liveAutomationRuns.length>0||repositories.some(repo=>repositoryHistoryWorking(repo.id))).catch(error=>console.warn('Sleep protection:',error));};
     update();const timer=window.setInterval(update,30000);const unsubscribe=subscribeConversationCache(update);
     return()=>{window.clearInterval(timer);unsubscribe();};
-  },[liveChats.some(chat=>chat.running),liveAutomationRuns.length,repositories.map(repo=>repo.id).join(',')]);
+  },[agentsRunning,liveAutomationRuns.length,repositories.map(repo=>repo.id).join(',')]);
   const localIds=localRepositories.map(repo=>repo.id).join('|');
   useEffect(()=>{
     let cancelled=false;
@@ -143,6 +143,8 @@ export function App() {
   useEffect(() => { localStorage.setItem('sidebar-open', String(sidebarOpen)); }, [sidebarOpen]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showFeedback,setShowFeedback]=useState(false);
+  const [emailVisited,setEmailVisited]=useState(false);
+  useEffect(()=>{if(showFeedback)setEmailVisited(true);},[showFeedback]);
   const [showAgents, setShowAgents] = useState(false);
   const [showAutomation, setShowAutomation] = useState(false);
   const [automationDraft,setAutomationDraft]=useState<AutomationDraft>();
@@ -155,6 +157,8 @@ export function App() {
   const [configRepo, setConfigRepo] = useState<Repository>();
   const [addRepo, setAddRepo] = useState<"choose" | "create">();
 
+  const projectsVisible=!showFeedback&&!showIdentities&&!showAgents&&!showAutomation;
+  useEffect(()=>{if(projectsVisible)window.dispatchEvent(new Event('projects-page-visible'));},[projectsVisible]);
   async function syncGithub(force = false) {
     if (catalogInFlight.current) {
       if (force) { catalogRefreshQueued.current = true; catalogGeneration.current++; }
@@ -445,7 +449,7 @@ export function App() {
     </aside>
 
     <main style={{ "--pane-top": `${paneSplit}fr`, "--pane-bottom": `${100 - paneSplit}fr` } as React.CSSProperties}>
-      {!showFeedback && !showIdentities && !showAgents && !showAutomation && <>
+      <div className="projects-page" hidden={!projectsVisible} style={{display:projectsVisible?'contents':'none'}}>
       <section className="toolbar">
         <label className="search"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" /></label>
         <div className="toolbar-popover" ref={filterAnchor}>
@@ -503,7 +507,7 @@ export function App() {
         {!visible.length && <div className="empty"><FolderGit2 /><h2>No projects found</h2><p>Try another search or add a local Git repository.</p></div>}
       </section>
       </div>
-      <CommitHistory unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} key={historyRepository?.id ?? "none"} repository={historyRepository} shortcutsEnabled={!providerSetup && !showShortcuts && !configRepo && !menu && !addRepo} />
+      <CommitHistory unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} key={historyRepository?.id ?? "none"} repository={historyRepository} shortcutsEnabled={projectsVisible && !providerSetup && !showShortcuts && !configRepo && !menu && !addRepo} />
       </div>
       <div className="pane-divider" role="separator" aria-label="Resize project and conversation panels" aria-orientation="horizontal" aria-valuemin={20} aria-valuemax={80} aria-valuenow={paneSplit} tabIndex={0}
         onKeyDown={(event) => {
@@ -521,13 +525,13 @@ export function App() {
           const next = Math.min(80, Math.max(20, Math.round((event.clientY - top) / (bottom - top) * 100)));
           setPaneSplit(next); localStorage.setItem("gitcerberus.paneSplit", String(next));
         }} onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)} />
-      <CodexHistory onSetup={setProviderSetup} onCursorConversation={reportCursorConversation} unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} repository={historyRepository} />
-      </>}
+      <CodexHistory active={projectsVisible} onSetup={setProviderSetup} onCursorConversation={reportCursorConversation} unlinkedName={selectedRepository && !isLocal(selectedRepository) ? selectedRepository.displayName : undefined} repository={historyRepository} />
+      </div>
       {showShortcuts && <section className="shortcut-help" aria-label="Keyboard shortcuts"><header><h2>Keyboard shortcuts</h2><button onClick={() => setShowShortcuts(false)}>Close</button></header>{Object.entries(shortcuts).map(([id,shortcut]) => <p key={id}><kbd>{shortcut.label}</kbd> {shortcut.description}</p>)}<p>Project action keys are shown on the selected card. Escape closes menus before returning to project actions.</p></section>}
       <ChatgptLoginDialog onSetup={()=>setProviderSetup('codex')}/>
       {providerSetup && <ProviderSetup provider={providerSetup} onClose={() => setProviderSetup(undefined)} />}
       <AgentsPanel identities={identities} onSetup={setProviderSetup} visible={showAgents} />
-      {showFeedback&&<FeedbackPanel repositories={repositories} initialRepositoryId={selectedRepository?.id}/>}
+      {(emailVisited||showFeedback)&&<div className="email-page-cache" hidden={!showFeedback} style={{display:showFeedback?'contents':'none'}}><FeedbackPanel repositories={repositories} initialRepositoryId={selectedRepository?.id} active={showFeedback}/></div>}
       {showAutomation && <section className="automation-page" aria-label="Automation"><SavedPromptsPanel repositories={repositories} profiles={chatgptAccounts.profiles} chatgptSettings={chatgptAccounts.settings} external={externalAccounts} identities={identities} draft={automationDraft}/></section>}
       {showIdentities && <IdentitiesPanel identities={identities} inferredOwner={identityPrompt?.owner} pendingRepositoryId={identityPrompt?.repositoryId} startGithubLogin={startGithubLogin} startExternalLogin={startExternalLogin} onClose={() => { setShowIdentities(false); setIdentityPrompt(undefined); setStartGithubLogin(false); setStartExternalLogin(undefined); }} onChanged={reload} />}
       {menu && <RepositoryContextMenu repository={menu.repository} x={menu.x} y={menu.y} busy={busy === menu.repository.id} onAction={(name) => void contextAction(menu.repository, name)} onClose={() => setMenu(undefined)} />}

@@ -40,13 +40,25 @@ async function flushChats(){
 function scheduleFlush(){
   if(flushTimer===undefined)flushTimer=window.setTimeout(()=>{flushTimer=undefined;void flushChats();},500);
 }
-function persist(id?:string){
-  for(const chat of id?chats.filter(chat=>chat.id===id):chats)dirtyChats.set(chat.id,chat);
-  // Browser storage is a small index/fallback. Full transcripts live in SQLite.
+let backupTimer:number|undefined,backupIdle:number|undefined;
+function writeChatFallback(){
+  window.clearTimeout(backupTimer);backupTimer=undefined;
+  if(backupIdle!==undefined){window.cancelIdleCallback?.(backupIdle);backupIdle=undefined;}
+  // Keep the existing recovery payload, but never rebuild it for every token.
   try{localStorage.setItem('gitcerberus.agentChats',JSON.stringify(chats.map(chat=>({...chat,activity:'',messages:chat.messages.map(({steps,edits,...message})=>({...message,text:message.text.slice(-12000)}))}))));}
   catch(error){storageError(error);}
+}
+function scheduleChatFallback(){
+  if(backupTimer!==undefined||backupIdle!==undefined)return;
+  backupTimer=window.setTimeout(()=>{backupTimer=undefined;if(window.requestIdleCallback)backupIdle=window.requestIdleCallback(()=>{backupIdle=undefined;writeChatFallback();},{timeout:1000});else writeChatFallback();},500);
+}
+window.addEventListener('pagehide',writeChatFallback);
+function persist(id?:string){
+  for(const chat of id?chats.filter(chat=>chat.id===id):chats)dirtyChats.set(chat.id,chat);
+  const complete=!!id&&!getAgentChat(id)?.running;
+  if(complete)writeChatFallback();else scheduleChatFallback();
   scheduleFlush();
-  if(id&&!getAgentChat(id)?.running)void flushChats();
+  if(complete)void flushChats();
 }
 export function restoreAgentConversation(chat:AgentChat){
   const current=getAgentChat(chat.id);
@@ -65,7 +77,8 @@ export function subscribeAgentChats(listener:()=>void){listeners.add(listener);r
 export function getAgentChat(id:string) { return chats.find(chat=>chat.id===id); }
 export function currentAgentChats(){return chats;}
 export function latestAgentChat(repositoryId:string) { return chats.find(chat=>chat.repositoryId===repositoryId); }
-export function useAgentChats() { return useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => chats); }
+export function useAgentChats(active=true) { return useSyncExternalStore(listener => { if(!active)return()=>{};listeners.add(listener); return () => { listeners.delete(listener); }; }, () => chats); }
+export function useAgentsRunning(){return useSyncExternalStore(subscribeAgentChats,()=>chats.some(chat=>chat.running));}
 export function useRepositoryAgentWorking(repositoryId:string){return useSyncExternalStore(listener=>{listeners.add(listener);return()=>{listeners.delete(listener);};},()=>chats.some(chat=>chat.repositoryId===repositoryId&&chat.running));}
 export function renameAgentChat(id:string, name:string) { const next=name.trim(); if(!next)return; chats=chats.map(chat=>chat.id===id?{...chat,name:next}:chat);persist();emit(); }
 export function archiveAgentChat(id:string, archived:boolean) { chats=chats.map(chat=>chat.id===id?{...chat,archived}:chat);persist();emit(); }

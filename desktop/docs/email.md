@@ -466,3 +466,14 @@ Email settings group provider, sign-in, connection, sender identities and folder
 purposes. Every sender row uses Email address, Identity name and Display name in
 the same order. Identity names such as Support are shared vocabulary for agents;
 display names are the names recipients see.
+
+## Navigation cache
+
+Email retains the open mailbox, folder tree, reader and unsaved reply in memory
+when switching sidebar pages. Returning shows the retained view while message
+lists and folder data refresh in the background. Discovery and message listing
+run independently. Recent folder lists and opened messages have bounded,
+project-scoped session caches; message bodies are not written to localStorage or
+a local mail database. Configuration/mail/folder changes invalidate the affected
+snapshots, and Refresh forces a fresh folder-count scan. Cached data can briefly
+reflect its last observation while a server refresh is pending or unavailable.

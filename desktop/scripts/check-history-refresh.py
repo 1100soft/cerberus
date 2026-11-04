@@ -29,8 +29,32 @@ script = r"""
  assert(calls>before&&!document.querySelector('.commit-tag'),'Focus refresh retained deleted tags');
  version=4;for(const poll of pollers)poll();
  await wait(()=>document.querySelector('.commit-history')?.textContent.includes('Commit 4'));
+ // Navigation must paint cached history while the replacement read is stalled.
+ document.querySelector('[aria-label="Toggle navigation"]').click();
+ const nav=name=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes(name));
+ const retainedHistory=document.querySelector('.commit-history');
+ nav('Automation').click();await wait(()=>document.querySelector('.projects-page').hidden);
+ let release;const blocked=new Promise(resolve=>release=resolve);const fresh=api.history;
+ api.history=async(...args)=>{await blocked;return fresh(...args);};
+ nav('Projects').click();
+ assert(document.querySelector('.commit-history')===retainedHistory,'Projects rebuilt its retained history view');
+ await wait(()=>document.querySelector('.commit-history')?.textContent.includes('Commit 4'));
+ assert(!document.querySelector('.commit-history')?.textContent.includes('Loading commits'),'Navigation hid the cached history behind loading');
+ version=5;release();
+ await wait(()=>document.querySelector('.commit-history')?.textContent.includes('Commit 5'));
+ // Shared reads, bounded retention, failures, and forced refresh races.
+ const {PageSnapshots}=await import('/src/lib/pageSnapshots.ts');const cache=new PageSnapshots(2);
+ let complete,reads=0;const slow=new Promise(resolve=>complete=resolve);
+ const first=cache.load('one',async()=>{reads++;return slow;});
+ assert(cache.load('one',async()=>99)===first,'Remount duplicated a pending read');
+ await cache.load('one',async()=>2,true);complete(1);await first;
+ assert(cache.peek('one')===2&&reads===1,'Late read overwrote a forced refresh');
+ try{await cache.load('one',async()=>{throw Error('offline');});}catch{}
+ assert(cache.peek('one')===2,'Failure erased a usable snapshot');
+ cache.set('two',2);cache.set('three',3);assert(cache.peek('one')===undefined,'Snapshot retention is unbounded');
+ let stale;const invalidated=cache.load('invalidated',()=>new Promise(resolve=>stale=resolve));await Promise.resolve();cache.clear(key=>key==='invalidated');stale('old account');await invalidated;assert(cache.peek('invalidated')===undefined,'An invalidated read repopulated stale account data');
  window.setInterval=originalInterval;
- window.__savedPromptCheck={passed:true,checks:'manual refresh, focus refresh, polling fallback, new commits and tag creation/removal'};
+ window.__savedPromptCheck={passed:true,checks:'manual/focus/poll refresh, tags, cached navigation during stalled reads, coalescing, bounded retention, failure preservation and refresh races'};
 })().catch(e=>{window.__savedPromptCheck={passed:false,error:String(e)}});
 """
 

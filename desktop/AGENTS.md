@@ -92,3 +92,19 @@ approval before executing. Use fixed provider commands and no privilege elevatio
   decoration sizing through page-specific selectors. Keep page switches stable;
   responsive width changes may depend on the window size only. Viewport checks
   must compare the sidebar across Projects, Identities, Agents, Automation and Email.
+
+
+## Responsiveness and caching
+
+Never run unnecessary work on the UI thread. Native IPC commands that read files,
+wait for locks, query credentials, run Git/other processes or access the network
+must be async and dispatch blocking work to spawn_blocking (clone owned state
+before dispatch). Rendering and interaction handlers must not perform synchronous
+I/O or repeat expensive parsing/scans. Retain expensive page views and reusable
+bounded session data, render cached results immediately, and revalidate in the
+background. Coalesce reads and parallelize independent pane loads; explicit
+refresh and mutation invalidation must supersede stale requests. Suspend hidden
+page polling/shortcuts; do not discard drafts, selection or scroll on navigation.
+Keep mailbox content transient in memory, never localStorage or a local mail DB;
+never cache credentials. Test navigation with delayed backends, stale/failed
+reads, mutation invalidation, draft retention and hidden-page keyboard isolation.
