@@ -324,3 +324,8 @@ provenance tags from release triggers, and preserves append-only release history
 The matching CI fix/Review prompts use verified correction-target metadata rather
 than guessing an upstream. CI ref names may be tags; agent startup retrieves a
 missing exact commit without advancing the user's checkout.
+
+Release requests now always route through agent preparation of versions and
+release documentation, followed by Review and a separate guarded publication
+script. Both normal and recovery paths use this chain. See the templates for the
+`release` → `review` → `release-ready` handoffs and approval fields.

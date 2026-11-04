@@ -2,47 +2,74 @@
 
 These are reference templates for configured automations, not built-in defaults or
 an automatic migration of other users' prompts. The corresponding local Release,
-release-recovery, CI fix and Review automations were updated together on 2026-11-04;
-their enabled settings were preserved.
+release-recovery, CI fix, Revise and Review automations were updated on 2026-11-04,
+and Release publish was added. Existing enabled settings were preserved.
 
-## Safe release publication
+## Release chain, including documentation
 
-`release.sh` is a Bash publisher. It requires Git, Python 3, and the runtime for
-the project's version check (Node.js or Bash). Configure a manual choice input
-named **progress level**, with `major`, `minor`, and `patch`, and optional emitted
-handoff **(release)**. The recovery agent uses `release-recovery.md`.
+Configure these stages together:
+
+1. **Release** (`release.sh`, manual Bash script): input **progress level** with
+   `major`, `minor`, `patch`; optional emitted handoff **(release)**. It captures
+   the exact requested version/source/target as a schema-1 `releasePlan` and
+   delegates to the agent. It never publishes directly, even if numeric versions
+   already match. The original automation run ID is retained.
+2. **Release preparation/recovery** (`release-recovery.md`, agent on `release`):
+   updates version manifests/lockfiles and relevant current-version docs,
+   changelog/release notes and migration notes in an isolated preparation branch.
+   It verifies rather than rewrites intentional historical references. All
+   substantive edits are committed together and trigger Review. If the existing
+   SHA already satisfies preparation, optional **(review)** explicitly requests
+   approval without manufacturing a commit. No direct publication/retry bypass.
+3. **Review** (`review.md`): independently verifies original release intent,
+   prepared snapshot, project validation and release documentation. For this
+   route it emits optional **(release-ready)** with the `releaseReady` flag only
+   after approval, preserving the original plan and exact reviewed SHA. Defects
+   use Revise while retaining the release plan; unresolved evidence blocks.
+4. **Release publish** (`release-publish.sh`, Bash script on `release-ready`,
+   required flag **releaseReady**): requires structured approval with
+   `documentationReviewed:true`, documentation paths, review run and exact SHA.
+   It executes an embedded copy of the maintained publisher in approved mode.
+   Regenerate that embedded body whenever `release.sh` changes; the publisher
+   fixture rejects drift. It performs no AI work and consumes no agent quota.
 
 The default source/target/remote are `wip`, `main`, and `origin`. Override them
 with `CERBERUS_RELEASE_SOURCE_BRANCH`, `CERBERUS_RELEASE_TARGET_BRANCH`, and
-`CERBERUS_RELEASE_REMOTE`; these are explicit release destinations, not ordinary
-publication upstreams. There is no historical release baseline. Existing target
-history is preserved and exactly one commit is appended per release; the new
-commit's tree equals the captured source tree. The first release can be orphaned.
+`CERBERUS_RELEASE_REMOTE` in the manual request. The plan preserves these values,
+original source/previous-target SHAs, exact tag, progress level and original run.
+Publication rechecks all of them; it never derives a different version on retry.
 
-Prepare and review application version metadata **before** publication. The
-publisher derives the proposed version from existing semantic version tags and
-the selected increment, then validates that exact source snapshot with
-`RELEASE_TAG` and `CERBERUS_RELEASE_VERSION` set. It discovers a single tracked
-`scripts/check-version.mjs` or `scripts/check-release-version.mjs` at any project
-level. Alternatively, set `CERBERUS_RELEASE_VERSION_CHECK` to a tracked relative
-`.mjs`, `.js`, or `.sh` path. The check must verify all relevant project metadata
-against `RELEASE_TAG`, exit nonzero on disagreement, and leave the snapshot
-unchanged. Missing/ambiguous checks and version mismatches fail before publication
-and emit the optional recovery handoff. The publisher never edits metadata or
-silently chooses a different version.
+The agent must update release-specific documentation even when content-related
+documentation was already maintained with development commits. Numeric version
+validation cannot author release notes. Review may accept already correct docs,
+but must inspect and record them. Published historical releases are not rewritten
+to repair missing notes without separate authorization.
 
-Release tags default to `vX.Y.Z`; source-provenance tags use
-`cerberus/source/vX.Y.Z`, outside the `v*.*.*` packaging trigger. The prefix can be
-changed with `CERBERUS_RELEASE_SOURCE_TAG_PREFIX`, but must remain outside the
-release-tag namespace. Source, target and tags are rechecked immediately before
-an atomic push. A target-tip lease protects against concurrent updates; it is
-never permission to rewrite target history. Published tags are immutable.
+`release.sh` requires Git, Python 3, and the project version-check runtime (Node.js
+or Bash). It discovers a single tracked `scripts/check-version.mjs` or
+`scripts/check-release-version.mjs` at any project level. Alternatively, set
+`CERBERUS_RELEASE_VERSION_CHECK` to a tracked relative `.mjs`, `.js`, or `.sh`
+path. The plan preserves explicit check/tag-prefix overrides. The check must
+validate project metadata against `RELEASE_TAG`, exit nonzero on disagreement,
+and leave the captured snapshot unchanged.
 
-Recovery verifies the original run and exact release goal. Metadata corrections
-are committed for Review on a verified development target, not immediately
-published. A previously published invalid release requires a separately
-authorized repair/superseding release. Repeated Release runs are new requests,
-not a safe substitute for recovery of an uncertain publication.
+The approved publisher uses `CERBERUS_RELEASE_APPROVED_SHA`,
+`CERBERUS_RELEASE_EXPECTED_SOURCE`, `CERBERUS_RELEASE_EXPECTED_TARGET`,
+`CERBERUS_RELEASE_TAG` and `CERBERUS_RELEASE_REQUEST_RUN`; these are populated
+from Review's verified handoff by Release publish, not manual input fields.
+The prepared commit must preserve the original source ancestry. One atomic push
+advances the development source to that reviewed prepared SHA, appends one release
+commit to the previous release-target tip, and creates annotated release and
+provenance tags. The release tree equals the reviewed prepared tree. An absent
+initial target may start with an orphan release; subsequent history is preserved.
+Both branch-tip leases prevent overwriting concurrent work. A race requires
+fresh verification/review, not an automatic rebase or new tag guess.
+
+Release tags default to `vX.Y.Z`; provenance tags use `cerberus/source/vX.Y.Z`,
+outside the `v*.*.*` packaging trigger. Existing tags remain immutable. Failure
+handoffs preserve the original request and route through the same preparation
+agent. Recovery checks for prior publication before acting and blocks uncertain,
+conflicting or already published invalid releases instead of republishing them.
 
 ## CI correction and Review
 

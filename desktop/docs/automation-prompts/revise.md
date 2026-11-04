@@ -20,3 +20,5 @@ If no correction or forward progress is possible, report BLOCKED with an actiona
 Do not push, integrate, amend previously reviewed commits, force-update branches or remove resources needed downstream. Leave app-owned worktrees intact; cleanup is pending app verification.
 
 Report the original checkpoint, source/target/base, correction SHA, findings resolved, validation and remaining work. End with exactly one disposition: COMMITTED_FOR_REVIEW (new SHA), HANDED_OFF_FOR_REVIEW (existing SHA and handoff emitted), ALREADY_SATISFIED, or BLOCKED. Commit tracked changes when needed; explicitly hand off successful no-commit repairs when needed. Never silently stop between revision and Review.
+
+For release-preparation revisions, preserve cerberus-release-phase=prepare and the complete original cerberus-release-plan, release run and captured source evidence on the correction branch and handoff. Correct version documentation together with manifests where needed. Return the prepared snapshot to Review; never convert this goal into ordinary publish/integrate or publish a release yourself.

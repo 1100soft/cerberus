@@ -1597,3 +1597,27 @@ with safe.bareRepository=explicit, and the WebKit handoff fixture passes (4 clai
 4 finishes, 9 calls). Revise's optional (review) output and both live prompts were
 verified after app reload; all automation enabled settings were preserved. These
 new prompt/documentation edits remain uncommitted for the next checkpoint.
+
+
+## 2026-11-04 — Release documentation gate
+
+The prior successful script path could publish without agent-authored release
+notes/current-version docs. The manual Release script now always emits a
+structured release plan for preparation, even when numeric metadata matches.
+Release preparation/recovery updates versions and relevant docs together, commits
+for Review (or explicitly hands off an already-correct SHA), and cannot publish.
+Review verifies docs and the original release plan, then emits release-ready with
+releaseReady=true. The new Release publish Bash automation consumes that approval
+and atomically advances the development source, appends one release-target commit
+with the exact reviewed tree, and creates new annotated tags. It rechecks both
+branch tips, exact requested version and remote URL. Revise preserves preparation
+phase/plan across corrections. Historical references/tags remain immutable.
+No real release is executed by this configuration change.
+
+Validation: 12 publisher tests pass with safe.bareRepository=explicit, including
+mandatory preparation on numerically valid/invalid sources, reviewed docs in both
+published trees, rejection of missing documentation approval and stale source
+approval, and preservation of concurrent target updates. Bash syntax, whitespace,
+production TypeScript/style/dropdown/Vite build and WebKit handoff checks pass.
+All five live templates and release-ready/required-flag wiring were verified
+after reload; original automations' enabled settings remain unchanged.
