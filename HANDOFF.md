@@ -1621,3 +1621,27 @@ approval, and preservation of concurrent target updates. Bash syntax, whitespace
 production TypeScript/style/dropdown/Vite build and WebKit handoff checks pass.
 All five live templates and release-ready/required-flag wiring were verified
 after reload; original automations' enabled settings remain unchanged.
+
+
+## 2026-11-04 — Release continuation after Publish
+
+Supersedes the direct Review → release-ready route above. Preparation commits use
+chore(release): prepare <tag> plus Cerberus-Release/Run/Tag/Source trailers. Review
+verifies the original manual release evidence and docs, then propagates release
+intent through ordinary integrate/publish/revise handoffs. Integrate explicitly
+hands already-integrated release work to Publish; Publish independently verifies
+the exact reviewed prepared SHA at the development upstream and alone emits
+release-ready with release + releaseReady flags, sourcePublished/publishedSha and
+publishRun evidence. Final release publication refuses unpublished preparation,
+never moves development refs, and appends one release-target commit plus tags.
+A changed SHA requires fresh Review; missing release evidence is blocked rather
+than silently dropping the original goal. No real release is run by this change.
+
+Validation for the post-Publish continuation: 13 publisher tests pass under
+safe.bareRepository=explicit, including required Publish confirmation, refusal to
+release an unpublished preparation, stale-source protection, version/docs checks
+and append-only release history. Bash syntax and diff whitespace checks pass.
+All seven live templates/configurations were verified after reload; Publish is
+the only release-ready emitter and the consumer requires both release flags.
+Existing enabled settings are unchanged. New workflow edits remain uncommitted;
+no live release, tag mutation or push was performed for this configuration change.

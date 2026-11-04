@@ -21,17 +21,37 @@ Configure these stages together:
    substantive edits are committed together and trigger Review. If the existing
    SHA already satisfies preparation, optional **(review)** explicitly requests
    approval without manufacturing a commit. No direct publication/retry bypass.
-3. **Review** (`review.md`): independently verifies original release intent,
-   prepared snapshot, project validation and release documentation. For this
-   route it emits optional **(release-ready)** with the `releaseReady` flag only
-   after approval, preserving the original plan and exact reviewed SHA. Defects
-   use Revise while retaining the release plan; unresolved evidence blocks.
-4. **Release publish** (`release-publish.sh`, Bash script on `release-ready`,
-   required flag **releaseReady**): requires structured approval with
-   `documentationReviewed:true`, documentation paths, review run and exact SHA.
-   It executes an embedded copy of the maintained publisher in approved mode.
-   Regenerate that embedded body whenever `release.sh` changes; the publisher
-   fixture rejects drift. It performs no AI work and consumes no agent quota.
+3. **Review** (`review.md`): detects `Cerberus-Release: true` commit trailers,
+   then independently verifies the original manual request, complete plan,
+   preparation changes and release documentation. The subject is
+   `chore(release): prepare <tag>`; trailers also carry request run, tag and
+   original source SHA. Markers identify intent; they never authorize a release
+   alone. Review emits normal **integrate** (temporary preparation branch) or
+   **publish** (original development source), carrying `variables.release=true`,
+   the plan, exact reviewed SHA, review run and documentation approval.
+4. **Integrate**, when needed (`integrate.md`): integrates the exact approved
+   preparation into its verified development target, preserving the release
+   context. After successful or already-completed exact integration it explicitly
+   emits **publish**, even when no new commit is needed. Reconciliation that
+   creates a different SHA stops for fresh Review and keeps the release markers.
+5. **Publish** (`publish.md`): publishes or independently verifies the exact
+   reviewed prepared SHA at the original development upstream. Only then it
+   emits optional **(release-ready)** with flags **release** and **releaseReady**,
+   original plan, review/documentation approval, `sourcePublished:true`,
+   `publishedSha`, and `publishRun`. An already-published development commit still
+   needs this continuation when the release remains pending. Ordinary non-release
+   publications do not emit it.
+6. **Release publish** (`release-publish.sh`, Bash script on `release-ready`,
+   required flags **release** and **releaseReady**): requires both documentation
+   approval and Publish's exact development-publication confirmation. It rechecks
+   the remote source tip against the approved SHA, appends one release-target
+   commit and creates tags. It never publishes development changes itself. It
+   executes an embedded copy of the maintained publisher; update that body with
+   `release.sh` (the fixture checks for drift). This step consumes no agent quota.
+
+Revise preserves the release flag, original plan and commit trailers through
+corrections. Any changed SHA requires fresh Review; it cannot inherit approval
+for earlier code/docs. Neither Review nor Integrate emits release-ready directly.
 
 The default source/target/remote are `wip`, `main`, and `origin`. Override them
 with `CERBERUS_RELEASE_SOURCE_BRANCH`, `CERBERUS_RELEASE_TARGET_BRANCH`, and
@@ -55,15 +75,17 @@ and leave the captured snapshot unchanged.
 
 The approved publisher uses `CERBERUS_RELEASE_APPROVED_SHA`,
 `CERBERUS_RELEASE_EXPECTED_SOURCE`, `CERBERUS_RELEASE_EXPECTED_TARGET`,
-`CERBERUS_RELEASE_TAG` and `CERBERUS_RELEASE_REQUEST_RUN`; these are populated
+`CERBERUS_RELEASE_TAG`, `CERBERUS_RELEASE_ORIGINAL_SOURCE` and
+`CERBERUS_RELEASE_REQUEST_RUN`; these are populated
 from Review's verified handoff by Release publish, not manual input fields.
-The prepared commit must preserve the original source ancestry. One atomic push
-advances the development source to that reviewed prepared SHA, appends one release
-commit to the previous release-target tip, and creates annotated release and
-provenance tags. The release tree equals the reviewed prepared tree. An absent
-initial target may start with an orphan release; subsequent history is preserved.
-Both branch-tip leases prevent overwriting concurrent work. A race requires
-fresh verification/review, not an automatic rebase or new tag guess.
+The prepared commit must preserve the original source ancestry and already be
+published to development by Integrate/Publish. The final atomic push appends one
+release commit to the previous release-target tip and creates annotated release
+and provenance tags; it never moves the development branch. The release tree
+equals the reviewed prepared tree. An absent initial target may start with an
+orphan release; subsequent history is preserved. A target-tip lease prevents
+overwriting concurrent releases. Source changes detected before publication
+require fresh verification/review, not an automatic rebase or new tag guess.
 
 Release tags default to `vX.Y.Z`; provenance tags use `cerberus/source/vX.Y.Z`,
 outside the `v*.*.*` packaging trigger. Existing tags remain immutable. Failure

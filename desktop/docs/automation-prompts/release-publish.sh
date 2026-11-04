@@ -16,6 +16,7 @@ source_tag_prefix="${CERBERUS_RELEASE_SOURCE_TAG_PREFIX:-cerberus/source/}"
 handoff="${CERBERUS_HANDOFF_RELEASE:-}"
 approved_sha="${CERBERUS_RELEASE_APPROVED_SHA:-}"
 expected_source="${CERBERUS_RELEASE_EXPECTED_SOURCE:-}"
+request_source_sha="${CERBERUS_RELEASE_ORIGINAL_SOURCE:-}"
 expected_target="${CERBERUS_RELEASE_EXPECTED_TARGET:-}"
 requested_tag="${CERBERUS_RELEASE_TAG:-}"
 request_run="${CERBERUS_RELEASE_REQUEST_RUN:-${CERBERUS_RUN_ID:-}}"
@@ -89,7 +90,7 @@ A version-validation failure requires a reviewed metadata correction on the veri
   if [[ -n "$handoff" ]]; then
     mkdir -p -- "$(dirname -- "$handoff")"
 
-    python3 - "$handoff" "$details" "$request_run" "$remote_name" "$remote" "$source_branch" "${original_source_sha:-$source_sha}" "$target_branch" "$target_sha" "$tag" "$source_tag" "$level" "$stage" <<'PY'
+    python3 - "$handoff" "$details" "$request_run" "$remote_name" "$remote" "$source_branch" "${request_source_sha:-${original_source_sha:-$source_sha}}" "$target_branch" "$target_sha" "$tag" "$source_tag" "$level" "$stage" <<'PY'
 import json
 import os
 import sys
@@ -265,16 +266,18 @@ fi
 stage="verify reviewed release plan"
 [[ "$approved_sha" =~ ^([a-fA-F0-9]{40}|[a-fA-F0-9]{64})$ ]] || fail "Approval must identify a full commit SHA"
 [[ -n "$expected_source" && "$source_sha" == "$expected_source" ]] || fail "Remote source no longer matches the reviewed release plan"
+[[ "$source_sha" == "$approved_sha" ]] || fail "Reviewed preparation must be published to the development source before release"
+[[ "$request_source_sha" =~ ^([a-fA-F0-9]{40}|[a-fA-F0-9]{64})$ ]] || fail "Original release source SHA is required"
 [[ "$target_sha" == "$expected_target" ]] || fail "Remote target no longer matches the reviewed release plan"
 [[ -n "$requested_tag" && "$tag" == "$requested_tag" ]] || fail "Requested release tag no longer matches the reviewed release plan"
 [[ -n "$request_run" ]] || fail "Original release request run is required"
 original_source_sha="$source_sha"
-# The approved preparation commit can still be local. Fetch from the executing
-# repository explicitly, without publishing it or moving the original checkout.
+# Fetch the already published, reviewed preparation object explicitly. The
+# release publisher never updates the development branch or original checkout.
 git -C "$tmp" fetch -q --no-tags -- "$original_repository" "$approved_sha"
 resolved_approval="$(git -C "$tmp" rev-parse --verify "$approved_sha^{commit}")"
 [[ "$resolved_approval" == "$approved_sha" ]] || fail "Reviewed commit could not be verified"
-git -C "$tmp" merge-base --is-ancestor "$original_source_sha" "$approved_sha" || fail "Prepared release discarded original source history"
+git -C "$tmp" merge-base --is-ancestor "$request_source_sha" "$approved_sha" || fail "Prepared release discarded original source history"
 source_sha="$approved_sha"
 tree_sha="$(git -C "$tmp" rev-parse "$source_sha^{tree}")"
 
@@ -470,9 +473,7 @@ remote_latest="$(printf '%s\n' "$remote_tags" | awk '{print $2}' | sed -n 's#^re
 stage="publish"
 
 git -C "$tmp" push --atomic \
-  "--force-with-lease=refs/heads/$target_branch:$target_sha" \
-  "--force-with-lease=refs/heads/$source_branch:$original_source_sha" origin \
-  "$approved_sha:refs/heads/$source_branch" \
+  "--force-with-lease=refs/heads/$target_branch:$target_sha" origin \
   "$candidate_sha:refs/heads/$target_branch" \
   "refs/tags/$tag:refs/tags/$tag" \
   "refs/tags/$source_tag:refs/tags/$source_tag"
@@ -493,15 +494,12 @@ published_release="$(
     cut -f1
 )"
 
-published_development="$(git -C "$tmp" ls-remote origin "refs/heads/$source_branch" | cut -f1)"
-
 published_source="$(
   git -C "$tmp" ls-remote origin "refs/tags/$source_tag^{}" |
     cut -f1
 )"
 
-if [[ "$published_development" != "$approved_sha" ||
-      "$published_main" != "$candidate_sha" ||
+if [[ "$published_main" != "$candidate_sha" ||
       "$published_release" != "$candidate_sha" ||
       "$published_source" != "$source_sha" ]]; then
 
@@ -527,6 +525,8 @@ if plan.get("schema") != 1 or approval.get("documentationReviewed") is not True 
 sha = approval.get("reviewedSha", "")
 if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):
     raise SystemExit("Release approval must identify an exact commit")
+if approval.get("sourcePublished") is not True or approval.get("publishedSha") != sha or not approval.get("publishRun") or approval.get("variables", {}).get("release") is not True:
+    raise SystemExit("Release requires Publish's verification of the exact reviewed development commit")
 for key in ["requestRun", "remoteName", "remoteUrl", "sourceBranch", "sourceSha", "targetBranch", "tag", "sourceTag", "progressLevel"]:
     if not isinstance(plan.get(key), str) or not plan[key]:
         raise SystemExit("Release plan missing " + key)
@@ -548,7 +548,8 @@ env.update(CERBERUS_INPUT_PROGRESS_LEVEL=plan["progressLevel"],
     CERBERUS_RELEASE_SOURCE_BRANCH=plan["sourceBranch"],
     CERBERUS_RELEASE_TARGET_BRANCH=plan["targetBranch"],
     CERBERUS_RELEASE_APPROVED_SHA=sha,
-    CERBERUS_RELEASE_EXPECTED_SOURCE=plan["sourceSha"],
+    CERBERUS_RELEASE_EXPECTED_SOURCE=sha,
+    CERBERUS_RELEASE_ORIGINAL_SOURCE=plan["sourceSha"],
     CERBERUS_RELEASE_EXPECTED_TARGET=plan["previousTargetSha"],
     CERBERUS_RELEASE_TAG=plan["tag"],
     CERBERUS_RELEASE_REQUEST_RUN=plan["requestRun"])

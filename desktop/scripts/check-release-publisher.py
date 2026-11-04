@@ -61,6 +61,7 @@ class ReleasePublisher(unittest.TestCase):
             env.update(CERBERUS_RELEASE_APPROVED_SHA=git(self.repo, 'rev-parse', 'HEAD'),
                        CERBERUS_RELEASE_EXPECTED_SOURCE=self.remote_git('rev-parse', 'refs/heads/wip'),
                        CERBERUS_RELEASE_EXPECTED_TARGET=self.base,
+                       CERBERUS_RELEASE_ORIGINAL_SOURCE=self.base,
                        CERBERUS_RELEASE_TAG='v1.2.4', CERBERUS_RELEASE_REQUEST_RUN='release-fixture')
         return subprocess.run(['bash', str(SCRIPT)], cwd=self.repo, env=env,
                               text=True, capture_output=True, timeout=30)
@@ -101,6 +102,7 @@ class ReleasePublisher(unittest.TestCase):
         self.commit('prepare reviewed release documentation')
         approved = git(self.repo, 'rev-parse', 'HEAD')
         self.assertEqual(self.remote_git('rev-parse', 'refs/heads/wip'), source)
+        git(self.repo, 'push', '-q', 'origin', 'wip')  # Integrate/Publish precedes release.
         result = self.run_release()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.remote_git('rev-parse', 'refs/heads/wip'), approved)
@@ -116,7 +118,8 @@ class ReleasePublisher(unittest.TestCase):
         payload = self.root / 'approved.json'
         approval = {'releasePlan': plan, 'reviewedSha': git(self.repo, 'rev-parse', 'HEAD'),
                     'reviewRun': 'review-fixture', 'documentationPaths': ['version'],
-                    'variables': {'releaseReady': True}, 'documentationReviewed': False}
+                    'variables': {'release': True, 'releaseReady': True}, 'documentationReviewed': False,
+                    'sourcePublished': True, 'publishedSha': git(self.repo, 'rev-parse', 'HEAD'), 'publishRun': 'publish-fixture'}
         payload.write_text(json.dumps(approval))
         env = {**self.env, 'CERBERUS_HANDOFF_INPUT': str(payload)}
         publisher = SCRIPT.with_name('release-publish.sh')
@@ -125,10 +128,29 @@ class ReleasePublisher(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.refs(), before)
         approval['documentationReviewed'] = True
+        approval['sourcePublished'] = False
+        payload.write_text(json.dumps(approval))
+        result = subprocess.run(['bash', str(publisher)], cwd=self.repo, env=env, text=True, capture_output=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.refs(), before)
+        self.assertIn("Publish's verification", result.stderr)
+        approval['sourcePublished'] = True
         payload.write_text(json.dumps(approval))
         result = subprocess.run(['bash', str(publisher)], cwd=self.repo, env=env, text=True, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('RELEASED v1.2.4', result.stdout)
+
+    def test_unpublished_preparation_cannot_be_released(self):
+        self.prepare()
+        original = self.remote_git('rev-parse', 'refs/heads/wip')
+        (self.repo / 'CHANGELOG.md').write_text('Release notes still local')
+        self.commit('chore(release): prepare v1.2.4')
+        before = self.refs()
+        result = self.run_release()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('must be published', result.stderr)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.remote_git('rev-parse', 'refs/heads/wip'), original)
 
     def test_stale_approval_does_not_publish(self):
         self.prepare()
@@ -141,7 +163,8 @@ class ReleasePublisher(unittest.TestCase):
         payload = self.root / 'stale.json'
         payload.write_text(json.dumps({'releasePlan': plan, 'reviewedSha': approved,
             'reviewRun': 'review-fixture', 'documentationPaths': ['version'],
-            'documentationReviewed': True, 'variables': {'releaseReady': True}}))
+            'documentationReviewed': True, 'variables': {'release': True, 'releaseReady': True},
+            'sourcePublished': True, 'publishedSha': approved, 'publishRun': 'publish-fixture'}))
         before = self.refs()
         result = subprocess.run(['bash', str(SCRIPT.with_name('release-publish.sh'))],
             cwd=self.repo, env={**self.env, 'CERBERUS_HANDOFF_INPUT': str(payload)}, text=True, capture_output=True, timeout=30)
