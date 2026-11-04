@@ -296,7 +296,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
       }
       addAutomationNotice({automationId:id,repositoryId,title:`${job.title} started`,message:repositoryLabel,status:'started'});
       const outgoing:Record<string,string>={};
-      const ciContext=ciRun?`GitHub Actions ${ciRun.conclusion==='success'?'passed':'failed'}: ${ciRun.name}. Branch: ${ciRun.headBranch||'unknown'}. Commit: ${ciRun.headSha}. Run: ${ciRun.htmlUrl}.\n\n`:'';
+      const ciContext=ciRun?`GitHub Actions ${ciRun.conclusion==='success'?'passed':'failed'}: ${ciRun.name}. Ref name: ${ciRun.headBranch||'unknown'} (may be a branch or tag; verify its type and do not infer an integration target from it). Commit: ${ciRun.headSha}. Run: ${ciRun.htmlUrl}.\n\n`:'';
       let stdout='',stderr='',response='',activity='',result='',failure='',agentStarted=false;
       const retryContext:AutomationRetry={feedback:mail,inputValues,job:{...job,...(executionRuntime?{scriptRuntime:executionRuntime}:{})},manual:retry?.manual??manual,incoming,ciRun,eventBranch,eventSha,matchedConditions};
       let agentChatId:string|undefined;

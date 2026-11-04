@@ -6,7 +6,11 @@ overlap and contours at every size; the compact/clipped design studies were not
 selected.
 
 `desktop/src-tauri/app-icon.svg` is the editable source of truth. It has a
-transparent background and no embedded raster images or external resources.
+transparent background and no embedded raster images or external resources. Its
+square viewBox tightly frames the complete stroked silhouette so exports fill
+their icon slots without clipping the shield contour or ear tips. The head
+gradient runs from `#DFD2FF` to `#927DE9`, with a deeper shield gradient from
+`#372756` to `#140E1C` for slightly stronger contrast.
 
 Run from the repository root after editing the source:
 

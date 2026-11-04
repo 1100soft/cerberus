@@ -1558,3 +1558,21 @@ Validation: production TypeScript/dropdown/style/Vite build and pure folder/cach
   output, ICO/ICNS readability and synchronized SVG copies. Icon generation strips
   timestamp metadata for reproducible iOS files. No live mailbox mutations or
   push were performed.
+
+## 2026-11-04 — Release-chain safeguards
+
+The manual Mountlet Release produced v0.7.3 with application metadata still at
+0.7.2. Its v0.7.3-source provenance tag also triggered package CI. The real release
+commit existed only remotely, so its first CI fixer failed before agent startup;
+the provenance-tag fixer completed a correction, but Review rejected its target
+because only a commit trailer/description identified wip.
+
+The configured Release, release-recovery, CI fix and Review prompts now match
+[the versioned templates](desktop/docs/automation-prompts/README.md), with enabled
+settings preserved. Release requires a project-owned version check before atomic
+publication and uses a non-release provenance namespace. Recovery preserves
+append-only history. Correction agents and Review share a verifiable target
+contract without inventing an ordinary upstream. Agent worktree preparation can
+fetch a missing exact SHA without moving existing refs/FETCH_HEAD; CI context
+identifies ref names as potentially tags. Existing published tags/history and
+pending correction branches were not repaired, pushed or integrated by this task.
