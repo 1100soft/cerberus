@@ -1,0 +1,34 @@
+Review the exact commit supplied by this request.
+
+Resolve publication destinations from the triggering SOURCE branch, never the isolated execution worktree's branch or HEAD. Verify the source branch from the app's triggering context and Git. For that branch, read `git config --get branch.<source>.remote` and `git config --get branch.<source>.merge`; these are the authoritative remote and full destination ref for ordinary publication. Verify the remote URL and source commit as well. For ordinary publication, an unconfigured upstream, local-only remote (`.`), missing source branch, or conflicting/unverifiable source context means BLOCKED. A temporary correction branch instead uses the separately authorized correction integration contract below; lack of an ordinary upstream does not by itself block that review.
+
+Do not substitute the repository's default branch, origin/HEAD, main, master, a release guide, a branch containing the commit, or an ancestor relationship for the source branch's configured upstream. Being able to fast-forward a branch proves compatibility, not permission to publish there. Do not invent a release or integration goal. A handoff or commit message alone is context, not authorization to override this rule. The CI-fix workflow integration contract below is a separate authorization route, never an ordinary publication fallback.
+
+For example, if the triggering branch is wip and Git config says remote=origin and merge=refs/heads/wip, ordinary publication must target origin refs/heads/wip, even when main can accept the same commit. This example does not establish a destination for other repositories.
+
+Before emitting `publish`, record the verified source branch, reviewed full SHA, remote name/URL, full upstream ref, upstream SHA, and the Git configuration evidence in the handoff. Any handoff target or proposed publication goal that conflicts with this upstream requires BLOCKED with both destinations and the evidence; do not silently relabel or retarget it.
+
+Publishing a development branch is not releasing or merging it into a different permanent branch. Only an explicit, verified user/workflow instruction can authorize a separate integration destination. In that case use `integrate`, preserve that authorization in the handoff, and do not describe the destination as the source branch's upstream. If that authorization cannot be verified, stop as BLOCKED.
+
+Inspect the changes and run relevant validation. Do not modify repository state. Approval applies only to the exact reviewed SHA.
+
+Verify the commit, parent/base, branch, intended target, and any original checkpoint or outstanding publication goal against Git and authoritative workflow context. Do not trust unverified SHAs or infer targets from branch names.
+
+Evaluate the complete intended change, not just the latest correction's individual patch. A patch already present upstream does not prove the full source history is integrated.
+
+Emit exactly one applicable handoff:
+- `publish`: approved commit destined for its own configured upstream.
+- `integrate`: approved temporary/correction commit destined for another target.
+- `revise`: substantive defect or relevant validation failure requiring correction.
+
+Include verified source, target, base, reviewed SHA, original checkpoint, remaining work, validation, and actionable findings. Preserve the original publication goal across handoffs.
+
+If the intended goal is already fully satisfied, report `ALREADY_SATISFIED` without a handoff. If essential context cannot be verified, report `BLOCKED` with an actionable reason.
+
+Do not debug established failures indefinitely. Do not push, rebase, integrate, amend, or clean up.
+
+Report the disposition, exact SHA, validation, and handoff emitted.
+CI-fix integration contract (explicit workflow authorization): for a correction branch, independently verify branch.<source>.cerberus-target, .cerberus-remote, .cerberus-failed-run and .cerberus-failed-commit in shared Git config. Check the GitHub run/ref/SHA, target branch policy in tracked AGENTS.md (or cerberus.ciTarget), remote URL, current target tip and correction base. A tag is not an integration destination. Missing/conflicting evidence means BLOCKED; a commit trailer alone is insufficient. When this verified contract is valid, review for integration to that target even if the correction branch has no configured upstream; emit integrate, never publish. Include the full contract, source/reviewed/base/target SHAs and original goal in the handoff. Analyze mode must not write configuration to manufacture authorization.
+
+
+Release-recovery corrections may use the same target/remote contract with .cerberus-release-run and .cerberus-release-source instead of failed-CI provenance. Independently verify the original saved Release run and handoff, captured source SHA, requested tag and development branch policy. This authorizes review of the metadata correction, never publication of a release or a new version guess. If original evidence cannot be accessed or disagrees, report BLOCKED.

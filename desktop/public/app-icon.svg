@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="app-icon-title">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="20 19 472 472" role="img" aria-labelledby="app-icon-title">
   <title id="app-icon-title">GitCerberus</title>
   <defs>
     <linearGradient id="night-watch-ice-shield" x1="0" y1="0" x2=".75" y2="1">
-      <stop stop-color="#31244F" />
-      <stop offset="1" stop-color="#171120" />
+      <stop stop-color="#372756" />
+      <stop offset="1" stop-color="#140E1C" />
     </linearGradient>
     <linearGradient id="night-watch-ice-head" x1=".15" y1="0" x2=".8" y2="1">
-      <stop stop-color="#D8CCFF" />
-      <stop offset="1" stop-color="#9D8BF1" />
+      <stop stop-color="#DFD2FF" />
+      <stop offset="1" stop-color="#927DE9" />
     </linearGradient>
     <clipPath id="night-watch-ice-clip">
       <path d="M184 138 274 24 286 112 340 65 332 150 378 191 390 226 482 266 464 300 422 334 317 322 279 350 255 447 237 420 220 486 154 365 69 399 101 310 30 334 129 221 70 225Z" />

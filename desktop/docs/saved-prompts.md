@@ -315,3 +315,12 @@ selection. Errors never disable the automation; interrupted email actions
 retain their reference for retry. Sending requires explicit mailbox permission;
 drafts and internal notes are always saved on IMAP without sending. See
 [Feedback](email.md) for configuration, examples and privacy/delivery limits.
+
+## Release and CI correction templates
+
+See [release and correction templates](automation-prompts/README.md) for a
+publisher that validates project versions before publication, separates
+provenance tags from release triggers, and preserves append-only release history.
+The matching CI fix/Review prompts use verified correction-target metadata rather
+than guessing an upstream. CI ref names may be tags; agent startup retrieves a
+missing exact commit without advancing the user's checkout.

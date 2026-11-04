@@ -55,6 +55,97 @@ fn git(repository: &Path, args: &[&str]) -> Result<String, String> {
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().into())
 }
+// CI may refer to a remote-only release commit. Fetch only that object; never
+// update a branch/tag/FETCH_HEAD or substitute the current checkout's commit.
+fn resolve_commit(repository: &Path, revision: &str) -> Result<String, String> {
+    let expression = format!("{revision}^{{commit}}");
+    let resolve = || {
+        git(
+            repository,
+            &["rev-parse", "--verify", "--end-of-options", &expression],
+        )
+    };
+    if let Ok(commit) = resolve() {
+        return Ok(commit);
+    }
+    if !matches!(revision.len(), 40 | 64) || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!(
+            "Automation revision {revision:?} is not available locally."
+        ));
+    }
+    let configured = git(repository, &["remote"])?;
+    let mut remotes: Vec<_> = configured.lines().collect();
+    remotes.sort_by_key(|remote| *remote != "origin");
+    let mut failures = Vec::new();
+    for remote in remotes {
+        if let Err(error) = fetch_commit(repository, remote, revision) {
+            failures.push(format!("{remote}: {error}"));
+        }
+        if let Ok(commit) = resolve() {
+            return Ok(commit);
+        }
+    }
+    Err(format!("Cannot prepare automation at commit {revision}. The exact commit is missing locally and could not be fetched from configured remotes. Check remote access and retry. {}", failures.join("; ")))
+}
+fn fetch_commit(repository: &Path, remote: &str, revision: &str) -> Result<(), String> {
+    use std::{
+        io::{Read, Seek},
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    let mut errors = tempfile::tempfile().map_err(|e| e.to_string())?;
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repository)
+        .args([
+            "fetch",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--refmap=",
+            "--no-recurse-submodules",
+            "--",
+            remote,
+            revision,
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(errors.try_clone().map_err(|e| e.to_string())?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < Duration::from_secs(60) => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            result => {
+                crate::setup_terminal::stop_process_tree(&mut child);
+                let _ = child.wait();
+                return Err(match result {
+                    Err(error) => error.to_string(),
+                    _ => "fetch timed out after 60 seconds".into(),
+                });
+            }
+        }
+    };
+    if status.success() {
+        return Ok(());
+    }
+    errors.rewind().map_err(|e| e.to_string())?;
+    let mut message = String::new();
+    errors
+        .take(8192)
+        .read_to_string(&mut message)
+        .map_err(|e| e.to_string())?;
+    Err(message.trim().into())
+}
 pub fn path(root: &Path, repository_id: &str, run_id: &str) -> Result<PathBuf, String> {
     if !valid(repository_id) || !valid(run_id) {
         return Err("Invalid automation checkout identifier.".into());
@@ -118,15 +209,7 @@ pub fn prepare(
         .as_deref()
         .or(revision.filter(|value| !value.is_empty()))
         .unwrap_or("HEAD");
-    let commit = git(
-        repository,
-        &[
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            &format!("{revision}^{{commit}}"),
-        ],
-    )?;
+    let commit = resolve_commit(repository, revision)?;
     let area = root.join("automation-worktrees");
     if area
         .symlink_metadata()
@@ -160,6 +243,83 @@ pub fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn remote_only_commit_is_fetched_without_moving_existing_refs_or_dirty_files() {
+        let remote = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        git(remote.path(), &["init", "-q"]).unwrap();
+        let commit = |path: &Path, message: &str| {
+            git(
+                path,
+                &[
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.test",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    message,
+                ],
+            )
+            .unwrap();
+            git(path, &["rev-parse", "HEAD"]).unwrap()
+        };
+        commit(remote.path(), "base");
+        git(
+            repo.path(),
+            &["clone", "-q", remote.path().to_str().unwrap(), "."],
+        )
+        .unwrap();
+        // Establish a FETCH_HEAD sentinel as well as ordinary tracking refs.
+        git(repo.path(), &["fetch", "-q", "origin"]).unwrap();
+        git(repo.path(), &["tag", "kept"]).unwrap();
+        let fetch_head = fs::read(repo.path().join(".git/FETCH_HEAD")).unwrap();
+        let refs = git(repo.path(), &["show-ref"]).unwrap();
+        let head = git(repo.path(), &["rev-parse", "HEAD"]).unwrap();
+        fs::write(repo.path().join("pending"), "local edit").unwrap();
+        git(repo.path(), &["add", "pending"]).unwrap();
+        let index = fs::read(repo.path().join(".git/index")).unwrap();
+        let sha = commit(remote.path(), "remote release");
+        git(remote.path(), &["tag", "new-release"]).unwrap();
+        assert!(git(repo.path(), &["cat-file", "-e", &sha]).is_err());
+        let checkout = prepare(root.path(), repo.path(), "repo", "run", Some(&sha)).unwrap();
+        assert_eq!(git(&checkout, &["rev-parse", "HEAD"]).unwrap(), sha);
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]).unwrap(), head);
+        let new_refs = git(repo.path(), &["show-ref"]).unwrap();
+        assert_eq!(
+            new_refs
+                .lines()
+                .filter(|line| !line.contains("refs/heads/private/automation-run"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            refs
+        );
+        assert_eq!(
+            fs::read(repo.path().join(".git/FETCH_HEAD")).unwrap(),
+            fetch_head
+        );
+        assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
+        assert_eq!(
+            fs::read_to_string(repo.path().join("pending")).unwrap(),
+            "local edit"
+        );
+        // A local revision requires no network access.
+        git(
+            repo.path(),
+            &["remote", "set-url", "origin", "/nonexistent/remote"],
+        )
+        .unwrap();
+        assert_eq!(resolve_commit(repo.path(), &sha).unwrap(), sha);
+        let missing = "a".repeat(40);
+        let error =
+            prepare(root.path(), repo.path(), "repo", "missing", Some(&missing)).unwrap_err();
+        assert!(error.contains("Check remote access and retry"), "{error}");
+        assert!(!path(root.path(), "repo", "missing").unwrap().exists());
+        assert!(resolve_commit(repo.path(), "--help").is_err());
+        assert!(resolve_commit(repo.path(), "missing-branch").is_err());
+    }
     #[test]
     fn contexts_are_isolated_resumable_and_preserve_dirty_edits() {
         let repo = tempfile::tempdir().unwrap();
