@@ -25,8 +25,6 @@ script = r"""
  const browserSource=await(await fetch('/src/components/CodexHistory.tsx')).text();
  const {restoreAgentConversation}=await import(modulePath(browserSource,'agentChats'));
  const {savePrompt,savedPrompts}=await import(modulePath(browserSource,'savedPrompts'));
- const {configurationChanged}=await import(modulePath(browserSource,'providerPreferences'));
- localStorage.setItem('gitcerberus.providers',JSON.stringify({codex:true,cursor:false,copilot:false,claude:false}));configurationChanged();
  const repo=(await api.repositories())[0];let records=[];
  api.repositoryAutomationLogs=async id=>records.filter(run=>run.repositoryId===id).map(run=>({...run,conversationId:run.conversation?.id}));
  api.repositoryCommitOrigins=async()=>({'script-run':['a'.repeat(40)]});
@@ -46,8 +44,10 @@ script = r"""
  assert(document.querySelector('.agent-heading').textContent.includes('Agent/Script'),'Heading missing');
  assert(document.querySelector('.handoff-trail').textContent.includes('Review fixture'),'Missing source relationship');
  assert(document.querySelector('.handoff-trail').textContent.includes('revise'),'Missing handoff');
- const oldRunButton=[...document.querySelectorAll('.codex-thread-list > button')].find(button=>button.textContent.includes('Review fixture'));
- assert(oldRunButton&&!oldRunButton.querySelector('time').textContent.includes(':'),'Old run incorrectly uses recent metadata timestamp');
+ // Wait for the agent row as well as the independently rendered script pane.
+ const oldRunButton=await wait(()=>[...document.querySelectorAll('.codex-thread-list > button')].find(button=>button.textContent.includes('Review fixture')));
+ assert(oldRunButton.querySelector('time').dateTime===new Date(parent.createdAt).toISOString(),'Old run incorrectly uses recent metadata timestamp');
+ assert(!oldRunButton.querySelector('time').textContent.includes(':'),'Old run should display a date');
  const scriptIcon=document.querySelector('.codex-thread-list > button.provider-script .conversation-provider-mark svg');
  const agentIcon=document.querySelector('.codex-thread-list > button.provider-codex .conversation-provider-mark > *');
  assert(scriptIcon&&agentIcon&&scriptIcon.getBoundingClientRect().width===agentIcon.getBoundingClientRect().width&&scriptIcon.getBoundingClientRect().height===agentIcon.getBoundingClientRect().height,'Script icon size differs');
@@ -105,9 +105,10 @@ script = r"""
 """
 
 window=Gtk.OffscreenWindow()
+# Seed provider visibility before React reads preferences or subscribes to changes.
 # Clipboard behavior is mocked before React mounts; never touch the host clipboard.
 manager=WebKit2.UserContentManager()
-manager.add_script(WebKit2.UserScript.new("let fixtureClipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>fixtureClipboard,writeText:async value=>{fixtureClipboard=value;}}});",WebKit2.UserContentInjectedFrames.TOP_FRAME,WebKit2.UserScriptInjectionTime.START,None,None))
+manager.add_script(WebKit2.UserScript.new("localStorage.setItem('gitcerberus.providers',JSON.stringify({codex:true,cursor:false,copilot:false,claude:false}));let fixtureClipboard='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{readText:async()=>fixtureClipboard,writeText:async value=>{fixtureClipboard=value;}}});",WebKit2.UserContentInjectedFrames.TOP_FRAME,WebKit2.UserScriptInjectionTime.START,None,None))
 # Apply the real stylesheet without waiting for external Google font imports.
 fixture_root=Path(__file__).resolve().parents[1]/"src"
 fixture_css=(fixture_root/"palette.css").read_text()+re.sub(r"""@import\s+(?:url\([^)]*\)|"[^"]*"|'[^']*')\s*;""", "", (fixture_root/"styles.css").read_text())
