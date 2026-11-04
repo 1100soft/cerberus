@@ -1576,3 +1576,24 @@ contract without inventing an ordinary upstream. Agent worktree preparation can
 fetch a missing exact SHA without moving existing refs/FETCH_HEAD; CI context
 identifies ref names as potentially tags. Existing published tags/history and
 pending correction branches were not repaired, pushed or integrated by this task.
+
+## 2026-11-04 — Continue configuration-only revisions
+
+The next Cerberus review found the publisher test's implicit bare-repository
+reads failed with safe.bareRepository=explicit. Revise fixed them in 2120726.
+Review then blocked its missing destination metadata; a second Revise configured
+an upstream but created no commit or handoff, so approval/publication stopped.
+Revise had correctly avoided an empty commit; the missing continuation was a
+workflow contract/configuration gap. The revised prompt now requires committed
+tracked-file repairs or an explicit optional review handoff after a successful
+no-commit repair. Review accepts independently verified ordinary revision target
+metadata and does not require a new SHA for configuration-only changes. Existing
+CI/release authorization remains distinct. Templates and live configuration are
+kept in sync; enabled settings are preserved.
+
+Current repair: fast-forwarded local wip to the validated correction 2120726 and
+pushed wip normally to origin/wip; both refs agree. All five publisher tests pass
+with safe.bareRepository=explicit, and the WebKit handoff fixture passes (4 claims,
+4 finishes, 9 calls). Revise's optional (review) output and both live prompts were
+verified after app reload; all automation enabled settings were preserved. These
+new prompt/documentation edits remain uncommitted for the next checkpoint.

@@ -77,3 +77,19 @@ integrate pending corrections, or move its tags.
 
 Validate the publisher with `python3 desktop/scripts/check-release-publisher.py`
 from the repository root. Tests publish only to disposable local bare remotes.
+
+## Revision continuation
+
+Use `revise.md` for Revise and configure optional emitted handoff **(review)**.
+Substantive tracked-file corrections must be validated and committed; the commit
+triggers Review. A configuration-only repair must instead explicitly emit review
+for the existing SHA once the blocker is resolved and approval is still needed.
+Do not manufacture empty commits or send a duplicate handoff after committing.
+Unresolved blockers emit nothing, preventing unchanged Review/Revise loops.
+
+Ordinary revisions preserve the verified original publication target using
+`cerberus-target`, `cerberus-remote`, `cerberus-revision-run`,
+`cerberus-revision-source`, and `cerberus-revision-checkpoint` on their correction
+branch. Review independently verifies the original Review evidence and actual
+source upstream. This is integration authorization, not a fabricated upstream;
+CI/release revisions preserve their own original authorization chain.

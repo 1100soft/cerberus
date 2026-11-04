@@ -58,8 +58,14 @@ class ReleasePublisher(unittest.TestCase):
         return subprocess.run(['bash', str(SCRIPT)], cwd=self.repo, env=self.env,
                               text=True, capture_output=True, timeout=30)
 
+    def remote_git(self, *args):
+        # Explicit selection works with safe.bareRepository=explicit.
+        return subprocess.check_output(
+            ['git', '--git-dir', str(self.remote), *args],
+            stderr=subprocess.PIPE, text=True).strip()
+
     def refs(self):
-        return git(self.remote, 'show-ref')
+        return self.remote_git('show-ref')
 
     def test_version_mismatch_cannot_publish(self):
         self.prepare('1.2.3')
@@ -96,12 +102,12 @@ class ReleasePublisher(unittest.TestCase):
         (self.repo / 'untracked').write_text('leave untouched')
         result = self.run_release()
         self.assertEqual(result.returncode, 0, result.stderr)
-        release = git(self.remote, 'rev-parse', 'refs/heads/main')
-        self.assertEqual(git(self.remote, 'rev-list', '--parents', '-n', '1', release), release+' '+self.base)
-        self.assertEqual(git(self.remote, 'rev-parse', release+'^{tree}'), git(self.repo, 'rev-parse', source+'^{tree}'))
-        self.assertEqual(git(self.remote, 'rev-parse', 'refs/tags/v1.2.4^{}'), release)
-        self.assertEqual(git(self.remote, 'rev-parse', 'refs/tags/cerberus/source/v1.2.4^{}'), source)
-        self.assertEqual(git(self.remote, 'rev-parse', 'refs/heads/wip'), source)
+        release = self.remote_git('rev-parse', 'refs/heads/main')
+        self.assertEqual(self.remote_git('rev-list', '--parents', '-n', '1', release), release+' '+self.base)
+        self.assertEqual(self.remote_git('rev-parse', release+'^{tree}'), git(self.repo, 'rev-parse', source+'^{tree}'))
+        self.assertEqual(self.remote_git('rev-parse', 'refs/tags/v1.2.4^{}'), release)
+        self.assertEqual(self.remote_git('rev-parse', 'refs/tags/cerberus/source/v1.2.4^{}'), source)
+        self.assertEqual(self.remote_git('rev-parse', 'refs/heads/wip'), source)
         self.assertEqual(git(self.repo, 'rev-parse', 'HEAD'), source)
         self.assertEqual((self.repo / 'untracked').read_text(), 'leave untouched')
         self.assertFalse(self.handoff.exists())
@@ -118,7 +124,7 @@ class ReleasePublisher(unittest.TestCase):
         self.env['CERBERUS_RELEASE_VERSION_CHECK'] = 'scripts/race.sh'
         result = self.run_release()
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(git(self.remote, 'rev-parse', 'refs/heads/main'), source)
+        self.assertEqual(self.remote_git('rev-parse', 'refs/heads/main'), source)
         self.assertIn('Remote target branch changed', self.handoff.read_text())
         self.assertNotIn('refs/tags/v1.2.4', self.refs())
 
