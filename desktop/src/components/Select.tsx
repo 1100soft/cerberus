@@ -32,7 +32,8 @@ export function Select({ value, options, onChange, label, disabled, className = 
   const search = useRef({ text: "", time: 0 });
   const id = useId();
   const preserveFocus = useRef(false);
-  function close(restore = false) { setOpen(false); if (restore && !autoOpen && !preserveFocus.current) trigger.current?.focus(); onClose?.(); }
+  // Restoring focus must not queue ancestor scrolls that dismiss the next menu.
+  function close(restore = false) { setOpen(false); if (restore && !autoOpen && !preserveFocus.current) trigger.current?.focus({ preventScroll: true }); onClose?.(); }
   function show() { preserveFocus.current = !!trigger.current?.closest('.shell[data-repository-focus]'); setActive(Math.max(0, options.findIndex((option) => option.value === value))); setOpen(true); }
   useLayoutEffect(() => { if (autoOpen) show(); }, [autoOpen]);
 
