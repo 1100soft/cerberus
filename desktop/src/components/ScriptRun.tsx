@@ -4,8 +4,8 @@ import {api,type AutomationLog,type AutomationLogSummary} from '../lib/api';
 import {currentAutomationLogs,subscribeAutomationLogs} from '../lib/automationLogs';
 import {AutomationRunContent} from './AutomationRunContent';
 import {CopyButton} from './CopyButton';
-export function ScriptRun({run}:{run:AutomationLogSummary}){
- useEffect(()=>{const acknowledge=()=>acknowledgeAutomationError(run.automationId);acknowledge();return subscribeSavedPrompts(acknowledge);},[run.automationId]);
+export function ScriptRun({run,active=true}:{run:AutomationLogSummary;active?:boolean}){
+ useEffect(()=>{if(!active)return;const acknowledge=()=>acknowledgeAutomationError(run.automationId);acknowledge();return subscribeSavedPrompts(acknowledge);},[run.automationId,active]);
  const [entry,setEntry]=useState<AutomationLog>(),[error,setError]=useState('');
  const pane=useRef<HTMLDivElement>(null),follow=useRef(true);
  useEffect(()=>{
