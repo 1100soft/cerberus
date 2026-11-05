@@ -119,13 +119,17 @@ script = r"""
  assert(calls.at(-1).repo==='2','Combined conditions ran for the wrong project');
  automation.recordAutomationGithubEvents('2',[event(comboId+'-push','a'.repeat(40))]);await pause(80);
  assert(calls.length===beforeCombo+1,'A polled push event repeated');
+ // Finish the combined run before advancing the scheduler's synthetic clock.
+ await wait(()=>automation.savedPrompts().find(job=>job.id===comboId)?.state==='completed');
+ window.__ciStage='idle conditions';
  const idleId='idle-'+crypto.randomUUID();
  automation.savePrompt({...base,id:idleId,title:'File quiet',trigger:'fileChange',conditions:['fileChange','idleTime'],debounceSeconds:2,commitBranch:'*'});
  const beforeIdle=calls.length;
  automation.recordAutomationFileChange('1',Date.now());await automation.checkSavedPromptSchedule();
  assert(calls.length===beforeIdle,'Idle condition ran before quiet period');
- await automation.checkSavedPromptSchedule(Date.now()+3000);
- await wait(()=>calls.length===beforeIdle+1);
+ // Recording the change may still own the scheduler; keep driving the future
+ // clock until that asynchronous pass finishes and the idle run is dispatched.
+ await wait(()=>{void automation.checkSavedPromptSchedule(Date.now()+3000);return calls.length===beforeIdle+1;});
  window.__ciStage='CI monitoring recovery';
  for(const job of automation.savedPrompts())automation.savePrompt({...job,enabled:false});
  const healthId='health-'+crypto.randomUUID();
