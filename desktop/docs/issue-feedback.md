@@ -3,19 +3,29 @@
 Feedback is a GitHub issue queue, independent of email. In **Feedback → settings**
 choose a default repository and GitHub identity, then optionally override the
 repository for the selected project or disable its feedback integration. Each
-project has a distinct project label. Empty labels generate stable project-ID
-labels; changing a project's display name never changes its queue. Existing
-reports are not automatically migrated when a repository/label changes.
+project has a **Feedback name**, defaulting to its project name. Users and agents
+refer to this friendly name; they do not need routing prefixes or identifiers.
+Cerberus maps it to the actual GitHub label internally. Existing prefixed/legacy
+labels retain their exact mapping, with the routing prefix hidden in the UI. New
+queues use the plain name. Saving freezes the initial name so renaming a project
+does not move its queue. Changing the feedback name migrates existing issues before the new mapping is
+saved. If the target already has open or closed issues, Save asks whether to
+choose a different name (default) or **Acquire issues**, merging the target queue
+into this project. No migration or setting change starts before that decision.
+Names assigned to another configured project cannot be acquired. GitHub label renames retain issue numbers, comments, states and other
+labels; an already-existing destination is merged without replacing other labels.
+Interrupted migrations are recorded locally: reopen settings and retry Save to
+resume. Issue-tool operations wait while saving and refuse access during an
+incomplete migration. Existing write receipts remain valid after renaming.
+Repository changes are separate; rename first if changing both. Names must resolve to distinct labels in each shared
+repository (case-insensitively).
 
 A shared repository such as
 [`1100soft/1100-shared-feedback`](https://github.com/1100soft/1100-shared-feedback)
-can serve arbitrary projects. Each project's configuration defines its exact
-label; neither the shared instructions nor application code prescribes label
-spellings or a project list. Configure the same label in every intake integration
-and installation for that project. Future projects can inherit the default
-repository; empty labels use generated project-ID labels as described above.
-The repository's [integration instructions](https://github.com/1100soft/1100-shared-feedback#configure-a-project)
-explain configuration, submission and routing without project-specific values.
+can serve arbitrary projects. Its [integration instructions](https://github.com/1100soft/1100-shared-feedback#names-and-internal-routing)
+explain the distinction between friendly names and internal routing. Agents use
+the project-bound tool to resolve it; direct intake integrations read the exact
+GitHub label from trusted configuration rather than guessing from a name.
 
 The Feedback page lists scoped open/closed issues, reads bodies/comments, creates
 issues, comments and closes/reopens issues. Lists are bounded to 50 per page and
@@ -102,3 +112,7 @@ using the browser's existing GitHub session. Issue actions stay above the scroll
 body/comments. Support-form submissions may also create issues and send an email copy for the
 same submission. Their presence does not necessarily mean an inbox email was
 imported.
+
+Feedback names preserve the capitalization entered by the user, including when
+derived from a project name. Case-insensitive matching prevents duplicate queues;
+it must never lowercase the stored or displayed name.

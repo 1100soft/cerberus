@@ -1916,3 +1916,50 @@ parameterized submissions and scoped agent handling. Removed individual project
 guides and fixed label tables. Local integration documentation follows the same
 rule. Existing configured labels remain configuration data; no application
 label constants or project registry were introduced.
+
+
+## 2026-11-05 — Friendly feedback names
+
+Feedback settings now show a Feedback name, defaulting to the project's display
+name. Legacy routing prefixes remain in stored labels/API calls but are hidden
+in the input and queue toolbar. Editing a legacy name preserves its prefix; new
+queues use plain names. Native save materializes defaults so later project name
+changes do not move queues. Agent instructions and shared README distinguish user
+requests from resolved GitHub labels; scoped tools handle mapping automatically.
+
+
+## 2026-11-05 — Migrate feedback labels on rename
+
+Supersedes the earlier “select a different queue” behavior: saving a feedback name
+now migrates existing GitHub labels/issues first. Uses GitHub label rename when
+possible; an existing destination is merged by adding the new label before
+removing only the old label, including closed issues, fetching page one as the
+source set shrinks. Settings and scoped requests share cross-process locking.
+A private pending migration journal survives interruptions; settings reopen with
+the intended destination, and Save resumes safely. Incomplete migrations block
+scoped issue operations. Label history keeps old operation receipts valid after
+renames. Cross-project existing-name collisions are rejected; rename and repository
+changes must be separate actions. Updated UI help, guide and shared README.
+
+Repaired live Mountlet migration: renamed the existing mountlet-report GitHub
+label to Mountlet after verifying the previously-created destination was empty.
+All 46 open/closed issue IDs, title/body hashes, states, comment counts and other
+labels match the private pre-migration snapshot under config-backups. Recorded
+the old/new label mapping for receipt compatibility. External intake endpoints
+need to resolve the new configured label; Mountlet application/deployment remains
+its agent's responsibility.
+
+
+## 2026-11-05 — Confirm acquiring an occupied feedback name
+
+Native feedback save now returns a structured conflict if a renamed destination
+already has issues (state=all), before migration journaling or remote mutation.
+Default save never implicitly adopts the occupied queue; the explicit
+acquireExisting request approves merging. Case-only renames and empty targets do
+not prompt. Existing cross-project name protections remain unconditional.
+The settings prompt displays friendly names, defaults/focuses “Use a different
+name,” returns focus/selection to the input, and offers “Acquire issues.”
+Keyboard focus stays in the prompt; Escape/outside-click choose another name.
+Conflict responses do not invalidate caches or publish saved-settings events.
+Already-journaled, approved migrations resume without another acquisition prompt.
+Updated shared/local guides and native/WebKit regression coverage.
