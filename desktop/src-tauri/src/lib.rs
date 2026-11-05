@@ -959,13 +959,18 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 fn permitted_external_url(url:&str)->bool{
-    permitted_github_url(url) || feedback::documentation_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
+    permitted_github_url(url) || permitted_github_issue_url(url) || feedback::documentation_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
 }
 
 #[cfg(test)]
 mod external_url_tests {
     #[test] fn email_links_allow_browser_and_mail_only(){for link in ["https://example.org/path","http://example.org","mailto:hello@example.org"]{assert!(super::permitted_email_link(link));}for link in ["javascript:alert(1)","file:///etc/passwd","data:text/html,test","https://example.org\n"]{assert!(!super::permitted_email_link(link));}}
     use super::permitted_external_url;
+    #[test]
+    fn github_issue_links_are_allowed_without_opening_arbitrary_destinations(){
+        for value in ["https://github.com/1100soft/mountlet-report/issues/49","https://github.com/org/project/issues/1/"]{assert!(permitted_external_url(value));}
+        for value in ["http://github.com/org/project/issues/1","https://github.com.evil.test/org/project/issues/1","https://github.com@evil.test/org/project/issues/1","https://user@github.com/org/project/issues/1","https://github.com:444/org/project/issues/1","https://github.com/org/project/issues/1?redirect=https://evil.test","https://github.com/org/project/issues/not-a-number","https://github.com/org/project/issues/0","https://github.com/org/project/issues/1/extra","https://github.com/org/project/issues/1\n"]{assert!(!permitted_external_url(value),"{value}");}
+    }
     #[test]
     fn usage_pages_are_permitted(){
         for url in ["https://help.gnome.org/seahorse/keyring-unlock.html","https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html","https://cursor.com/dashboard/spending","https://claude.ai/settings/usage","https://github.com/settings/copilot","https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli","https://code.claude.com/docs/en/setup"]{
@@ -974,6 +979,14 @@ mod external_url_tests {
         assert!(!permitted_external_url("https://cursor.com/dashboard/spending?redirect=https://example.com"));
         assert!(!permitted_external_url("https://help.gnome.org/seahorse/keyring-unlock.html?redirect=https://example.com"));
     }
+}
+
+fn permitted_github_issue_url(value:&str)->bool{
+    if value.trim()!=value||value.chars().any(char::is_control){return false;}
+    let Ok(url)=url::Url::parse(value) else{return false;};
+    if url.scheme()!="https"||url.host_str()!=Some("github.com")||url.port().is_some()||!url.username().is_empty()||url.password().is_some()||url.query().is_some()||url.fragment().is_some(){return false;}
+    let parts:Vec<_>=url.path().trim_matches('/').split('/').collect();
+    parts.len()==4&&parts[..2].iter().all(|part|!part.is_empty()&&*part!="."&&*part!=".."&&part.bytes().all(|c|c.is_ascii_alphanumeric()||b"-_.".contains(&c)))&&parts[2]=="issues"&&parts[3].parse::<u64>().is_ok_and(|n|n>0)
 }
 
 fn permitted_github_url(url: &str) -> bool {

@@ -97,3 +97,9 @@ cross-channel development record. Duplicate reports from web, app and email must
 be matched on evidence, not only a subject/title. Do not create a code agent for
 every email or issue. Future event-triggered issue intake should use a durable
 cursor and explicit scope, without replaying all historical issues on setup.
+
+The issue header's **Open on GitHub** icon opens that issue in the default browser
+using the browser's existing GitHub session. Issue actions stay above the scrolling
+body/comments. Historical Mountlet support-form submissions are also issues: the
+website endpoint can write a support issue and send an email copy for the same
+submission. Their presence does not mean Cerberus imported an inbox email.

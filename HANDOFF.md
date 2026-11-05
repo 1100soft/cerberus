@@ -1869,3 +1869,27 @@ comments and menu bounds/keyboard/Escape/outside dismissal. Existing email WebKi
 regressions, email-cache checks and Mountlet report-delivery tests passed. Build
 warnings remain as before. No local checkpoint commit or application-code push
 requested or performed for this task.
+
+## 2026-11-05 — Issue browser links and fixed issue actions
+
+Fixed the issue external-link button: open_external_url's allowlist supported
+GitHub repository pages but omitted issue paths. It now accepts canonical HTTPS
+GitHub owner/repository/issues/positive-number URLs, rejecting spoofed hosts,
+credentials, custom ports, queries, malformed issue numbers and control text.
+Moved issue title/browser/close-reopen controls into a fixed reader header outside
+a dedicated scrolling body/comments area; creation forms remain scrollable.
+
+Read the real Mountlet #49 through GitHub and its events. It existed since
+2026-10-29 22:29:54Z, labeled mountlet-report/support. Its metadata says
+source=website and category=other, matching the existing report endpoint's
+[ support ] title/body format. The message is a domain-sale enquiry, not a bug.
+Mountlet's report endpoint submits support messages to GitHub when configured and
+can also send a Resend email copy. This predates the Cerberus feedback feature;
+no evidence of an issue transfer/import by Cerberus. No issue content/state or
+reporting routing was changed in this task.
+
+Validation: production build passed; 3 native external-URL tests passed, covering
+valid issue links and unsafe/incorrect URLs. WebKit issue checks passed at the
+minimum viewport and 100/140/150% zoom, including external-link dispatch and
+fixed action bounds while scrolling a long issue. The native dev watcher reloaded
+the change; one current desktop instance remains. No commit/push requested.
