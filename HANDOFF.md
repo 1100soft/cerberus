@@ -1690,3 +1690,13 @@ activity/streaming fixture; four viewport sizes at 75/100/140/150% zoom; email-c
 coalescing/account isolation/forced refresh/invalidation/race checks; chat-backup
 batching/completion/exit checks. All passed. Existing build warnings remain. No
 live mailbox mutation, new release, commit or push performed for this task.
+
+## 2026-11-05 — Checkpoint
+
+Checkpoint includes the pending release-preparation → Review/Integrate/Publish →
+release publication templates and configuration documentation, plus retained
+Projects/Email views, bounded session caches, native worker dispatch, and batched
+chat recovery writes. Validation above was reviewed; 13 publisher tests and both
+email-cache/chat-persistence checks were repeated successfully before staging.
+No credentials, generated build output or unrelated files are included. Commit
+only; no push requested or performed by this task.
