@@ -477,3 +477,13 @@ project-scoped session caches; message bodies are not written to localStorage or
 a local mail database. Configuration/mail/folder changes invalidate the affected
 snapshots, and Refresh forces a fresh folder-count scan. Cached data can briefly
 reflect its last observation while a server refresh is pending or unavailable.
+
+## Email agents
+
+See [the email agent design](email-agents.md) for the screening, triage, specialist
+and human-review workflow and its versioned prompts. **Configured mailboxes only**
+limits handoff, scheduled and manual runs to projects with email configured, even
+when all/future projects are selected. Email conditions always require a mailbox.
+`folderNames` discovers folder paths/delimiters without scanning message counts.
+Message headers include `inReplyTo` and `references` as untrusted thread hints;
+use exact message references and never reuse a UID after moving mail.

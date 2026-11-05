@@ -11,7 +11,7 @@ export type FolderOperation={operation:'create'|'rename'|'delete'|'move';parent:
 export type FolderChange={forward:FolderOperation;inverse:FolderOperation};
 export type FolderBatch={nodes:MailFolder[];changes:FolderChange[];processed:number;error?:string|null};
 export type MailRef={folder:string;validity:number;uid:number;messageId:string};
-export type FeedbackMail=MailRef&{subject:string;from:string;replyTo:string;date:string;timestamp:number;body:string;html?:string;inlineImages?:Record<string,string>;read?:boolean;starred?:boolean;attachments:string[]};
+export type FeedbackMail=MailRef&{subject:string;from:string;replyTo:string;inReplyTo?:string;references?:string;date:string;timestamp:number;body:string;html?:string;inlineImages?:Record<string,string>;read?:boolean;starred?:boolean;attachments:string[]};
 export const defaultMailbox=():MailboxConfig=>({autoSpecialFolders:true,provider:'custom',enabled:true,address:'',username:'',imapHost:'',imapPort:993,imapSecurity:'tls',smtpHost:'',smtpPort:465,smtpSecurity:'tls',inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Cerberus Notes',metadata:'Cerberus Receipts',certificatePath:'',allowSend:false});
 // Preview data stays in memory. Real mail never goes into localStorage or a DB.
 const preview=new Map<string,MailboxConfig>();

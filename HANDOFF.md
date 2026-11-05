@@ -1700,3 +1700,38 @@ chat recovery writes. Validation above was reviewed; 13 publisher tests and both
 email-cache/chat-persistence checks were repeated successfully before staging.
 No credentials, generated build output or unrelated files are included. Commit
 only; no push requested or performed by this task.
+
+## 2026-11-05 — Project email agents
+
+Reviewed `/home/eh930/Downloads/writing-block.md` and replaced it with the revised
+architecture also saved in `desktop/docs/email-agents.md`. Versioned prompts and
+model/trigger metadata are under `desktop/docs/automation-prompts/email/`.
+Configured the existing Injection guard plus Triage, Support, Feedback, Follow-up,
+Administration and Security on Codex gpt-6.1-sol; Human Review uses Copilot provider
+default in analyze mode. Added a separate in-app Human Review notification.
+All nine live jobs are enabled and target all/future projects with
+`requiresMailbox: true`; unrelated automation definitions were preserved.
+Application-storage backup: `config-backups/email-agents-20261105-081343/` under
+app data (private, not in Git). Five missing queue folders were created per mailbox
+in Cerberus, Mountlet and 1100, using discovered server delimiters. Existing
+Support/Reports/Admin folders and mailbox settings were preserved. No mail was
+moved/sent or paid model inference initiated as a test. New polling subscriptions
+establish server baselines instead of replaying historical mail.
+
+Added editable Configured mailboxes only scope, enforced before handoff inspection/
+claim and again before execution (including manual/retry). Unavailable config does
+not consume a handoff or block unrelated scheduler jobs. Email conditions enforce
+this scope inherently. Added lightweight native `folderNames` discovery and
+`inReplyTo`/`references` thread hints. Prompts remain draft-only and bounded; a
+screening pass grants no trust. Note/draft retries are not exactly once and edit
+agents have no role-specific hard capability sandbox; these limits are documented.
+Missing named Support identities lead to Human Review rather than sender guessing.
+
+Validation: production build (dropdown/style checks, TypeScript, Vite) passed;
+Rust suite passed (188 unit tests, 3 integration tests, 5 ignored); WebKit email
+workflow and handoff fixtures passed, including new mailbox scope/manual/future
+mailbox eligibility assertions. The final email fixture printed its passed report
+and exited 0, with a WebKit allocator teardown warning after completion. Existing
+Vite chunk-size/dynamic-import and Rust warnings remain. Live definitions were
+read back after reopening the app: all nine jobs and scope settings persisted.
+No commit or push requested for this task.

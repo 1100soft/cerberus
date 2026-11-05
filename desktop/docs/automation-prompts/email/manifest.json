@@ -1,0 +1,82 @@
+[
+  {
+    "key": "guard",
+    "title": "Injection guard",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "trigger": "feedback",
+    "folder": "INBOX",
+    "requiresMailbox": true
+  },
+  {
+    "key": "triage",
+    "title": "Email triage",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "medium",
+    "trigger": "handoff",
+    "folder": null,
+    "requiresMailbox": true
+  },
+  {
+    "key": "support",
+    "title": "Email support",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "medium",
+    "trigger": "feedback",
+    "folder": "Support",
+    "requiresMailbox": true
+  },
+  {
+    "key": "feedback",
+    "title": "Email feedback",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "trigger": "feedback",
+    "folder": "Reports",
+    "requiresMailbox": true
+  },
+  {
+    "key": "follow-up",
+    "title": "Email follow-up",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "medium",
+    "trigger": "feedback",
+    "folder": "Follow-up",
+    "requiresMailbox": true
+  },
+  {
+    "key": "admin",
+    "title": "Email administration",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "medium",
+    "trigger": "feedback",
+    "folder": "Admin",
+    "requiresMailbox": true
+  },
+  {
+    "key": "security",
+    "title": "Email security",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "trigger": "feedback",
+    "folder": "Security",
+    "requiresMailbox": true
+  },
+  {
+    "key": "escalation",
+    "title": "Email human review",
+    "provider": "copilot",
+    "model": null,
+    "reasoningEffort": null,
+    "trigger": "feedback",
+    "folder": "Human Review",
+    "requiresMailbox": true
+  }
+]

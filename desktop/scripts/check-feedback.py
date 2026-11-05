@@ -118,6 +118,19 @@ script = r"""
  // A feedback-only automation must dispatch for its own repo, acknowledge once,
  // preserve a reference in logs, and never persist customer content as its input.
  const job={id:'feedback-fixture',repositoryId:repo.id,repositoryIds:[repo.id],provider:'codex',threadId:'',title:'Email fixture automation',prompt:'New email received',trigger:'feedback',conditions:['feedback'],feedbackSince:Date.now()-1000,minutes:60,enabled:true,nextAt:Date.now(),editor:'vscode',kind:'notification'};
+ // Mailbox scope applies to handoff-only stages too, including manual runs.
+ const scoped={...job,id:'mailbox-scope-fixture',trigger:'handoff',conditions:['handoff'],requiresMailbox:true,handoffName:'mailbox-scope-test',includeFutureRepositories:true};
+ scheduler.savePrompt(scoped);
+ assert(await scheduler.mailboxEligible(scoped,repo.id),'Configured mailbox excluded');
+ assert(!await scheduler.mailboxEligible(scoped,other.id),'Unconfigured mailbox accepted');
+ let refused=false;try{await scheduler.runSavedPrompt(scoped.id,true,other.id);}catch(error){refused=String(error).includes('Configure Email');}
+ assert(refused,'Manual execution bypassed mailbox scope');
+ const oldPending=api.hasPendingHandoff;let unconfiguredChecks=0;
+ api.hasPendingHandoff=async id=>{if(id===other.id)unconfiguredChecks++;return false;};
+ await scheduler.checkSavedPromptSchedule();assert(unconfiguredChecks===0,'Unconfigured mailbox handoff was inspected');
+ extraConfigs.set(other.id,{...config});assert(await scheduler.mailboxEligible(scoped,other.id),'New mailbox did not become eligible');
+ await scheduler.checkSavedPromptSchedule();assert(unconfiguredChecks>0,'Newly configured mailbox handoff not inspected');
+ extraConfigs.delete(other.id);api.hasPendingHandoff=oldPending;scheduler.removePrompt(scoped.id);
  window.feedbackDebug=()=>({jobs:scheduler.savedPrompts(),requests});scheduler.savePrompt(job);await scheduler.pollFeedback();await wait(()=>requests.some(request=>request.action==='ack'));
  await wait(()=>scheduler.savedPrompts().find(item=>item.id===job.id)?.state==='completed');
  const logs=await api.listAutomationLogs(job.id);assert(logs.length===1,'Wrong email dispatch count');assert(logs[0].repositoryId===repo.id,'Email crossed project scope');const log=await api.readAutomationLog(job.id,repo.id,logs[0].runId);assert(log.feedback.uid===22,'Original email reference missing');assert(!JSON.stringify(log).includes('Customer report'),'Email body copied into run log');

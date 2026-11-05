@@ -24,7 +24,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'feedback' | 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {requiresMailbox?:boolean;feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export type AutomationRetry={feedback?:MailRef;inputValues?:AutomationInputValues;job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
 const blockedRuns=new Map<string,AutomationLog>();
 const retryingRuns=new Set<string>();
@@ -225,6 +225,14 @@ async function releaseIncomingHandoff(incoming:HandoffClaim){
   if(incoming.retained)await api.finishHandoff(incoming.repositoryId,incoming.name,incoming.id);
   else await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);
 }
+// Email-triggered jobs and their handoff stages must stay within configured mailboxes.
+export async function mailboxEligible(job:SavedPrompt,repositoryId:string):Promise<boolean>{
+  return !(job.requiresMailbox||automationConditions(job).includes('feedback'))||!!(await feedback.config(repositoryId))?.enabled;
+}
+async function scheduledMailboxEligible(job:SavedPrompt,repositoryId:string){
+  try{return await mailboxEligible(job,repositoryId);}
+  catch(error){console.warn('Could not inspect automation mailbox scope:',error);return false;}
+}
 export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string,matchedConditions?:Trigger[],retry?:AutomationRetry,manualInputValues?:AutomationInputValues,feedbackInput?:MailRef):Promise<void>{
   const originalMail=retry?.feedback||feedbackInput;
   const mail=originalMail?mailReference(originalMail):undefined;
@@ -235,6 +243,18 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
     if(!targets.length)return;
     change(id,{nextAt:Date.now()+job.minutes*60_000});
     await Promise.all(targets.map(repositoryId=>runSavedPrompt(id,false,repositoryId,incoming,ciRun,eventBranch,eventSha,matchedConditions)));return;
+  }
+  try{
+    if(!await mailboxEligible(job,runtimeRepositoryId||job.repositoryId)){
+      if(manual)throw new Error('Configure Email for this project before running this automation.');
+      if(incoming)await releaseIncomingHandoff(incoming);
+      return;
+    }
+  }catch(error){
+    // Leave pending handoffs available when mailbox configuration cannot be read.
+    if(incoming)await releaseIncomingHandoff(incoming);
+    if(manual)throw error;
+    console.warn('Could not check automation mailbox scope:',error);return;
   }
   const executionKey=contextKey(id,runtimeRepositoryId||'',eventBranch||ciRun?.headBranch||undefined,eventSha||ciRun?.headSha,incoming,mail);
   if(executions.has(executionKey)){if(incoming)await releaseIncomingHandoff(incoming);return;}
@@ -413,6 +433,7 @@ async function tick(now=Date.now()){
       if(conditions.includes('handoff')&&validHandoffName(job.handoffName||'')){
         const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
         for(const repositoryId of targets){
+          if(!await scheduledMailboxEligible(job,repositoryId))continue;
           if([...pendingConditionEvents.values()].some(pending=>pending.jobId===job.id&&pending.repositoryId===repositoryId&&pending.events.handoff))continue;
           try{if(await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))recordConditionEvent(repositoryId,'handoff',now);}catch(error){console.warn('Could not inspect handoff:',error);}
         }
@@ -424,6 +445,7 @@ async function tick(now=Date.now()){
       }
       for(const [key,pending] of pendingConditionEvents){
         if(pending.jobId!==job.id)continue;
+        if(!await scheduledMailboxEligible(job,pending.repositoryId))continue;
         const conditions=automationConditionSets(job)[pending.setIndex];
         if(!conditions||conditions.includes('manual'))continue;
         const latest=Math.max(...Object.values(pending.events).map(event=>event?.at||0));
@@ -455,7 +477,7 @@ async function tick(now=Date.now()){
       if(job.includeFutureRepositories&&!futureHandoffTargets)futureHandoffTargets=inTauri()?[...watchedRepositoryIds]:(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id);
       const targets=job.includeFutureRepositories?futureHandoffTargets!:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
       for(const repositoryId of targets){
-        if(!repositoryId)continue;
+        if(!repositoryId||!await scheduledMailboxEligible(job,repositoryId))continue;
         try{if(!await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))continue;}catch(error){console.warn('Could not inspect handoff:',error);continue;}
         if(job.kind!=='notification'&&job.kind!=='prompt'&&await repositoryAgentBusy(repositoryId))continue;
         let claim:{id:string;path:string}|null;
