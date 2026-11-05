@@ -283,6 +283,7 @@ pub fn environment(
         .join("\n");
     let mut env = HashMap::from([
         ("CERBERUS_TRACK_GIT".into(), real.to_string_lossy().into()),
+        ("CERBERUS_ACTIVITY_RUN_ID".into(), run_id.into()),
         (
             "CERBERUS_TRACK_EXECUTABLE".into(),
             std::env::current_exe()

@@ -78,5 +78,16 @@
     "trigger": "feedback",
     "folder": "Human Review",
     "requiresMailbox": true
+  },
+  {
+    "key": "inbox-triage",
+    "title": "Triage inbox",
+    "provider": "inherit screening agent",
+    "model": null,
+    "reasoningEffort": null,
+    "trigger": "manual",
+    "folder": "INBOX",
+    "requiresMailbox": true,
+    "inboxBatch": true
   }
 ]

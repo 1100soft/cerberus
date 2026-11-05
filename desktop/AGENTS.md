@@ -136,3 +136,14 @@ If port 3000 is occupied, identify its owner before taking action.
   issues. If occupied, require an explicit acquisition decision before any
   migration/settings write. Default to choosing a different name; focus the name
   input on retry. A configured other project’s queue is never acquirable.
+
+- Project cards keep their natural content height and never shrink inside the
+  scrolling list. Group names, identities and service badges so they can wrap;
+  reflow branch status using the project list's named container. Verify that
+  sibling groups do not overlap at narrow widths and 100/140/150% zoom.
+- Use distinct navigation imagery: contact card for Identities, bot for Agents,
+  tickets for Feedback. The project tray has no redundant Agent/chat action.
+  Keep it translucent when idle and opaque on hover or keyboard navigation.
+- Manual automation defaults must preserve the current project while async
+  eligibility checks are pending; only choose another project after establishing
+  that the current one is ineligible. Preserve explicit dialog choices.

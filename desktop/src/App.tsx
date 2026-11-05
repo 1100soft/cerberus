@@ -9,7 +9,7 @@ import { useWorkspaceFocus } from './lib/workspaceFocus';
 import { matchesShortcut, shortcuts } from './lib/shortcuts';
 import { ProviderSetup, type Provider } from "./components/ProviderSetup";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownWideNarrow, Bell, Clock3, FolderGit2, Mail, ListFilter, Menu, Plus, Search, Settings, ShieldCheck, MessageSquare } from "lucide-react";
+import { ArrowDownWideNarrow, Clock3, FolderGit2, Mail, ListFilter, Menu, Plus, Search, Settings, ContactRound, Tickets, Bot } from "lucide-react";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { SavedPromptsPanel } from "./components/SavedPromptsPanel";
 import { Select } from "./components/Select";
@@ -270,6 +270,12 @@ export function App() {
   const actionIndex = normalizedSelection.controlIndex;
   const historyRepository = selectedRepository && isLocal(selectedRepository) ? selectedRepository : undefined;
   useWorkspaceFocus(!providerSetup && !configRepo && !addRepo && !menu && !showAgents && !showIdentities && !showAutomation && !showFeedback&&!showIssues, historyRepository?.id);
+  useEffect(()=>{if(projectsVisible&&normalizedSelection.repositoryId!==selection.repositoryId)setSelection(normalizedSelection);},[projectsVisible,normalizedSelection.repositoryId,selection.repositoryId]);
+  const [controlNavigation,setControlNavigation]=useState({repositoryId:'',sequence:0});
+  function selectKeyboardControl(id:string,index=actionIndex,focus=true){setControlNavigation(previous=>({repositoryId:id,sequence:previous.sequence+1}));selectControl(id,index,focus);}
+  const sharedProjectId=selection.repositoryId||selectedRepository?.id;
+  function selectPageProject(id:string){setSelection({repositoryId:id,controlIndex:0});if(!visible.some(repo=>repo.id===id)){setQuery('');setListFilters(defaultRepositoryFilters);}}
+  useEffect(()=>{const open=(event:Event)=>{const {projectId,page}=(event as CustomEvent<{projectId:string;page:string}>).detail;selectPageProject(projectId);setShowIssues(page==='feedback');setShowFeedback(page==='email');setShowAgents(false);setShowAutomation(false);setShowIdentities(false);};window.addEventListener('open-project-page',open);return()=>window.removeEventListener('open-project-page',open);},[visible]);
   function selectControl(repositoryId: string, controlIndex = actionIndex, focus = false, list = visible) {
     const next = selectRepositoryControl(list, repositoryId, controlIndex);
     setSelection(next);
@@ -287,7 +293,7 @@ export function App() {
       if (!document.querySelector('[role=dialog]') && !providerSetup && !configRepo && !menu && !addRepo && !document.querySelector('[role=listbox]')) {
         if (matchesShortcut(event, 'repository.focus')) {
           event.preventDefault(); setSidebarOpen(false); setShowShortcuts(false);
-          if (!showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation && selectedRepository) selectControl(selectedRepository.id, actionIndex, true);
+          if (!showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation && selectedRepository) selectKeyboardControl(selectedRepository.id, actionIndex, true);
           return;
         }
         if (!showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation && (matchesShortcut(event, 'conversation.previous') || matchesShortcut(event, 'conversation.next'))) {
@@ -305,7 +311,7 @@ export function App() {
       const controls = repositoryControls(repo);
       const shortcut = controls.findIndex(item => item.key.toLowerCase() === event.key.toLowerCase());
       if (shortcut >= 0) {
-        event.preventDefault(); selectControl(repo.id, shortcut, true);
+        event.preventDefault(); selectKeyboardControl(repo.id, shortcut, true);
         if (controls[shortcut].id === 'identity') requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.repo-row.selected .identity')?.click());
         else void action(repo, controls[shortcut].id);
         return;
@@ -316,8 +322,8 @@ export function App() {
       event.preventDefault();
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
         const index = (selectedIndex + (event.key === 'ArrowUp' ? -1 : 1) + visible.length) % visible.length;
-        selectControl(visible[index].id, actionIndex, true);
-      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') selectControl(repo.id, actionIndex + (event.key === 'ArrowLeft' ? -1 : 1), true);
+        selectKeyboardControl(visible[index].id, actionIndex, true);
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') selectKeyboardControl(repo.id, actionIndex + (event.key === 'ArrowLeft' ? -1 : 1), true);
       else if (controls[actionIndex]?.id === 'identity') document.querySelector<HTMLButtonElement>('.repo-row.selected .identity')?.click();
       else if (controls[actionIndex]) void action(repo, controls[actionIndex].id);
     };
@@ -328,7 +334,6 @@ export function App() {
   useEffect(()=>{const show=(event:Event)=>{const detail=(event as CustomEvent<{githubLogin?:boolean;externalLogin?:'cursor'|'claude'}>).detail;setShowIssues(false);setShowFeedback(false);setProviderSetup(undefined);setStartGithubLogin(!!detail?.githubLogin);setStartExternalLogin(detail?.externalLogin);setShowIdentities(true);setShowAgents(false);setShowAutomation(false);};window.addEventListener('show-identities',show);return()=>window.removeEventListener('show-identities',show);},[]);
   async function action(repo: Repository, name: string) {
     if (busy) return;
-    if (name === 'chat') { requestAnimationFrame(() => document.querySelector<HTMLElement>('.codex-thread-list button.active, .codex-thread-list button.provider-codex, .codex-thread-list button, .conversation-search input')?.focus()); return; }
     if (name === 'configure') { setConfigRepo(repo); return; }
     setBusy(repo.id);
     try {
@@ -442,11 +447,11 @@ export function App() {
       <div className="brand"><div><b>GitCerberus</b><span>Project guardian</span></div></div>
       <nav>
         <button className={!showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowIdentities(false); setShowAgents(false); setShowAutomation(false); setIdentityPrompt(undefined); }}><FolderGit2 /><span className="nav-label">Projects</span><span className="nav-count">{repositories.length}</span></button>
-        <button className={showIdentities ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowAgents(false); setShowAutomation(false); setShowIdentities(true); }}><ShieldCheck /><span className="nav-label">Identities</span><span className="nav-count">{identities.length}</span></button>
-        <button className={showAgents ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowAgents(true); setShowIdentities(false); setShowAutomation(false); }}><Bell /><span className="nav-label">Agents</span></button>
+        <button className={showIdentities ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowAgents(false); setShowAutomation(false); setShowIdentities(true); }}><ContactRound /><span className="nav-label">Identities</span><span className="nav-count">{identities.length}</span></button>
+        <button className={showAgents ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowAgents(true); setShowIdentities(false); setShowAutomation(false); }}><Bot /><span className="nav-label">Agents</span></button>
         <button className={showAutomation ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setAutomationDraft(undefined); setShowAutomation(true); setShowAgents(false); setShowIdentities(false); }}><Clock3 /><span className="nav-label">Automation</span></button>
         <button className={showFeedback?"active":""} onClick={()=>{setShowIssues(false);setShowFeedback(true);setShowAgents(false);setShowIdentities(false);setShowAutomation(false);}}><Mail/><span className="nav-label">Email</span></button>
-        <button className={showIssues?'active':''} onClick={()=>{setShowIssues(true);setShowFeedback(false);setShowAgents(false);setShowIdentities(false);setShowAutomation(false);}}><MessageSquare/><span className="nav-label">Feedback</span></button>
+        <button className={showIssues?'active':''} onClick={()=>{setShowIssues(true);setShowFeedback(false);setShowAgents(false);setShowIdentities(false);setShowAutomation(false);}}><Tickets/><span className="nav-label">Feedback</span></button>
       </nav>
       <div className="aside-bottom"><label className="auto-fast-forward-setting" title="Fast-forward branches from their configured upstream when no agents are active and worktrees are clean. Diverged branches are left unchanged."><input type="checkbox" checked={autoFastForward} onChange={event=>setAutoFastForward(event.target.checked)}/>Auto fast-forward</label>{conversationStorageError&&<p className="config-error" role="alert">{conversationStorageError}</p>}<button onClick={() => { setShowShortcuts(open => !open); }}><Settings />Keyboard shortcuts</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
     </aside>
@@ -506,7 +511,7 @@ export function App() {
       <div className="repository-workspace">
       <div className="repository-list-column">
       <section className="repo-grid" tabIndex={-1}>
-        {visible.map((repo, index) => <RepositoryCard key={repo.id} repository={repo} identities={identities} chatgpt={chatgptAccounts} external={externalAccounts} catalog={githubReady ? githubRepositories : undefined} onAssignIdentity={async (identityId) => { await api.assignIdentity(repo.id, identityId); setRepositories(await api.repositories()); setNotice(`Updated identity for ${repo.displayName}`); }} selected={index === selectedIndex} actionIndex={actionIndex} busy={!!busy} onSelect={(controlIndex, focus) => selectControl(repo.id, controlIndex, focus)} onAction={(name) => action(repo, name)} onConfigure={() => { setMenu(undefined); setConfigRepo(repo); }} onContextMenu={(event) => setMenu({ repository: repo, x: event.clientX, y: event.clientY })} dragSource={isLocal(repo)?reorderCards.source(repo.id,repo.displayName):undefined} dragItem={isLocal(repo)?reorderCards.item(repo.id):undefined} changedLines={changedLines[repo.id]}/>) }
+        {visible.map((repo, index) => <RepositoryCard key={repo.id} repository={repo} identities={identities} chatgpt={chatgptAccounts} external={externalAccounts} catalog={githubReady ? githubRepositories : undefined} onAssignIdentity={async (identityId) => { await api.assignIdentity(repo.id, identityId); setRepositories(await api.repositories()); setNotice(`Updated identity for ${repo.displayName}`); }} selected={index === selectedIndex} actionIndex={actionIndex} controlNavigation={controlNavigation.repositoryId===repo.id?controlNavigation.sequence:0} busy={!!busy} onSelect={(controlIndex, focus) => selectControl(repo.id, controlIndex, focus)} onAction={(name) => action(repo, name)} onConfigure={() => { setMenu(undefined); setConfigRepo(repo); }} onContextMenu={(event) => setMenu({ repository: repo, x: event.clientX, y: event.clientY })} dragSource={isLocal(repo)?reorderCards.source(repo.id,repo.displayName):undefined} dragItem={isLocal(repo)?reorderCards.item(repo.id):undefined} changedLines={changedLines[repo.id]}/>) }
         {!visible.length && <div className="empty"><FolderGit2 /><h2>No projects found</h2><p>Try another search or add a local Git repository.</p></div>}
       </section>
       </div>
@@ -534,9 +539,9 @@ export function App() {
       <ChatgptLoginDialog onSetup={()=>setProviderSetup('codex')}/>
       {providerSetup && <ProviderSetup provider={providerSetup} onClose={() => setProviderSetup(undefined)} />}
       <AgentsPanel identities={identities} onSetup={setProviderSetup} visible={showAgents} />
-      {(emailVisited||showFeedback)&&<div className="email-page-cache" hidden={!showFeedback} style={{display:showFeedback?'contents':'none'}}><FeedbackPanel repositories={repositories} initialRepositoryId={selectedRepository?.id} active={showFeedback}/></div>}
-      <IssueFeedbackPage repositories={repositories} identities={identities} active={showIssues} initialRepositoryId={selectedRepository?.id}/>
-      {showAutomation && <section className="automation-page" aria-label="Automation"><SavedPromptsPanel repositories={repositories} profiles={chatgptAccounts.profiles} chatgptSettings={chatgptAccounts.settings} external={externalAccounts} identities={identities} draft={automationDraft}/></section>}
+      {(emailVisited||showFeedback)&&<div className="email-page-cache" hidden={!showFeedback} style={{display:showFeedback?'contents':'none'}}><FeedbackPanel repositories={repositories} initialRepositoryId={sharedProjectId} onProjectChange={selectPageProject} active={showFeedback}/></div>}
+      <IssueFeedbackPage repositories={repositories} identities={identities} active={showIssues} initialRepositoryId={sharedProjectId} onProjectChange={selectPageProject}/>
+      {showAutomation && <section className="automation-page" aria-label="Automation"><SavedPromptsPanel initialRepositoryId={sharedProjectId} repositories={repositories} profiles={chatgptAccounts.profiles} chatgptSettings={chatgptAccounts.settings} external={externalAccounts} identities={identities} draft={automationDraft}/></section>}
       {showIdentities && <IdentitiesPanel identities={identities} inferredOwner={identityPrompt?.owner} pendingRepositoryId={identityPrompt?.repositoryId} startGithubLogin={startGithubLogin} startExternalLogin={startExternalLogin} onClose={() => { setShowIdentities(false); setIdentityPrompt(undefined); setStartGithubLogin(false); setStartExternalLogin(undefined); }} onChanged={reload} />}
       {menu && <RepositoryContextMenu repository={menu.repository} x={menu.x} y={menu.y} busy={busy === menu.repository.id} onAction={(name) => void contextAction(menu.repository, name)} onClose={() => setMenu(undefined)} />}
       {configRepo && <RepositoryConfigDialog repository={configRepo} identities={identities} catalog={githubReady ? githubRepositories : undefined} onClose={() => setConfigRepo(undefined)} onSave={saveConfig} onRemove={() => removeRepo(configRepo)} />}

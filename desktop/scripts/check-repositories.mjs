@@ -16,7 +16,8 @@ assert.equal(identitiesWithRepositoryAccess([{id:'one'},{id:'two'}], repos[0], [
 assert.equal(identitiesWithRepositoryAccess([{id:'one'},{id:'two'}], repos[1], [remote, { ...remote, identityId: 'two' }, { ...remote, id: 2, name: 'Other', htmlUrl: 'https://github.com/owner/other', identityId: 'two' }]).map(i => i.id).join(), 'two');
 assert.equal(repos[0].github.private, true);
 assert.equal(isLocal(repos[1]), false);
-assert.equal(repositoryControls(repos[0])[0].id, 'chat');
+assert.equal(repositoryControls(repos[0])[0].id, 'identity');
+assert(!repositoryControls(repos[0]).some(control=>control.id==='chat'));
 assert.ok(repositoryControls(repos[0]).some(c => c.id === 'identity' && c.label === 'Assign account'));
 assert.ok(!repositoryControls(repos[1]).some(c => c.id === 'editor'));
 assert.ok(repositoryControls(repos[1]).some(c => c.id === 'clone'));

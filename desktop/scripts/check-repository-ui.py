@@ -58,11 +58,23 @@ script = r"""
   }
   repositoryList.style.maxHeight = '';
   rows()[0].click(); await pause();
+  for(const row of rows()){
+    const box=row.getBoundingClientRect(),heading=row.querySelector('.row-heading').getBoundingClientRect(),state=row.querySelector('.repo-state').getBoundingClientRect();
+    const overlap=(a,b)=>Math.min(a.right,b.right)-Math.max(a.left,b.left)>1&&Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1;
+    assert(!overlap(heading,state),'Project heading overlaps branch status at '+zoom);
+    const fields=[...row.querySelectorAll('.row-name,.repo-account-badges,.repo-service-badges')].filter(el=>el.getBoundingClientRect().width>0).map(el=>el.getBoundingClientRect());
+    for(let i=0;i<fields.length;i++){assert(fields[i].left>=box.left-1&&fields[i].right<=box.right+1,'Card field exceeds its width at '+zoom);for(let j=i+1;j<fields.length;j++)assert(!overlap(fields[i],fields[j]),'Card fields overlap at '+zoom);}
+    assert(row.scrollWidth<=row.clientWidth+2,'Project card overflows horizontally at '+zoom);
+  }
   window.__repositoryProgress = 'project controls '+zoom;
   const before = rows().map(row => row.getBoundingClientRect().height);
   rows()[1].click(); await pause();
   assert(rows().every((row, i) => Math.abs(row.getBoundingClientRect().height - before[i]) < 1), 'Selection changed card height: ' + JSON.stringify({before, after:rows().map(row => row.getBoundingClientRect().height), zoom}));
   const card = selected();
+  document.activeElement?.blur();card.focus();await new Promise(resolve=>setTimeout(resolve,2100));
+  assert(Number(getComputedStyle(card.querySelector('.row-panel')).opacity)<.6,'Tray is not translucent while idle');
+  key(card,'ArrowRight');await pause();assert(card.querySelector('.row-panel').classList.contains('keyboard-active'),'Keyboard control navigation did not reveal the tray');
+
   const editor = card.querySelector('[aria-label="Open in VS Code"]');
   editor.focus(); await pause();
   key(editor, 'ArrowRight'); await pause();
@@ -110,7 +122,7 @@ script = r"""
   assert(tray.top < rowRect.bottom && tray.bottom > rowRect.bottom, 'Tray does not overlap card bottom');
   const mid = (rowRect.left + rowRect.right) / 2, trayMid = (tray.left + tray.right) / 2;
   assert(Math.abs(trayMid - mid) < rowRect.width / 3, 'Control tray is not centered on the card');
-  assert(rowRect.height / zoom <= 38, 'Project cards are not dense');
+  const headingBox=card.querySelector('.row-heading').getBoundingClientRect(),stateBox=card.querySelector('.repo-state').getBoundingClientRect(),cardStyle=getComputedStyle(card);const stacked=stateBox.top>=headingBox.bottom-1;const contentHeight=(stacked?headingBox.height+stateBox.height:Math.max(headingBox.height,stateBox.height))/zoom;const requiredHeight=contentHeight+parseFloat(cardStyle.paddingTop)+parseFloat(cardStyle.paddingBottom)+2+(stacked?parseFloat(cardStyle.rowGap):0);assert(rowRect.height/zoom<=Math.max(32,requiredHeight)+3,'Project card reserves unnecessary empty height');
   assert(!card.querySelector('.availability'), 'Local presence consumes card content');
   assert(card.querySelector('.repo-owner').getBoundingClientRect().top < rowRect.top, 'Owner is not on the corner');
   assert(card.querySelector('.repo-visibility').getBoundingClientRect().top < rowRect.top, 'Visibility is not on the corner');
@@ -203,11 +215,8 @@ script = r"""
   document.querySelector('.summary').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); await pause();
   assert(!document.querySelector('.repo-filters'), 'Filter panel did not close on outside click');
   rows()[0].click(); await pause();
-  let chatButton = selected().querySelector('[aria-label="Chat with agent"]');
-  assert(chatButton && chatButton.dataset.controlIndex === '0', 'Chat must be the first project action');
-  chatButton.click(); await pause();
+  assert(!selected().querySelector('[aria-label="Chat with agent"]'), 'Removed Agent shortcut remains in the tray');
   let input = document.querySelector('.codex-thread-list button.active');
-  assert(input && document.activeElement?.closest('.codex-panel'), 'Chat action must focus the Agent history pane');
   assert(!document.querySelector('.chat-composer, [aria-label="Agent permissions"], [aria-label="Model"]'), 'Read-only Agent pane exposed input controls');
   const providerCheckbox = document.querySelector('.provider-controls input');
   if (!providerCheckbox.checked) { providerCheckbox.click(); await pause(); }
@@ -231,7 +240,6 @@ script = r"""
   assert(document.querySelector('.codex-thread-list .active b')?.textContent === 'Review project', 'Project selection should open latest conversation');
   assert(!document.querySelector('.toast'), 'Persistent monitoring overlay remains');
   input = document.querySelector('.codex-thread-list button.active');
-  chatButton = selected().querySelector('[aria-label="Chat with agent"]');
   input.focus();
   assert(document.querySelector('.turn-edits-button')?.textContent.includes('changed file'), 'Per-response edit overview missing');
   const display = document.querySelector('.codex-messages');

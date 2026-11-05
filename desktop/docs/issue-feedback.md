@@ -116,3 +116,20 @@ imported.
 Feedback names preserve the capitalization entered by the user, including when
 derived from a project name. Case-insensitive matching prevents duplicate queues;
 it must never lowercase the stored or displayed name.
+
+## Project cards and active work
+
+Project cards show whether the feedback repository and mapped label are reachable,
+and the number of **open issues** with that label (pull requests excluded). Counts
+are cached per project for two minutes, refreshed after local changes, and can lag
+GitHub's search index briefly. An unavailable label or credential shows a warning,
+not a zero. The feedback and email icons open their respective pages for that
+project. Project selection is shared across Projects, Email and Feedback. Catalog
+projects without a linked local folder still navigate to their setup empty state.
+
+While an app-managed agent/script reads or changes a specific issue through the
+project tool, its issue card shows the active task name. Completion removes the
+indicator. The tool records only the run ID, issue number and timestamp alongside
+existing commit provenance; it stores no issue body. Reads of an issue list alone
+do not attribute every issue to the agent. Agents operating through unrelated
+external clients cannot be reliably attributed by Cerberus.
