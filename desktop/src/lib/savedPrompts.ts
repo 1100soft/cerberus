@@ -704,6 +704,14 @@ export async function recoverFeedbackRuns(){
 }
 let feedbackPolling=false;
 const feedbackErrors=new Map<string,{count:number;next:number;notice:boolean}>();
+const feedbackNoticeAt=new Map<string,number>();
+function reportEmailPollingFailure(repositoryId:string,repositoryLabel:string,automationTitle:string,folder:string,reason:unknown){
+  const title=`${repositoryLabel}: email checks delayed`,now=Date.now();
+  const previous=Math.max(feedbackNoticeAt.get(repositoryId)||0,...currentAutomationNotices().filter(notice=>notice.repositoryId===repositoryId&&(notice.automationId==='email-monitor'||notice.title===title)).map(notice=>notice.createdAt));
+  if(now-previous<60*60_000)return;
+  feedbackNoticeAt.set(repositoryId,now);
+  addAutomationNotice({automationId:'email-monitor',repositoryId,title,message:`Mailbox polling could not check ${folder||'the watched folder'} (${automationTitle}). This does not mean an email agent failed. Checks will retry automatically; automations remain enabled.`,details:String(reason),steps:['Open Email and select this project to inspect the affected folder.','For a local mail bridge, check that it is running. Change connection settings only if the mailbox itself cannot be opened.'],status:'message'});
+}
 export async function pollFeedback(){
   if(feedbackPolling)return;feedbackPolling=true;
   try{
@@ -715,6 +723,7 @@ export async function pollFeedback(){
         if(health&&Date.now()<health.next)continue;
         if([...pendingConditionEvents.values()].some(pending=>pending.jobId===job.id&&pending.repositoryId===repo.id&&pending.events.feedback))continue;
         if(currentAutomationRuns().some(run=>run.automationId===job.id&&run.repositoryId===repo.id&&run.feedback))continue;
+        let watchedFolder=job.feedbackFolder||job.feedbackPath?.filter(part=>part!=='\0mailbox').join('/')||'INBOX';
         try{
           const config=await feedback.config(repo.id);if(!config?.enabled)continue;
           // Legacy/imported jobs start observing now; never replay the mailbox accidentally.
@@ -727,6 +736,7 @@ export async function pollFeedback(){
             if(!resolved){feedbackErrors.delete(key);continue;} // Partial folder coverage is intentional.
             folder=resolved;
           }
+          watchedFolder=folder;
           const events=await feedback.request<MailRef[]>(repo.id,{action:'poll',folder,subscription:job.id,since:job.feedbackSince});
           feedbackErrors.delete(key);
           const latestConfig=await feedback.config(repo.id);
@@ -743,7 +753,7 @@ export async function pollFeedback(){
         }catch(reason){
           const count=(health?.count||0)+1,notice=health?.notice||count>=3;
           feedbackErrors.set(key,{count,next:Date.now()+Math.min(900000,60000*2**Math.min(count-1,4)),notice});
-          if(count>=3&&!health?.notice)addAutomationNotice({automationId:job.id,repositoryId:repo.id,title:`${repo.displayName}: email checks delayed`,message:`${String(reason)} Open Email → mailbox settings to check the connection. Automation remains enabled.`,status:'message'});
+          if(count>=3&&!health?.notice)reportEmailPollingFailure(repo.id,repo.displayName,job.title,watchedFolder,reason);
         }
       }
     }

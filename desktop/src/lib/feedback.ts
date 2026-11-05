@@ -28,6 +28,7 @@ const overviews=new PageSnapshots<{value:unknown;at:number}>(32);
 const configurations=new PageSnapshots<{value:MailboxConfig|null;at:number}>(64);
 window.addEventListener('feedback-mail-changed',event=>{const id=(event as CustomEvent<string>).detail;overviews.clear(key=>!id||key===id);});
 window.addEventListener('feedback-config-changed',event=>{const id=(event as CustomEvent<string>).detail;configurations.clear(key=>!id||key===id);overviews.clear(key=>!id||key===id);});
+export const cachedMailboxConfiguration=(id:string)=>configurations.peek(id)?.value;
 async function mailboxConfiguration(id:string):Promise<MailboxConfig|null>{
  const cached=configurations.peek(id);if(cached&&Date.now()-cached.at<30_000)return cached.value;
  return (await configurations.load(id,async()=>({value:inTauri()?await invoke<MailboxConfig|null>('feedback_config',{repositoryId:id}):preview.get(id)||null,at:Date.now()}))).value;

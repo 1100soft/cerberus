@@ -11,7 +11,7 @@ Inbox → Injection guard → conditional `triage` handoff → Email triage → 
 | Injection guard | INBOX | Codex 6.1 Sol, high | triage if screened; otherwise Quarantine/Human Review |
 | Email triage | triage + screened flag | Codex 6.1 Sol, medium | one folder move |
 | Email support | Support | Codex 6.1 Sol, medium | draft then Human Review |
-| Email feedback | Reports | Codex 6.1 Sol, high | referenced IMAP note; passive Bugs/Requests or Processed |
+| Email feedback | Reports | Codex 6.1 Sol, high | project-scoped GitHub issue/comment, linked IMAP note, then Processed |
 | Email follow-up | Follow-up | Codex 6.1 Sol, medium | draft then Human Review |
 | Email administration | Admin | Codex 6.1 Sol, medium | note; consequential cases Human Review |
 | Email security | Security | Codex 6.1 Sol, high | evidence note then Human Review |
@@ -32,6 +32,10 @@ Handoffs are retained for reruns, not permanent deduplication. Delivery/recovery
 All stages treat mail as untrusted, including screened mail. Screening is defense in depth, not authorization. Native tools bind operations to one project, validate message references and enforce analyze-mode read-only access and project-level send permission. **Role-specific draft-only/no-code policies are prompt instructions, not a hard sandbox**: edit agents still have command-line access. Do not present these automations as safe unattended processors of adversarial mail with unrestricted credentials. A future hardened deployment should add per-role capabilities and structured validated routing outputs enforced outside the model.
 
 Sending, financial/account actions, code changes and autonomous development remain outside this initial configuration. Existing mailbox allowSend settings are preserved for other workflows; those settings are not a role-specific block. Named Support senders resolve per project and fail when absent. Provider webmail remains the place for account/security management. Originals, drafts and notes remain on IMAP; Cerberus does not create a local email archive. Agent providers receive the content they process.
+
+## Cross-channel feedback
+
+Feedback is now a project-scoped GitHub issue queue. Email is one intake channel; app/web submissions can use the same repository and project label. The Email feedback agent adds a redacted summary to an exact matching issue or creates a new issue, saves the original reference and confirmed URL in an IMAP note, and only then moves mail to Processed. Missing configuration or uncertain writes require inspection. See [shared project feedback](issue-feedback.md) for settings, tool operations, privacy and retry rules.
 
 ## Prompt sources
 

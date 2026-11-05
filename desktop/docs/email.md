@@ -487,3 +487,22 @@ when all/future projects are selected. Email conditions always require a mailbox
 `folderNames` discovers folder paths/delimiters without scanning message counts.
 Message headers include `inReplyTo` and `references` as untrusted thread hints;
 use exact message references and never reuse a UID after moving mail.
+
+Folder trees are cached separately per project in bounded session memory. Switching
+projects restores the cached hierarchy immediately and refreshes it independently
+of message loading. Refresh failures preserve the last usable tree; late results
+from another project cannot replace the selected project’s hierarchy. Account
+configuration changes invalidate that project’s cached tree.
+
+Email automation checks treat empty folders and folders with no newer UIDs as
+normal idle queues. Arrival searches use explicit UID bounds from the selected
+mailbox snapshot, avoiding Bridge's error on open-ended searches of empty folders.
+Polling failures back off per watcher; notifications are consolidated per project
+and limited to one per hour, including brief recoveries and retained notification
+history. A polling warning names its folder and does not imply an agent failed,
+disable automations, or by itself require reconnecting the mailbox.
+
+Incoming bug/feature email can join the [shared GitHub feedback queue](issue-feedback.md).
+The Email feedback agent forwards a redacted summary through the project-scoped
+issue tool and stores the original reference and confirmed issue URL in an IMAP
+note. The email is marked Processed only after both writes succeed.

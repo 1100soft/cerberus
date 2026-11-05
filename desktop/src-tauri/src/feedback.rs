@@ -605,7 +605,7 @@ fn connect(c: &Config, secret: &str) -> Result<Session, String> {
         .login(&c.username, secret)
         .map_err(|_| "IMAP login failed. Check the username and app/Bridge password.".into())
 }
-fn select(s: &mut Session, name: &str, expected: Option<u32>) -> Result<u32, String> {
+fn select_mailbox(s: &mut Session, name: &str, expected: Option<u32>) -> Result<imap::types::Mailbox, String> {
     folder(name)?;
     let m = s
         .select(wire_folder(name))
@@ -614,7 +614,10 @@ fn select(s: &mut Session, name: &str, expected: Option<u32>) -> Result<u32, Str
     if expected.is_some_and(|old| old != validity) {
         return Err("This message reference expired after a mailbox reset. Refresh and select the message again.".into());
     }
-    Ok(validity)
+    Ok(m)
+}
+fn select(s: &mut Session, name: &str, expected: Option<u32>) -> Result<u32, String> {
+    select_mailbox(s,name,expected)?.uid_validity.ok_or_else(||"Server did not provide UIDVALIDITY".into())
 }
 fn ensure(s: &mut Session, name: &str) -> Result<(), String> {
     folder(name)?;
@@ -1101,12 +1104,17 @@ fn poll(
     let Some((validity, after)) = baseline else {
         return Ok(serde_json::json!([]));
     };
-    select(s, name, Some(validity))?;
+    let mailbox=select_mailbox(s,name,Some(validity))?;
+    // Bridge rejects UID ranges on empty folders, and a reversed `start:*`
+    // range can include old messages. Bound this read to the SELECT snapshot.
+    let highest=mailbox.uid_next.ok_or("Server omitted UIDNEXT")?.saturating_sub(1);
+    let Some(first)=after.checked_add(1) else {return Ok(serde_json::json!([]));};
+    if mailbox.exists==0 || first>highest {return Ok(serde_json::json!([]));}
     let mut ids: Vec<_> = s
-        .uid_search(format!("UID {}:* UNDELETED", after.saturating_add(1)))
-        .map_err(|_| "Cannot search email arrivals")?
+        .uid_search(format!("UID {first}:{highest} UNDELETED"))
+        .map_err(|error| format!("Cannot search email arrivals in {name}: {error}"))?
         .into_iter()
-        .filter(|uid| *uid > after)
+        .filter(|uid| *uid >= first && *uid <= highest)
         .collect();
     ids.sort_unstable();
     let mut events = vec![];
@@ -3095,6 +3103,21 @@ mod wire_tests {
             .any(|record| record.contains("Customer text")));
     }
     #[test]
+    fn polling_skips_empty_and_unchanged_folders_without_uid_search() {
+        for empty in [true,false] {
+            let observed=if empty {SELECT.replace("1 EXISTS","0 EXISTS").replace("UIDNEXT 3","UIDNEXT 1")} else {SELECT.into()};
+            let steps=vec![
+                ("EXAMINE",SELECT.into()),("SELECT",SELECT.into()),("UID SEARCH","* SEARCH\r\n".into()),
+                ("SELECT",SELECT.into()),("UID SEARCH","* SEARCH 2\r\n".into()),
+                ("BODY.PEEK[HEADER]",fetched(true,&format!("X-Cerberus-Watermark: 7:{}\r\n\r\n",if empty {0} else {2}))),
+                ("SELECT",SELECT.into()),("SELECT",observed),
+            ];
+            let (root,port,server)=fixture(steps);let c=config_for(root.path(),port);let mut s=connect(&c,"fixture-secret").unwrap();
+            let result=poll(&mut s,&c,&Request{subscription:"job".into(),since:1,..Default::default()},"INBOX").unwrap();
+            assert_eq!(result,serde_json::json!([]));s.logout().unwrap();assert!(server.join().unwrap().is_empty());
+        }
+    }
+    #[test]
     fn polling_catches_old_mail_moved_after_baseline_and_suppresses_handled_ids() {
         let event = URL_SAFE_NO_PAD.encode(identity(&reference()));
         let mut steps = vec![
@@ -3106,7 +3129,7 @@ mod wire_tests {
                 fetched(true, &format!("X-Cerberus-Event: {event}\r\n\r\n")),
             ),
         ];
-        steps.extend([("SELECT",SELECT.into()),("UID SEARCH","* SEARCH 2\r\n".into()),("BODY.PEEK[HEADER]",fetched(true,"X-Cerberus-Watermark: 7:2\r\n\r\n")),("SELECT",SELECT.into()),("SELECT",SELECT.into()),("UID 3:* UNDELETED","* SEARCH 2 3 4\r\n".into()),("UID FETCH 3,4",format!("{}{}",fetched(true,HEADER).replacen("UID 2","UID 3",1),fetched(true,"Message-ID: <moved-old@example.org>\r\nDate: Mon, 01 Jan 2020 00:00:00 +0000\r\n\r\n").replacen("UID 2","UID 4",1)))]);
+        steps.extend([("SELECT",SELECT.into()),("UID SEARCH","* SEARCH 2\r\n".into()),("BODY.PEEK[HEADER]",fetched(true,"X-Cerberus-Watermark: 7:2\r\n\r\n")),("SELECT",SELECT.into()),("SELECT",SELECT.replace("UIDNEXT 3","UIDNEXT 5")),("UID 3:4 UNDELETED","* SEARCH 2 3 4\r\n".into()),("UID FETCH 3,4",format!("{}{}",fetched(true,HEADER).replacen("UID 2","UID 3",1),fetched(true,"Message-ID: <moved-old@example.org>\r\nDate: Mon, 01 Jan 2020 00:00:00 +0000\r\n\r\n").replacen("UID 2","UID 4",1)))]);
         let (root, port, server) = fixture(steps);
         let c = config_for(root.path(), port);
         let mut s = connect(&c, "fixture-secret").unwrap();

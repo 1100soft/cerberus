@@ -108,3 +108,12 @@ page polling/shortcuts; do not discard drafts, selection or scroll on navigation
 Keep mailbox content transient in memory, never localStorage or a local mail DB;
 never cache credentials. Test navigation with delayed backends, stale/failed
 reads, mutation invalidation, draft retention and hidden-page keyboard isolation.
+
+## Development server ownership
+
+Tauri starts Vite through beforeDevCommand on port 3000. Reuse an existing
+project dev server for browser/WebKit checks; never leave a standalone server
+started for tests running after the checks. Track the exact process/group you
+start and stop it in cleanup, including failures. Do not kill another project’s
+server, silently change ports, or run standalone Vite alongside `npm run tauri dev`.
+If port 3000 is occupied, identify its owner before taking action.
