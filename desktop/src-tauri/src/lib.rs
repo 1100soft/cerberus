@@ -367,47 +367,16 @@ fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{stat
 #[tauri::command]
 fn script_runtime_platform()->String{script_runtime::platform().preset}
 #[tauri::command]
-fn script_runtime_settings(state: State<AppState>) -> Result<script_runtime::Runtime, String> {
-    script_runtime::settings(&state.data_dir)
-}
+fn script_runtime_settings(state:State<AppState>)->Result<script_runtime::Runtime,String>{script_runtime::settings(&state.data_dir)}
 #[tauri::command]
-fn save_script_runtime(
-    config: script_runtime::Runtime,
-    state: State<AppState>,
-) -> Result<(), String> {
-    script_runtime::save(&state.data_dir, &config)
-}
+fn save_script_runtime(config:script_runtime::Runtime,state:State<AppState>)->Result<(),String>{script_runtime::save(&state.data_dir,&config)}
 #[tauri::command]
-fn script_runtime_candidates(
-    repository_id: Option<String>,
-    state: State<AppState>,
-) -> Result<Vec<script_runtime::Status>, String> {
-    let repo = if let Some(id) = repository_id {
-        state.db.repository_path(&id)?
-    } else {
-        std::env::current_dir().map_err(|e| e.to_string())?
-    };
-    Ok(script_runtime::candidates(&repo))
-}
+fn script_runtime_candidates(repository_id:Option<String>,state:State<AppState>)->Result<Vec<script_runtime::Status>,String>{let repo=if let Some(id)=repository_id{state.db.repository_path(&id)?}else{std::env::current_dir().map_err(|e|e.to_string())?};Ok(script_runtime::candidates(&repo))}
 #[tauri::command]
-async fn check_script_runtime(
-    repository_id: Option<String>,
-    config: script_runtime::Runtime,
-    state: State<'_, AppState>,
-) -> Result<script_runtime::Status, String> {
-    let repo = if let Some(id) = repository_id {
-        state.db.repository_path(&id)?
-    } else {
-        std::env::current_dir().map_err(|e| e.to_string())?
-    };
-    let config = if config.preset == "default" {
-        script_runtime::settings(&state.data_dir)?
-    } else {
-        config
-    };
-    tauri::async_runtime::spawn_blocking(move || script_runtime::check(&repo, &config))
-        .await
-        .map_err(|e| e.to_string())
+async fn check_script_runtime(repository_id:Option<String>,config:script_runtime::Runtime,state:State<'_,AppState>)->Result<script_runtime::Status,String>{
+ let repo=if let Some(id)=repository_id{state.db.repository_path(&id)?}else{std::env::current_dir().map_err(|e|e.to_string())?};
+ let config=if config.preset=="default"{script_runtime::settings(&state.data_dir)?}else{config};
+ tauri::async_runtime::spawn_blocking(move||script_runtime::check(&repo,&config)).await.map_err(|e|e.to_string())
 }
 #[tauri::command]
 async fn run_automation_shell(
@@ -457,28 +426,11 @@ async fn run_automation_shell(
     .map_err(|error| error.to_string())?
 }
 #[tauri::command]
-async fn watch_automation_repositories(
-    repository_ids: Vec<String>,
-    state: State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<Vec<String>, String> {
-    let mut errors = Vec::new();
-    let desired = repository_ids
-        .into_iter()
-        .filter_map(|id| match state.db.repository_path(&id) {
-            Ok(path) => Some((id, path)),
-            Err(error) => {
-                errors.push(format!("{id}: {error}"));
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    let watchers = state.repository_watchers.clone();
-    errors.extend(
-        tauri::async_runtime::spawn_blocking(move || watchers.sync(desired, app))
-            .await
-            .map_err(|error| error.to_string())??,
-    );
+async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
+    let mut errors=Vec::new();
+    let desired=repository_ids.into_iter().filter_map(|id|match state.db.repository_path(&id){Ok(path)=>Some((id,path)),Err(error)=>{errors.push(format!("{id}: {error}"));None}}).collect::<Vec<_>>();
+    let watchers=state.repository_watchers.clone();
+    errors.extend(tauri::async_runtime::spawn_blocking(move||watchers.sync(desired,app)).await.map_err(|error|error.to_string())??);
     Ok(errors)
 }
 #[tauri::command]

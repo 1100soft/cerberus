@@ -1963,3 +1963,28 @@ Keyboard focus stays in the prompt; Escape/outside-click choose another name.
 Conflict responses do not invalidate caches or publish saved-settings events.
 Already-journaled, approved migrations resume without another acquisition prompt.
 Updated shared/local guides and native/WebKit regression coverage.
+
+
+## 2026-11-05 — Checkpoint validation
+
+Reviewed the full tracked/untracked checkpoint: shared issue feedback and native
+scoped tools, friendly label names and resumable/confirmed label migrations,
+email agent prompts/mailbox eligibility, faster cached folder switching, bounded
+IMAP arrival searches, warning cooldown and CI-fix authorization guidance. No
+credentials, mailbox bodies, private app configuration, generated build artifacts
+or unrelated project changes are included. Cleaned up unrelated Rust formatting.
+The broader folder regression fixture now strips imports once and supplies the
+real PageSnapshots dependency; the saved-prompts fixture waits for streamed log
+text instead of asserting as soon as an empty log container mounts.
+Validation includes production build (dropdown/style checks, TypeScript, Vite),
+210 native unit tests and three integration tests (five unit tests ignored),
+email cache/folder checks, shared-feedback WebKit at 100/140/150% and automation
+WebKit checks. Existing bundle-size and native dead-code warnings remain.
+
+Email WebKit assertions also passed with process exit 0; WebKit emitted
+`free(): corrupted unsorted chunks` during teardown, as observed in this session
+before the checkpoint. Treat this as an unresolved runtime diagnostic, not a
+clean teardown result. No further application changes were made for that issue.
+Secret scan hits were existing invalid private-key rejection test strings, not
+credentials. All repository changes are included in this checkpoint; app-private
+settings/backups and other project working trees remain outside this repository.
