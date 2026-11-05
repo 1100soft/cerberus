@@ -32,4 +32,4 @@ export function matchesShortcut(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | '
   const binding: Binding = shortcuts[command];
   return !event.isComposing && !event.altKey && (event.key === binding.key || !!binding.aliases?.includes(event.key)) && (binding.primary ? (event.ctrlKey || event.metaKey) : !event.metaKey && event.ctrlKey === !!binding.ctrl) && (!!binding.allowShift || event.shiftKey === !!binding.shift);
 }
-export const repositoryActionKeys = { chat: 'A', identity: 'I', editor: 'E', cursor: 'C', locate: 'I', clone: 'C', hosted: 'G', configure: ',' };
+export const repositoryActionKeys = { identity: 'I', editor: 'E', cursor: 'C', locate: 'I', clone: 'C', hosted: 'G', configure: ',' };

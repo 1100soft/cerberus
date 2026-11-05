@@ -24,7 +24,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'feedback' | 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {requiresMailbox?:boolean;feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {inboxBatch?:boolean;requiresMailbox?:boolean;feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export type AutomationRetry={feedback?:MailRef;inputValues?:AutomationInputValues;job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
 const blockedRuns=new Map<string,AutomationLog>();
 const retryingRuns=new Set<string>();
@@ -233,6 +233,24 @@ async function scheduledMailboxEligible(job:SavedPrompt,repositoryId:string){
   try{return await mailboxEligible(job,repositoryId);}
   catch(error){console.warn('Could not inspect automation mailbox scope:',error);return false;}
 }
+const inboxBatches=new Set<string>();
+export async function collectInboxReferences(repositoryId:string):Promise<MailRef[]>{
+ const references:MailRef[]=[];let before:MailRef|undefined,validity:number|undefined;
+ while(true){
+  const rows=await feedback.request<MailRef[]>(repositoryId,{action:'list',folder:'INBOX',...(before?{message:before}:{})},true);
+  if(!rows.length)break;
+  for(const row of rows){const ref=mailReference(row);if(!Number.isInteger(ref.uid)||ref.uid<=0||ref.folder!=='INBOX'||before&&ref.uid>=before.uid)throw Error('Inbox changed while collecting messages. Refresh and retry.');if(validity!==undefined&&ref.validity!==validity)throw Error('Inbox was reset. Refresh and retry.');validity=ref.validity;references.push(ref);}
+  const next=rows.reduce((a,b)=>a.uid<b.uid?a:b);before=mailReference(next);if(rows.length<50)break;
+ }
+ return references;
+}
+export function installInboxTriage(){
+ const marker='gitcerberus.inbox-triage-installed.v1';if(localStorage.getItem(marker)||jobs.some(job=>job.inboxBatch))return;
+ const guard=jobs.find(job=>job.requiresMailbox&&automationConditions(job).includes('feedback')&&job.emitsHandoffs?.some(name=>emittedHandoff(name).name==='triage'));
+ if(!guard)return;
+ savePrompt({...guard,id:'manual-inbox-triage',title:'Triage inbox',trigger:'manual',conditions:['manual'],conditionSets:[['manual']],inboxBatch:true,runtimeTarget:true,enabled:true,includeFutureRepositories:true,repositoryIds:[],repositoryId:'',state:undefined,lastResult:undefined,lastAt:undefined,errorUnread:false,nextAt:Date.now()});
+ localStorage.setItem(marker,'true');
+}
 export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string,matchedConditions?:Trigger[],retry?:AutomationRetry,manualInputValues?:AutomationInputValues,feedbackInput?:MailRef):Promise<void>{
   const originalMail=retry?.feedback||feedbackInput;
   const mail=originalMail?mailReference(originalMail):undefined;
@@ -255,6 +273,12 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
     if(incoming)await releaseIncomingHandoff(incoming);
     if(manual)throw error;
     console.warn('Could not check automation mailbox scope:',error);return;
+  }
+  if(job.inboxBatch&&manual&&!mail){
+    const project=runtimeRepositoryId||job.repositoryId,key=JSON.stringify([id,project]);
+    if(inboxBatches.has(key))throw Error('Inbox triage is already running for this project.');
+    inboxBatches.add(key);
+    try{const messages=await collectInboxReferences(project);for(const message of messages){if(!jobs.some(item=>item.id===id&&(!job.enabled||item.enabled)))break;if(currentAutomationRuns().some(run=>run.repositoryId===project&&run.feedback&&mailKey(run.feedback)===mailKey(message)))continue;const started=Date.now();await runSavedPrompt(id,true,project,undefined,undefined,undefined,undefined,['manual'],undefined,manualInputValues,message);if(currentAutomationLogs(id).some(log=>log.repositoryId===project&&log.feedback&&mailKey(log.feedback)===mailKey(message)&&log.createdAt>=started&&log.status==='error'))throw Error('Inbox triage paused after a blocked message. Open its log and retry that message before rerunning the batch.');}if(!messages.length)addAutomationNotice({automationId:id,repositoryId:project,title:'Inbox is empty',message:'No emails to triage.',status:'message'});}finally{inboxBatches.delete(key);}return;
   }
   const executionKey=contextKey(id,runtimeRepositoryId||'',eventBranch||ciRun?.headBranch||undefined,eventSha||ciRun?.headSha,incoming,mail);
   if(executions.has(executionKey)){if(incoming)await releaseIncomingHandoff(incoming);return;}
@@ -760,6 +784,7 @@ export async function pollFeedback(){
   }catch(reason){console.warn('Email polling:',reason);}finally{feedbackPolling=false;}
 }
 export function startSavedPromptScheduler(){
+  installInboxTriage();
   void startAutomationMaintenance(()=>recoverFeedbackRuns().then(recoverNotificationAutomations).then(recoverAutomationConversations).then(refreshBlockedAutomations),cleanupRetainedAutomationCheckouts,error=>console.warn('Automation recovery/cleanup:',error));
   // The dashboard remains mounted when the Tauri window is hidden. A crash or
   // restart preserves interrupted runs for explicit retry. Saved job state is

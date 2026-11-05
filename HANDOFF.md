@@ -1988,3 +1988,69 @@ clean teardown result. No further application changes were made for that issue.
 Secret scan hits were existing invalid private-key rejection test strings, not
 credentials. All repository changes are included in this checkpoint; app-private
 settings/backups and other project working trees remain outside this repository.
+
+
+## 2026-11-05 — Project feedback status, shared selection and item work
+
+Project cards now link email/feedback badges to their pages, preserving the
+selected project across all three pages (including catalog-only setup states).
+Feedback status verifies the configured label and reports the GitHub-indexed open
+issue count, excluding PRs, with two-minute coalesced status caching and mutation
+refresh. Warnings are distinguished from zero counts. Native work stays off the
+UI thread. Reference-only item tool activity uses the existing tracked run ID and
+commit-provenance directory; the UI joins that metadata to live agent/automation
+runs, polls only for active projects/tasks, and clears working indicators on
+completion. Email trigger references also provide immediate attribution.
+
+Configured manual “Triage inbox” in app-private storage while the desktop app was
+not running, with a private backup, inherited screening provider/model/prompt and
+conditional triage handoff. It was not executed. Added one-time installation for
+other existing screening chains; deletion is respected. The batch snapshots all
+current Inbox references with UID pagination, screens sequentially, emits normal
+Triage handoffs, skips in-flight inputs and pauses on a blocked item. Each item
+has a separate log/retry context. Manual run uses the selected project and
+filters mailbox-only automations to configured mailboxes.
+
+Validation: production build/type checking and dropdown/style checks passed;
+212 native unit tests plus three integration tests passed (five ignored). New
+Inbox pagination/installation checks and existing email cache checks passed.
+WebKit feedback, email and automation suites passed, including cross-page
+selection/card links, issue counts, active item indicators, default acquisition
+safeguards and zoomed layouts. Added the new Inbox and shared-feedback fixtures
+to CI. The owned temporary Vite test server was stopped after validation.
+
+
+## 2026-11-05 — Responsive project cards and control tray
+
+Reworked cards into wrapping name/account/service groups with independently
+wrapping branch status; at narrow project-list container widths status moves
+below the heading. Cards retain their required content height and never flex-
+shrink; stale older card-grid container queries were removed without removing
+unrelated pane rules. The floating tray wraps within its card, is translucent
+when idle, and becomes opaque on hover, visible keyboard focus or keyboard
+control-navigation signals. Removed the redundant Agent action and A shortcut.
+Identities now uses ContactRound, Agents/Agent pane uses Bot, and Feedback uses
+Tickets consistently on cards/page/sidebar.
+
+Manual run now waits for mailbox eligibility before normalizing its selected
+project, preserving the current project instead of falling back while the choices
+are temporarily empty. Projects also synchronizes its visible normalized
+selection into the shared selection owner. Added regression coverage for delayed
+mailbox defaults, non-overlapping groups, content-sized card heights and idle/
+keyboard tray emphasis; updated the retired Agent-action expectations.
+
+Validation: production build/type checking, stylesheet/dropdown checks and
+repository control/selection checks passed. Native WebKit UI assertions passed
+at 900×620 and 1720×700 with 100/140/150% zoom, covering group overlap, natural
+card height, tray opacity/keyboard navigation, account menus, scrolling and the
+removed action. The shared-feedback fixture also passed its delayed mailbox
+selected-project regression, and minimum-window viewport checks passed. WebKit
+continues emitting the previously recorded heap diagnostic during teardown.
+
+Checkpoint verification (2026-11-06): production build (including dropdown/style
+checks and TypeScript), inbox triage, repository selection, email cache/folder
+checks, release tooling tests, shell syntax and focused Rust formatting passed.
+The native suite passed on retry: 212 unit tests and 3 integration tests, with
+5 ignored; its first attempt hit transient ETXTBSY in the Codex login fixture.
+Previously completed minimum/wide WebKit layout and shared-selection checks
+remain documented above. No push performed for this checkpoint.

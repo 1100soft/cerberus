@@ -59,7 +59,6 @@ export function identitiesWithRepositoryAccess(identities: Identity[], repo: { c
 export type RepositoryControl = { id: string; label: string; key: string };
 export function repositoryControls(repo: Repository): RepositoryControl[] {
   const controls: RepositoryControl[] = isLocal(repo) ? [
-    { id: 'chat', label: 'Chat with agent', key: repositoryActionKeys.chat },
     { id: 'identity', label: 'Assign account', key: repositoryActionKeys.identity },
     { id: 'editor', label: 'Open in VS Code', key: repositoryActionKeys.editor },
     { id: 'cursor', label: 'Open in Cursor', key: repositoryActionKeys.cursor },

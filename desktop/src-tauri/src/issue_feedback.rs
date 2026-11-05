@@ -653,7 +653,12 @@ fn execute_in_scope(
     read_only: bool,
     api: &Github,
 ) -> Result<Value, String> {
-    if read_only && !matches!(r.action.as_str(), "list" | "read" | "comments" | "status") {
+    if read_only
+        && !matches!(
+            r.action.as_str(),
+            "list" | "read" | "comments" | "status" | "summary"
+        )
+    {
         return Err("Analyze mode permits only reading feedback".into());
     }
     if r.body.len() > 60_000 || r.title.len() > 240 {
@@ -667,6 +672,41 @@ fn execute_in_scope(
         return Ok(
             json!({"scope":s,"private":info["private"],"canWrite":info["permissions"]["push"]}),
         );
+    }
+    if r.action == "summary" {
+        api.get(&label_path(&s.label), &[])?;
+        let search = Github {
+            http: api.http.clone(),
+            secret: api.secret.clone(),
+            base: api
+                .base
+                .split_once("/repos/")
+                .map(|parts| parts.0)
+                .unwrap_or(&api.base)
+                .into(),
+            reserved_labels: Vec::new(),
+        };
+        let result = search.get(
+            "/search/issues",
+            &[
+                (
+                    "q",
+                    format!(
+                        "repo:{} is:issue is:open label:{}",
+                        s.repository,
+                        serde_json::to_string(&s.label).unwrap()
+                    ),
+                ),
+                ("per_page", "1".into()),
+            ],
+        )?;
+        if result["incomplete_results"] == true {
+            return Err("GitHub issue count is temporarily incomplete; retry later".into());
+        }
+        let count = result["total_count"]
+            .as_u64()
+            .ok_or("Invalid GitHub issue count")?;
+        return Ok(json!({"openCount":count,"labelConfigured":true}));
     }
     if r.action == "list" {
         let state = if r.state.is_empty() {
@@ -916,7 +956,7 @@ pub fn cli_main() -> Option<i32> {
     if std::env::args().nth(1).as_deref() != Some("--cerberus-issues") {
         return None;
     }
-    let result = (|| {
+    let result: Result<serde_json::Value, String> = (|| {
         let root = std::env::var("CERBERUS_ISSUE_DATA_DIR")
             .map_err(|_| "Feedback tool is not configured")?;
         let id = std::env::var("CERBERUS_ISSUE_PROJECT")
@@ -933,13 +973,29 @@ pub fn cli_main() -> Option<i32> {
             serde_json::from_str(&text).map_err(|_| "Invalid feedback request")?;
         let root = Path::new(&root);
         let db = Database::open_read_only(root.join("gitcerberus.db"))?;
-        execute(
+        let number = request.number;
+        let action = request.action.clone();
+        let result = execute(
             root,
             &db,
             &id,
             request,
             std::env::var("CERBERUS_ISSUE_READ_ONLY").as_deref() == Ok("true"),
-        )
+        )?;
+        let number = if action == "create" {
+            result["number"].as_u64().unwrap_or(0)
+        } else {
+            number
+        };
+        if number > 0
+            && matches!(
+                action.as_str(),
+                "read" | "comments" | "comment" | "update" | "create"
+            )
+        {
+            crate::item_activity::record(root, &id, None, Some(number));
+        }
+        Ok(result)
     })();
     match result {
         Ok(value) => {
@@ -1024,6 +1080,35 @@ mod tests {
         assert!(!repo_valid("../other"));
         assert!(!repo_valid("org/repo?token=x"));
         assert!(!label_valid("project:a,project:b"));
+    }
+    #[test]
+    fn summary_checks_label_and_counts_only_open_issues_in_scope() {
+        let (api, server) = mock(vec![
+            (200, json!({"name":"project:one"})),
+            (200, json!({"total_count":17,"incomplete_results":false})),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let result = execute_in_scope(
+            root.path(),
+            "one",
+            &test_scope(),
+            Request {
+                action: "summary".into(),
+                ..Request::default()
+            },
+            true,
+            &api,
+        )
+        .unwrap();
+        assert_eq!(result["openCount"], 17);
+        let calls = server.join().unwrap();
+        assert!(calls[0].starts_with("GET /labels/project%3Aone"));
+        assert!(
+            calls[1].starts_with("GET /search/issues?")
+                && calls[1].contains("is%3Aissue")
+                && calls[1].contains("is%3Aopen")
+                && calls[1].contains("repo%3Aorg%2Fshared")
+        );
     }
     #[test]
     fn disabled_project_retains_its_queue_ownership() {

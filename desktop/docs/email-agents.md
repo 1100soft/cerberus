@@ -40,3 +40,26 @@ Feedback is now a project-scoped GitHub issue queue. Email is one intake channel
 ## Prompt sources
 
 Versioned prompts and model/trigger metadata live in [automation-prompts/email](automation-prompts/email/manifest.json). Live automation configuration is in Cerberus application storage, separate from Git. Future projects need mailbox setup, the corresponding queue folders and an assigned provider identity. The existing folder-copy UI standardizes queues across projects. Agents discover folderNames without slow per-folder counts and never create folders from untrusted messages.
+
+## Manual Inbox triage
+
+**Triage inbox** is a manual automation. Choose the project in its run dialog
+(the shared project selection is preselected); only configured mailboxes are
+eligible. It snapshots all current INBOX references, paging older messages without
+reading bodies, and processes them sequentially through the existing screening
+policy. Accepted messages emit the conditional `triage` handoff; the existing
+Triage agent routes them to the specialist folders and their downstream agents.
+New arrivals are outside the snapshot and remain with the normal watcher.
+
+Each message has its own run, log and retry context. A blocked message pauses the
+batch; inspect/retry that message before rerunning. Currently running messages
+are skipped. Disabling a running batch or removing its automation stops it between
+messages. Messages are not acknowledged as automatic arrivals or replayed on
+startup. No inference is run when configuring the automation.
+
+The initial manual automation inherits the configured screening agent's prompt,
+provider, model and conditional handoffs. It is installed once when that chain is
+present; deleting it is respected. Its `inboxBatch` setting is retained when
+editing it. Working indicators on email cards use the original triggering
+reference and/or reference-only tool activity, matched to currently running tasks.
+They disappear on completion, and do not infer identity from message subjects.

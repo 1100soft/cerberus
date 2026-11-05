@@ -1,3 +1,4 @@
+import {IssueFeedbackBadge} from './IssueFeedbackBadge';
 import {FeedbackMailboxBadge} from './FeedbackMailboxBadge';
 import { assignedExternalIdentity, externalProviders, useExternalIdentities } from '../lib/externalIdentities';
 import { RepositoryAccounts } from './RepositoryAccounts';
@@ -6,7 +7,7 @@ import { ProviderIdentityBadge } from './ProviderIdentityBadge';
 import { useRepositoryAgentWorking } from '../lib/agentChats';
 import { repositoryHistoryWorking, subscribe } from '../lib/conversationCache';
 import { assignedChatgpt,repositoryAccountKey,useChatgptAccounts } from '../lib/chatgptAccounts';
-import { MessageSquare, AlertTriangle, ArrowDown, ArrowUp, CloudDownload, ExternalLink, FolderOpen, GitBranch, Globe, Lock, Settings2, UserRound, LoaderCircle, Clock3 } from "lucide-react";
+import {  AlertTriangle, ArrowDown, ArrowUp, CloudDownload, ExternalLink, FolderOpen, GitBranch, Globe, Lock, Settings2, UserRound, LoaderCircle, Clock3 } from "lucide-react";
 import { CursorIcon, VSCodeIcon } from "./Icons";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { associatedIdentity, identitiesWithRepositoryAccess, isLocal, ownerColor, repositoryControls, repositoryOwner, repositoryVisibility } from "../lib/repositories";
@@ -22,7 +23,7 @@ type Props = {
   repository: Repository; identities: Identity[]; catalog?: GithubRepository[];
   chatgpt: ReturnType<typeof useChatgptAccounts>; external: ReturnType<typeof useExternalIdentities>;
   onAssignIdentity: (identityId: string) => Promise<void>;
-  selected: boolean; actionIndex: number; busy?: boolean;
+  selected: boolean; actionIndex: number;controlNavigation?:number; busy?: boolean;
   onSelect: (controlIndex?: number, focus?: boolean) => void;
   onAction: (action: string) => void;
   onConfigure: () => void; onContextMenu: (event: React.MouseEvent) => void;
@@ -30,7 +31,7 @@ type Props = {
   dragItem?:ReturnType<ReturnType<typeof useCardReorder>['item']>;
   changedLines?:number;
 };
-export function RepositoryCard({ repository: repo, identities, catalog, chatgpt, external, onAssignIdentity, selected, actionIndex, busy, onSelect, onAction, onConfigure, onContextMenu, dragSource, dragItem, changedLines }: Props) {
+export function RepositoryCard({ repository: repo, identities, catalog, chatgpt, external, onAssignIdentity, selected, actionIndex, controlNavigation=0, busy, onSelect, onAction, onConfigure, onContextMenu, dragSource, dragItem, changedLines }: Props) {
   const accountKey=repositoryAccountKey(repo);
   const appWorking=useRepositoryAgentWorking(repo.id);
   const historyWorking=useSyncExternalStore(subscribe,()=>repositoryHistoryWorking(repo.id));
@@ -38,6 +39,8 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
   const automationWorking=useAutomationWorking(repo.id);
   const assigned=assignedChatgpt(chatgpt.settings,accountKey);
   const chatgptAccount=chatgpt.profiles.find(profile=>profile.id===assigned);
+  const [trayActive,setTrayActive]=useState(false);
+  useEffect(()=>{if(!selected||!controlNavigation){setTrayActive(false);return;}setTrayActive(true);const timer=setTimeout(()=>setTrayActive(false),1800);return()=>clearTimeout(timer);},[controlNavigation,selected]);
   const [assignOpen, setAssignOpen] = useState(false);
   const local = isLocal(repo);
   const changes = repo.stagedCount + repo.modifiedCount + repo.untrackedCount;
@@ -47,7 +50,7 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
   const account = associatedIdentity(repo, identities);
   const assignable = identitiesWithRepositoryAccess(identities, repo, catalog);
   const visibilityDetail = repo.github ? `${repo.github.private ? "Private" : "Public"} GitHub repository` : repo.hostType === 'github' ? 'Visibility unverified. Connect an account that can access this project.' : 'Visibility is not verified for this host.';
-  const icons: Record<string, React.ReactNode> = { chat: <MessageSquare />, editor: <VSCodeIcon />, cursor: <CursorIcon />, hosted: <ExternalLink />, configure: <Settings2 />, clone: <CloudDownload />, locate: <FolderOpen /> };
+  const icons: Record<string, React.ReactNode> = { editor: <VSCodeIcon />, cursor: <CursorIcon />, hosted: <ExternalLink />, configure: <Settings2 />, clone: <CloudDownload />, locate: <FolderOpen /> };
   useEffect(() => { if (!selected) setAssignOpen(false); }, [selected]);
   return <article {...dragItem} {...dragSource} className={`repo-row ${selected ? "selected" : ""} ${local ? "repo-local" : "repo-remote"} ${dragItem?.className||''}`}
     style={{ "--owner-color": ownerColor(owner) } as React.CSSProperties} data-repository-id={repo.id}
@@ -61,23 +64,24 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
     >
     <span className="repo-owner" title={`Owner: ${owner}`}>{owner}</span>
     <div className="row-heading">
-      <AccountBadge identity={account} />
+      <strong className="row-name" title={repo.displayName}>{repo.displayName}</strong>
+      <div className="repo-account-badges">      <AccountBadge identity={account} />
       {assigned && <ChatgptAccountBadge account={chatgptAccount} assignedId={assigned} inherited={!Object.hasOwn(chatgpt.settings.repositories,accountKey)} />}
       {externalProviders.map(({id:provider})=>{const id=assignedExternalIdentity(external.settings,provider,accountKey);const account=external.identities.find(item=>item.id===id);return account?<ProviderIdentityBadge key={provider} provider={provider} id={account.id} label={account.label}/>:null;})}
-      <strong className="row-name" title={repo.displayName}>{repo.displayName}</strong>
-      <FeedbackMailboxBadge repositoryId={repo.id}/>
+</div>
+      <div className="repo-service-badges">      <FeedbackMailboxBadge repositoryId={repo.id} showEmpty onOpen={()=>window.dispatchEvent(new CustomEvent('open-project-page',{detail:{projectId:repo.id,page:'email'}}))}/><IssueFeedbackBadge repositoryId={repo.id}/>
       {agentWorking && <span title="Agent working"><LoaderCircle className="conversation-working repository-working" aria-label="Agent working"/></span>}
-      {automationWorking && <span title="Automation running"><Clock3 className="conversation-working automation-working" aria-label="Automation running"/></span>}
+      {automationWorking && <span title="Automation running"><Clock3 className="conversation-working automation-working" aria-label="Automation running"/></span>}</div>
     </div>
     <span className={`repo-visibility ${visibility}`} title={visibilityDetail} aria-label={visibilityDetail}>{repo.github ? (repo.github.private ? <Lock /> : <Globe />) : <span>?</span>}</span>
     <div className="repo-state">
-      {local && <><span className="branch" title={`Working branch: ${repo.branch ?? "Detached HEAD"}`}><GitBranch />{repo.branch ?? "Detached HEAD"}</span>
+      {local && <><span className="branch" title={`Working branch: ${repo.branch ?? "Detached HEAD"}`}><GitBranch /><span className="branch-name">{repo.branch ?? "Detached HEAD"}</span></span>
       <span className={`ahead-count ${repo.ahead ? "ahead" : "muted"}`} title={`${repo.ahead} commits ahead`}><ArrowUp />{repo.ahead}</span>
       <span className={repo.behind ? "behind" : "muted"} title={`${repo.behind} commits behind`}><ArrowDown />{repo.behind}</span>
       <span className={`change-indicator ${(changedLines??changes)>0 ? "changes" : "clean"}`} title={changedLines===undefined?"Counting changed lines…":`${changedLines} changed lines since the last commit (added plus deleted; untracked included)`} aria-label={changedLines===undefined?'Counting changed lines':`${changedLines} changed lines since the last commit`}>{changedLines===undefined?'…':changedLines}</span></>}
       {repo.identityMismatch && <AlertTriangle className="row-warning" aria-label="Identity mismatch" />}
     </div>
-    {selected && <div className="row-panel" aria-label={`Controls for ${repo.displayName}`}>
+    {selected && <div className={`row-panel ${trayActive?'keyboard-active':''}`} aria-label={`Controls for ${repo.displayName}`}>
       <div className="row-actions">
       {controls.map((control, index) => control.id === 'identity'
         ? <button key={control.id} data-control-index={index} className={`identity ${actionIndex === index ? "chosen" : ""}`} disabled={busy}

@@ -1960,7 +1960,7 @@ pub fn cli_main() -> Option<i32> {
         return None;
     }
     use std::io::Read;
-    let result = (|| {
+    let result: Result<serde_json::Value, String> = (|| {
         let root = std::env::var_os("CERBERUS_EMAIL_DATA_DIR")
             .or_else(|| std::env::var_os("CERBERUS_FEEDBACK_ROOT"))
             .ok_or("Email tools are available only in a configured Cerberus run")?;
@@ -1986,7 +1986,10 @@ pub fn cli_main() -> Option<i32> {
         if matches!(request.action.as_str(), "ack" | "poll" | "test" | "status") {
             return Err("This operation is reserved for the automation scheduler".into());
         }
-        execute(Path::new(&root), &id, request)
+        let message=request.message.clone();
+        let result=execute(Path::new(&root), &id, request)?;
+        if let Some(message)=message { crate::item_activity::record(Path::new(&root),&id,Some(message),None); }
+        Ok(result)
     })();
     match result {
         Ok(value) => {

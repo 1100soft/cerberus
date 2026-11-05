@@ -1,3 +1,4 @@
+mod item_activity;
 mod issue_feedback;
 pub use issue_feedback::cli_main as issue_feedback_cli_main;
 mod feedback;
@@ -875,6 +876,12 @@ async fn auto_fast_forward(repository_id:String,app:tauri::AppHandle,state:State
 #[tauri::command]
 async fn sync_email_senders(repository_id:String,config:Option<feedback::Config>,token:Option<String>,push:bool,state:State<'_,AppState>)->Result<feedback::Config,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||sender_sync::synchronize(&root,&repository_id,config,token,push)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
+async fn project_item_activity(repository_id: String, run_ids: Vec<String>, state: State<'_,AppState>) -> Result<Vec<item_activity::ItemActivity>,String> {
+    let root=state.data_dir.clone();
+    let db=state.db.clone();
+    tauri::async_runtime::spawn_blocking(move|| {db.repository_path(&repository_id)?;item_activity::read(&root,&repository_id,&run_ids)}).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
 async fn issue_feedback_settings(
     state: State<'_, AppState>,
 ) -> Result<issue_feedback::Settings, String> {
@@ -1312,6 +1319,7 @@ pub fn run() {
             repository_automation_logs,
             repository_commit_origins,
             sync_email_senders,
+            project_item_activity,
             issue_feedback_settings,
             save_issue_feedback_settings,
             issue_feedback_scope,

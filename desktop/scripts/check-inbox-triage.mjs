@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import ts from 'typescript';
+const source=await readFile(new URL('../src/lib/savedPrompts.ts',import.meta.url),'utf8');
+const functions=source.slice(source.indexOf('export async function collectInboxReferences'),source.indexOf('export async function runSavedPrompt'));
+const stored=new Map(),jobs=[{id:'guard',title:'Custom screening name',requiresMailbox:true,conditions:['feedback'],emitsHandoffs:['(triage)'],provider:'codex',model:'chosen-model',prompt:'Keep screening policy',threadId:'',enabled:true}];
+let calls=[],mode='normal';
+globalThis.inboxFixture={jobs,localStorage:{getItem:key=>stored.get(key),setItem:(key,value)=>stored.set(key,value)},automationConditions:job=>job.conditions,emittedHandoff:name=>({name:name.replace(/[()]/g,'')}),savePrompt:job=>jobs.push(job),mailReference:row=>({folder:row.folder,validity:row.validity,uid:row.uid,messageId:row.messageId}),feedback:{request:async(id,r,force)=>{calls.push({id,r,force});if(!r.message)return Array.from({length:50},(_,n)=>({folder:'INBOX',validity:7,uid:100-n,messageId:'id'+n}));return [{folder:'INBOX',validity:mode==='reset'?8:7,uid:mode==='loop'?51:50,messageId:'older'}];}}};
+const js=ts.transpileModule('const {jobs,localStorage,automationConditions,emittedHandoff,savePrompt,mailReference,feedback}=globalThis.inboxFixture;\n'+functions,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {collectInboxReferences,installInboxTriage}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const refs=await collectInboxReferences('chosen-project');assert.equal(refs.length,51);assert.equal(calls.length,2);assert(calls.every(c=>c.id==='chosen-project'&&c.r.folder==='INBOX'&&c.force));assert.equal(calls[1].r.message.uid,51);
+mode='reset';await assert.rejects(collectInboxReferences('chosen-project'),/reset/);
+mode='loop';await assert.rejects(collectInboxReferences('chosen-project'),/changed/);
+installInboxTriage();const manual=jobs.find(j=>j.inboxBatch);assert(manual);assert.equal(manual.trigger,'manual');assert.deepEqual(manual.conditions,['manual']);assert.equal(manual.prompt,jobs[0].prompt);assert.equal(manual.model,'chosen-model');assert.equal(manual.runtimeTarget,true);assert.equal(manual.requiresMailbox,true);assert.deepEqual(manual.emitsHandoffs,['(triage)']);
+installInboxTriage();assert.equal(jobs.filter(j=>j.inboxBatch).length,1);jobs.splice(jobs.indexOf(manual),1);installInboxTriage();assert(!jobs.some(j=>j.inboxBatch));
+console.log('Inbox snapshot pagination, scope, reset/cursor protection, guard inheritance and one-time manual triage installation passed.');

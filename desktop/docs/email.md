@@ -506,3 +506,11 @@ Incoming bug/feature email can join the [shared GitHub feedback queue](issue-fee
 The Email feedback agent forwards a redacted summary through the project-scoped
 issue tool and stores the original reference and confirmed issue URL in an IMAP
 note. The email is marked Processed only after both writes succeed.
+
+Project-card email and feedback icons open the corresponding page and synchronize
+project selection with Projects. Email cards show the names of app-managed tasks
+currently handling their exact mailbox reference, including handoff stages that
+read the message through the tool. Only references and activity timestamps are
+recorded; message bodies remain on the server. Work performed in an unrelated
+external client cannot be attributed automatically. See [manual Inbox triage](email-agents.md#manual-inbox-triage)
+for applying the email-agent chain to existing Inbox messages deliberately.
