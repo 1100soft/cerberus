@@ -7,16 +7,15 @@ project has a distinct project label. Empty labels generate stable project-ID
 labels; changing a project's display name never changes its queue. Existing
 reports are not automatically migrated when a repository/label changes.
 
-One private repository serves the configured projects:
-[`1100soft/1100-shared-feedback`](https://github.com/1100soft/1100-shared-feedback).
-It was renamed from `1100soft/mountlet-report`; existing issue numbers, comments
-and labels remain intact. Mountlet retains `mountlet-report`; Cerberus uses
-`project:cerberus`, 1100 uses `project:1100`, CI uses `project:ci`, and InDEx uses
-`project:index`. These readable labels are explicitly configured on this machine;
-other installations must configure the same labels. Future projects otherwise
-inherit the default with generated project-ID labels. The repository contains
-[per-project instructions](https://github.com/1100soft/1100-shared-feedback#project-queues)
-with exact labels, submission examples and routing policy; it need not be cloned.
+A shared repository such as
+[`1100soft/1100-shared-feedback`](https://github.com/1100soft/1100-shared-feedback)
+can serve arbitrary projects. Each project's configuration defines its exact
+label; neither the shared instructions nor application code prescribes label
+spellings or a project list. Configure the same label in every intake integration
+and installation for that project. Future projects can inherit the default
+repository; empty labels use generated project-ID labels as described above.
+The repository's [integration instructions](https://github.com/1100soft/1100-shared-feedback#configure-a-project)
+explain configuration, submission and routing without project-specific values.
 
 The Feedback page lists scoped open/closed issues, reads bodies/comments, creates
 issues, comments and closes/reopens issues. Lists are bounded to 50 per page and
@@ -35,11 +34,6 @@ project label. Treat classification labels (`bug`, `enhancement`, `support`,
 GitHub issues cannot have per-label token permissions, so the intake server must
 set its own project label rather than trusting the client's requested label.
 
-Mountlet's source now supports `REPORT_GITHUB_PROJECT_LABEL` (defaults to its
-existing `mountlet-report`). Its 422 retry drops optional labels only, retaining
-that project label. These source changes need Mountlet's usual review/deployment;
-its agent owns updating the deployed repository setting and verifying token access
-after the rename. Repository redirects must not be relied on for API writes.
 
 ## Project-bound agent and script tools
 
@@ -105,6 +99,6 @@ cursor and explicit scope, without replaying all historical issues on setup.
 
 The issue header's **Open on GitHub** icon opens that issue in the default browser
 using the browser's existing GitHub session. Issue actions stay above the scrolling
-body/comments. Historical Mountlet support-form submissions are also issues: the
-website endpoint can write a support issue and send an email copy for the same
-submission. Their presence does not mean Cerberus imported an inbox email.
+body/comments. Support-form submissions may also create issues and send an email copy for the
+same submission. Their presence does not necessarily mean an inbox email was
+imported.

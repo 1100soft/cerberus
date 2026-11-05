@@ -1906,3 +1906,13 @@ project guide each for Mountlet, Cerberus, 1100, CI and InDEx under `projects/`
 in the shared repository. Guides cover mandatory labels, CLI/REST intake, native
 scoped tools, privacy, deduplication and project onboarding. Mountlet application
 compatibility, credentials and deployment updates are delegated to its agent.
+
+
+## 2026-11-05 — Generic shared-feedback instructions
+
+Supersedes the project-specific guides above: shared README now describes
+onboarding any project, resolving its repository/label from configuration,
+parameterized submissions and scoped agent handling. Removed individual project
+guides and fixed label tables. Local integration documentation follows the same
+rule. Existing configured labels remain configuration data; no application
+label constants or project registry were introduced.
