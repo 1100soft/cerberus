@@ -1,3 +1,5 @@
+mod issue_feedback;
+pub use issue_feedback::cli_main as issue_feedback_cli_main;
 mod feedback;
 mod sender_sync;
 pub use feedback::cli_main as feedback_cli_main;
@@ -291,18 +293,74 @@ async fn run_new_agent_conversation(repository_id:String,provider:String,identit
     let key=prompt_repository_key(&record);
     let root=state.data_dir.clone();
     if let Some(ref run_id)=automation_run_id{let worktree_root=root.clone();let path=repo.clone();let id=repository_id.clone();let run_id=run_id.clone();repo=tauri::async_runtime::spawn_blocking(move||automation_worktrees::prepare(&worktree_root,&path,&id,&run_id,automation_commit.as_deref())).await.map_err(|error|error.to_string())??;}
-    let mut tracking=tracking_run_id.as_deref().or(automation_run_id.as_deref()).map(|id|commit_provenance::environment(&root,&repo,&repository_id,id)).transpose()?;
-    let mail_env=feedback::environment(&root,&repository_id,mode=="analyze")?;
-    let has_mail=!mail_env.is_empty();
-    tracking.get_or_insert_with(Default::default).extend(mail_env);
-    let prompt=if has_mail{format!("{prompt}{}",feedback::instructions())}else{prompt};
-    let registration=request_id.map(|id|state.drafts.register(id)).transpose()?;
-    let cancelled=registration.as_ref().map(|item|item.cancelled.clone());
-    if provider=="copilot" {
-        if record.identity.as_ref().map(|item|item.id.as_str())!=Some(identity_id.as_str()){return Err("Assign the selected GitHub identity to this repository first".into());}
-        return copilot::new_conversation(&root,&identity_id,&repo,&mode,&prompt,session_id.as_deref(),cancelled,Some(output),tracking).await;
+    let mut tracking = tracking_run_id
+        .as_deref()
+        .or(automation_run_id.as_deref())
+        .map(|id| commit_provenance::environment(&root, &repo, &repository_id, id))
+        .transpose()?;
+    let environment_root = root.clone();
+    let environment_project = repository_id.clone();
+    let read_only = mode == "analyze";
+    let (mut mail_env, issue_env) = tauri::async_runtime::spawn_blocking(move || {
+        Ok::<_, String>((
+            feedback::environment(&environment_root, &environment_project, read_only)?,
+            issue_feedback::environment(&environment_root, &environment_project, read_only)?,
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let has_mail = !mail_env.is_empty();
+    let has_issues = !issue_env.is_empty();
+    mail_env.extend(issue_env);
+    tracking
+        .get_or_insert_with(Default::default)
+        .extend(mail_env);
+    let prompt = if has_mail {
+        format!("{prompt}{}", feedback::instructions())
+    } else {
+        prompt
+    };
+    let prompt = if has_issues {
+        format!("{prompt}{}", issue_feedback::instructions())
+    } else {
+        prompt
+    };
+    let registration = request_id.map(|id| state.drafts.register(id)).transpose()?;
+    let cancelled = registration.as_ref().map(|item| item.cancelled.clone());
+    if provider == "copilot" {
+        if record.identity.as_ref().map(|item| item.id.as_str()) != Some(identity_id.as_str()) {
+            return Err("Assign the selected GitHub identity to this repository first".into());
+        }
+        return copilot::new_conversation(
+            &root,
+            &identity_id,
+            &repo,
+            &mode,
+            &prompt,
+            session_id.as_deref(),
+            cancelled,
+            Some(output),
+            tracking,
+        )
+        .await;
     }
-    tauri::async_runtime::spawn_blocking(move||prompt_delivery::new_cli_conversation(&root,&repo,&key,&provider,&identity_id,&mode,&prompt,session_id.as_deref(),cancelled,Some(output),tracking)).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        prompt_delivery::new_cli_conversation(
+            &root,
+            &repo,
+            &key,
+            &provider,
+            &identity_id,
+            &mode,
+            &prompt,
+            session_id.as_deref(),
+            cancelled,
+            Some(output),
+            tracking,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn cancel_draft(request_id:String,state:State<AppState>)->Result<(),String>{state.drafts.cancel(&request_id)}
@@ -321,12 +379,51 @@ async fn check_script_runtime(repository_id:Option<String>,config:script_runtime
  tauri::async_runtime::spawn_blocking(move||script_runtime::check(&repo,&config)).await.map_err(|e|e.to_string())
 }
 #[tauri::command]
-async fn run_automation_shell(repository_id:String,script:String,runtime:Option<script_runtime::Runtime>,output:tauri::ipc::Channel<shell_automation::ShellChunk>,handoff_input_path:Option<String>,handoff_output_paths:std::collections::HashMap<String,String>,context:Option<std::collections::HashMap<String,String>>,state:State<'_,AppState>)->Result<shell_automation::ShellRun,String>{
-    let _awake=awake::acquire();
-    let repository=state.db.repository_path(&repository_id)?;
-    let runtime=match runtime{Some(config) if config.preset=="default"=>script_runtime::settings(&state.data_dir)?,Some(config)=>config,None=>script_runtime::Runtime{preset:"bash".into(),..Default::default()}};
-    let root=state.data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move||{let mut context=context.unwrap_or_default();if let Some(id)=context.get("CERBERUS_RUN_ID").cloned(){context.extend(commit_provenance::environment(&root,&repository,&repository_id,&id)?);context.extend(feedback::environment(&root,&repository_id,false)?);}shell_automation::run_stream_with_runtime(&repository,&script,Some(output),handoff_input_path.as_deref(),&handoff_output_paths,&context,&runtime)}).await.map_err(|error|error.to_string())?
+async fn run_automation_shell(
+    repository_id: String,
+    script: String,
+    runtime: Option<script_runtime::Runtime>,
+    output: tauri::ipc::Channel<shell_automation::ShellChunk>,
+    handoff_input_path: Option<String>,
+    handoff_output_paths: std::collections::HashMap<String, String>,
+    context: Option<std::collections::HashMap<String, String>>,
+    state: State<'_, AppState>,
+) -> Result<shell_automation::ShellRun, String> {
+    let _awake = awake::acquire();
+    let repository = state.db.repository_path(&repository_id)?;
+    let runtime = match runtime {
+        Some(config) if config.preset == "default" => script_runtime::settings(&state.data_dir)?,
+        Some(config) => config,
+        None => script_runtime::Runtime {
+            preset: "bash".into(),
+            ..Default::default()
+        },
+    };
+    let root = state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut context = context.unwrap_or_default();
+        if let Some(id) = context.get("CERBERUS_RUN_ID").cloned() {
+            context.extend(commit_provenance::environment(
+                &root,
+                &repository,
+                &repository_id,
+                &id,
+            )?);
+            context.extend(feedback::environment(&root, &repository_id, false)?);
+            context.extend(issue_feedback::environment(&root, &repository_id, false)?);
+        }
+        shell_automation::run_stream_with_runtime(
+            &repository,
+            &script,
+            Some(output),
+            handoff_input_path.as_deref(),
+            &handoff_output_paths,
+            &context,
+            &runtime,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 #[tauri::command]
 async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_,AppState>,app:tauri::AppHandle)->Result<Vec<String>,String>{
@@ -778,6 +875,52 @@ async fn auto_fast_forward(repository_id:String,app:tauri::AppHandle,state:State
 #[tauri::command]
 async fn sync_email_senders(repository_id:String,config:Option<feedback::Config>,token:Option<String>,push:bool,state:State<'_,AppState>)->Result<feedback::Config,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||sender_sync::synchronize(&root,&repository_id,config,token,push)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
+async fn issue_feedback_settings(
+    state: State<'_, AppState>,
+) -> Result<issue_feedback::Settings, String> {
+    let root = state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || issue_feedback::settings(&root))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn save_issue_feedback_settings(
+    settings: issue_feedback::Settings,
+    acquire_existing: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<issue_feedback::SaveOutcome, String> {
+    let root = state.data_dir.clone();
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || issue_feedback::save_with_acquisition(&root, &db, settings, acquire_existing.unwrap_or(false)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn issue_feedback_scope(
+    repository_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<issue_feedback::Scope>, String> {
+    let root = state.data_dir.clone();
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || issue_feedback::scope(&root, &db, &repository_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn issue_feedback_request(
+    repository_id: String,
+    request: issue_feedback::Request,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let root = state.data_dir.clone();
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        issue_feedback::execute(&root, &db, &repository_id, request, false)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 async fn feedback_config(
     repository_id: String,
     state: State<'_, AppState>,
@@ -947,13 +1090,36 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 fn permitted_external_url(url:&str)->bool{
-    permitted_github_url(url) || feedback::documentation_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
+    permitted_github_url(url) || permitted_github_issue_url(url) || feedback::documentation_url(url) || matches!(url, "https://help.gnome.org/seahorse/keyring-unlock.html" | "https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html" | "https://platform.openai.com/settings/organization/billing/" | "https://platform.openai.com/api-keys" | "https://cursor.com/dashboard" | "https://cursor.com/dashboard/spending" | "https://claude.ai/settings/usage" | "https://developers.openai.com/codex/cli/" | "https://cursor.com/docs/cli/installation" | "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli" | "https://code.claude.com/docs/en/setup")
 }
 
 #[cfg(test)]
 mod external_url_tests {
     #[test] fn email_links_allow_browser_and_mail_only(){for link in ["https://example.org/path","http://example.org","mailto:hello@example.org"]{assert!(super::permitted_email_link(link));}for link in ["javascript:alert(1)","file:///etc/passwd","data:text/html,test","https://example.org\n"]{assert!(!super::permitted_email_link(link));}}
     use super::permitted_external_url;
+    #[test]
+    fn github_issue_links_are_allowed_without_opening_arbitrary_destinations() {
+        for value in [
+            "https://github.com/1100soft/mountlet-report/issues/49",
+            "https://github.com/org/project/issues/1/",
+        ] {
+            assert!(permitted_external_url(value));
+        }
+        for value in [
+            "http://github.com/org/project/issues/1",
+            "https://github.com.evil.test/org/project/issues/1",
+            "https://github.com@evil.test/org/project/issues/1",
+            "https://user@github.com/org/project/issues/1",
+            "https://github.com:444/org/project/issues/1",
+            "https://github.com/org/project/issues/1?redirect=https://evil.test",
+            "https://github.com/org/project/issues/not-a-number",
+            "https://github.com/org/project/issues/0",
+            "https://github.com/org/project/issues/1/extra",
+            "https://github.com/org/project/issues/1\n",
+        ] {
+            assert!(!permitted_external_url(value), "{value}");
+        }
+    }
     #[test]
     fn usage_pages_are_permitted(){
         for url in ["https://help.gnome.org/seahorse/keyring-unlock.html","https://docs.kde.org/stable_kf6/en/kwalletmanager/kwalletmanager/introduction.html","https://cursor.com/dashboard/spending","https://claude.ai/settings/usage","https://github.com/settings/copilot","https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli","https://code.claude.com/docs/en/setup"]{
@@ -962,6 +1128,37 @@ mod external_url_tests {
         assert!(!permitted_external_url("https://cursor.com/dashboard/spending?redirect=https://example.com"));
         assert!(!permitted_external_url("https://help.gnome.org/seahorse/keyring-unlock.html?redirect=https://example.com"));
     }
+}
+
+fn permitted_github_issue_url(value: &str) -> bool {
+    if value.trim() != value || value.chars().any(char::is_control) {
+        return false;
+    }
+    let Ok(url) = url::Url::parse(value) else {
+        return false;
+    };
+    if url.scheme() != "https"
+        || url.host_str() != Some("github.com")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    let parts: Vec<_> = url.path().trim_matches('/').split('/').collect();
+    parts.len() == 4
+        && parts[..2].iter().all(|part| {
+            !part.is_empty()
+                && *part != "."
+                && *part != ".."
+                && part
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+        })
+        && parts[2] == "issues"
+        && parts[3].parse::<u64>().is_ok_and(|n| n > 0)
 }
 
 fn permitted_github_url(url: &str) -> bool {
@@ -1081,7 +1278,63 @@ pub fn run() {
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,
             copilot_repository_snapshot,
-            save_agent_conversation, agent_conversations, local_activity_presence, cleanup_automation_checkout, agent_profiles, chatgpt_capabilities, save_agent_profile, remove_agent_profile, run_agent, agent_resume_status, cancel_agent, prompt_capability, submit_saved_prompt, run_new_agent_conversation, cancel_draft, run_automation_shell, script_runtime_platform, script_runtime_settings, save_script_runtime, check_script_runtime, script_runtime_candidates, watch_automation_repositories, repository_changed_lines, repository_changed_lines_batch, repository_change_summary, repository_commit_state, repository_commit_states_batch, delete_automation_log, sweep_automation_checkouts, write_automation_log, list_automation_logs, repository_automation_logs, repository_commit_origins, sync_email_senders, feedback_config, save_feedback_config, feedback_setup, feedback_folder_batch, feedback_request, read_automation_log, handoff_output_path, publish_handoff, has_pending_handoff, handoff_settings, save_handoff_settings, list_matching_handoffs, claim_selected_handoff, claim_handoff, retry_handoff, handoff_retained, finish_handoff, release_handoff, cleanup_stale_handoffs,
+            save_agent_conversation,
+            agent_conversations,
+            local_activity_presence,
+            cleanup_automation_checkout,
+            agent_profiles,
+            chatgpt_capabilities,
+            save_agent_profile,
+            remove_agent_profile,
+            run_agent,
+            agent_resume_status,
+            cancel_agent,
+            prompt_capability,
+            submit_saved_prompt,
+            run_new_agent_conversation,
+            cancel_draft,
+            run_automation_shell,
+            script_runtime_platform,
+            script_runtime_settings,
+            save_script_runtime,
+            check_script_runtime,
+            script_runtime_candidates,
+            watch_automation_repositories,
+            repository_changed_lines,
+            repository_changed_lines_batch,
+            repository_change_summary,
+            repository_commit_state,
+            repository_commit_states_batch,
+            delete_automation_log,
+            sweep_automation_checkouts,
+            write_automation_log,
+            list_automation_logs,
+            repository_automation_logs,
+            repository_commit_origins,
+            sync_email_senders,
+            issue_feedback_settings,
+            save_issue_feedback_settings,
+            issue_feedback_scope,
+            issue_feedback_request,
+            feedback_config,
+            save_feedback_config,
+            feedback_setup,
+            feedback_folder_batch,
+            feedback_request,
+            read_automation_log,
+            handoff_output_path,
+            publish_handoff,
+            has_pending_handoff,
+            handoff_settings,
+            save_handoff_settings,
+            list_matching_handoffs,
+            claim_selected_handoff,
+            claim_handoff,
+            retry_handoff,
+            handoff_retained,
+            finish_handoff,
+            release_handoff,
+            cleanup_stale_handoffs,
             install_provider,
             cancel_provider_install,
             configure_cursor,

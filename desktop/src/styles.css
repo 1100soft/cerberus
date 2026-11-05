@@ -1334,3 +1334,41 @@ input[type="number"] { text-align: right; }
 /* Decorative head stays behind navigation and never captures pointer events. */
 .shell > aside {isolation:isolate}
 .shell > aside::before {content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:url('/cerberus-head.svg') center 65% / 280px auto no-repeat;opacity:.16}
+
+/* Project-scoped feedback shares the shell; both panes scroll independently. */
+.issue-feedback-page{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;gap:.65rem;overflow:hidden}
+.issue-feedback-page[hidden]{display:none}
+.issue-feedback-page>header{display:flex;align-items:center;flex-wrap:wrap;gap:.65rem}
+.issue-feedback-page h2{display:flex;align-items:center;gap:.5rem}
+.issue-feedback-workspace{display:grid;grid-template-columns:minmax(200px,1fr) minmax(280px,2fr);flex:1;min-height:0;min-width:0;gap:.75rem}
+.issue-feedback-list,.issue-feedback-reader{min-height:0;min-width:0;overflow:auto;overflow-wrap:anywhere}
+.issue-feedback-list{display:flex;flex-direction:column;gap:.35rem}
+.issue-feedback-list>button{flex:none;display:flex;flex-direction:column;align-items:flex-start;text-align:left;white-space:normal;gap:.3rem}
+.issue-feedback-list>button[aria-pressed=true]{border-color:var(--accent)}
+.issue-feedback-reader{padding:.5rem;display:flex;flex-direction:column;gap:.6rem}
+.issue-feedback-reader textarea{min-height:7rem;resize:vertical;width:100%;box-sizing:border-box}
+.issue-feedback-reader label,.issue-feedback-settings label{display:flex;flex-direction:column;gap:.4rem}
+.issue-feedback-reader input,.issue-feedback-settings input{min-height:2.2rem;box-sizing:border-box;width:100%}
+.issue-feedback-settings .automation-dialog-content{display:flex;flex-direction:column;gap:1rem}
+.issue-feedback-settings section{display:flex;flex-direction:column;gap:.65rem}
+.issue-feedback-target{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:.75rem}
+.issue-feedback-settings footer>div{min-width:0;flex:1;overflow-wrap:anywhere}
+.issue-feedback-reader article{border-top:1px solid var(--border);padding-top:.6rem}
+@media(max-width:1100px){.issue-feedback-workspace{grid-template-columns:minmax(170px,1fr) minmax(220px,2fr)}.issue-feedback-target{grid-template-columns:minmax(0,1fr)}}
+
+.shell:has(.issue-feedback-page:not([hidden])) > main{height:100%;margin:0;min-width:0;min-height:0;overflow:hidden;box-sizing:border-box;padding:62px 24px 24px}
+
+.issue-feedback-page{container-type:inline-size}
+.issue-feedback-page .feedback-toolbar>span{min-width:0;overflow-wrap:anywhere}
+@container(max-width:520px){.issue-feedback-workspace{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,.65fr) minmax(0,1.35fr)}}
+@media(max-width:1100px){.issue-feedback-workspace{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,.65fr) minmax(0,1.35fr)}}
+
+.issue-feedback-reader{overflow:hidden}
+.issue-feedback-issue-header{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem;flex:none;min-width:0}
+.issue-feedback-issue-header h3{margin:0;min-width:0;overflow-wrap:anywhere}
+.issue-feedback-issue-actions{display:flex;align-items:center;gap:.35rem;flex:none}
+.issue-feedback-scroll{flex:1;min-height:0;min-width:0;overflow:auto;overflow-wrap:anywhere;display:flex;flex-direction:column;gap:.6rem}
+.issue-feedback-scroll>button{align-self:flex-start;flex:none}
+
+.issue-feedback-conflict { width: min(34rem, calc(100vw - 2rem)); }
+.issue-feedback-conflict footer { flex-wrap: wrap; gap: .75rem; }

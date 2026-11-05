@@ -101,9 +101,13 @@ missing full SHA from configured remotes without moving existing branch/tag refs
 or `FETCH_HEAD`; it never substitutes the current checkout. Each remote fetch
 has a 60-second timeout and failures retain an actionable error for retry.
 
-The CI fix template authorizes correction integration only through a verified
-branch policy in tracked `AGENTS.md` or explicit local `cerberus.ciTarget`, plus
-shared Git config on the correction branch:
+The CI fix and Review templates authorize an ordinary persistent branch correction
+from the independently verified failed workflow branch and its matching configured
+publication remote/merge ref. An applicable explicit tracked `AGENTS.md` policy or
+local `cerberus.ciTarget` takes precedence; conflicts block execution. Tag/release
+and disposable-branch failures still require explicit target authorization.
+Infrastructure and missing-configuration failures do not manufacture correction
+branches or commits. Corrections record shared Git config on the branch:
 
 - `branch.<correction>.cerberus-target`: development branch.
 - `branch.<correction>.cerberus-remote`: verified remote.

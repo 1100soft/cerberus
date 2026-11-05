@@ -30,6 +30,11 @@ npm run build     # Dropdown convention check, TypeScript, production bundle
 npm run tauri dev # Desktop app
 ```
 
+Choose either browser development (`npm run dev`) or desktop development
+(`npm run tauri dev`). Tauri starts its own Vite server on port 3000; stop a
+standalone browser server before starting Tauri. A port-conflict error means the
+new desktop development session did not start, even if an older window is open.
+
 Rust checks:
 
 ```bash
@@ -54,3 +59,8 @@ publication. Desktop checks and packaging use reusable workflows prepared for
 organization-wide sharing. See
 [CI and releases](docs/ci-and-releases.md) for coverage, signing requirements, and
 the Android/iOS readiness plan.
+
+Project feedback can share a private GitHub issue repository across projects,
+with a separate label per project and project overrides of the shared default.
+See [the feedback guide](desktop/docs/issue-feedback.md) for configuration and
+Agent/Script tools, including email intake.

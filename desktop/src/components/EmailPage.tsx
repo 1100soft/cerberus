@@ -1,7 +1,7 @@
-import {emailLists,emailMessages,emailListKey,emailMessageKey,invalidateEmailSnapshots} from '../lib/emailSnapshots';
+import {emailFolders,emailLists,emailMessages,emailListKey,emailMessageKey,invalidateEmailSnapshots} from '../lib/emailSnapshots';
 import {memo,useEffect,useRef,useState,type ComponentType} from 'react';
 import {Mail,RefreshCw,Settings2,Star,MailOpen,Trash2,X,ExternalLink} from 'lucide-react';
-import {feedback,mailboxSenders,type MailboxConfig,type MailRef,type FeedbackMail,type FolderOverview,mailKey,mailReference} from '../lib/feedback';
+import {feedback,cachedMailboxConfiguration,cachedMailFolders,mailboxSenders,type MailboxConfig,type MailRef,type FeedbackMail,type FolderOverview,mailKey,mailReference} from '../lib/feedback';
 import type {Repository} from '../types';
 import {api} from '../lib/api';
 import {mailboxWebmail} from '../lib/mailProviders';
@@ -27,12 +27,13 @@ export const EmailPage=memo(function EmailPage({repositories,initialRepositoryId
  const ids=scope.map(repo=>repo.id).join(',');useEffect(()=>setRepository(current=>scope.some(repo=>repo.id===current)?current:scope[0]?.id||''),[ids]);
  const refreshFolders=async(id=repository,force=false)=>{if(id!==activeProject.current)return [];const token=++treeGeneration.current;setLoadingFolders(true);try{
   const current=await feedback.config(id);if(!current)return [];
-  const names=await feedback.setup(id,current,undefined,undefined,undefined,force);if(token!==treeGeneration.current)return [];
-  setFolders(previous=>{const known=new Map(previous.map(node=>[node.path,node]));return names.map(node=>({...known.get(node.path),...node}));});setLoadingFolders(false);setFolder(current=>names.some(node=>node.path===current&&node.selectable)?current:'INBOX');
-  const nodes=await feedback.request<FolderOverview[]>(id,{action:'folderTree'},force);if(token===treeGeneration.current)setFolders(nodes);return nodes;
- }finally{if(token===treeGeneration.current)setLoadingFolders(false);}};
- useEffect(()=>{let active=true;setMailMenu(null);setMoveMail(null);setMoveFolder(null);generation.current++;treeGeneration.current++;setRows([]);setSelected(undefined);setMessage(undefined);setConfig(null);setConfigRepository('');setFolder('');setFolders([]);setLoadingFolders(false);setText('');setError('');setNotice('');setConfirmSend(false);if(!repository)return;setBusy(true);
-  void feedback.config(repository).then(async value=>{if(!active)return;setConfigRepository(repository);setConfig(value);if(value?.enabled){setFolder(jump.current?.project===repository?jump.current.path:'INBOX');jump.current=null;setSender(value.address);}}).catch(reason=>{if(active)setError(String(reason));}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;generation.current++;treeGeneration.current++;};
+  const names=await feedback.setup(id,current,undefined,undefined,undefined,force);if(token!==treeGeneration.current||id!==activeProject.current)return [];
+  setFolders(previous=>{const known=new Map(previous.map(node=>[node.path,node]));const next=names.map(node=>({...known.get(node.path),...node}));emailFolders.set(id,next);return next;});setLoadingFolders(false);setFolder(current=>names.some(node=>node.path===current&&node.selectable)?current:'INBOX');
+  const nodes=await feedback.request<FolderOverview[]>(id,{action:'folderTree'},force);if(token===treeGeneration.current&&id===activeProject.current){emailFolders.set(id,nodes);setFolders(nodes);}return nodes;
+ }catch(reason){if(token===treeGeneration.current&&id===activeProject.current)throw reason;return [];}finally{if(token===treeGeneration.current)setLoadingFolders(false);}};
+ useEffect(()=>{let active=true;setMailMenu(null);setMoveMail(null);setMoveFolder(null);generation.current++;treeGeneration.current++;setRows([]);setSelected(undefined);setMessage(undefined);setConfig(null);setConfigRepository('');setFolder('');setFolders(emailFolders.peek(repository)||[]);setLoadingFolders(false);setText('');setError('');setNotice('');setConfirmSend(false);if(!repository)return;setBusy(true);
+  const cached=cachedMailboxConfiguration(repository);if(cached?.enabled){setConfigRepository(repository);setConfig(cached);setFolder(jump.current?.project===repository?jump.current.path:'INBOX');setSender(cached.address);setFolders(emailFolders.peek(repository)||cachedMailFolders(repository,cached)||[]);setBusy(false);}
+  void feedback.config(repository).then(async value=>{if(!active)return;setConfigRepository(repository);setConfig(value);if(value?.enabled){setFolder(jump.current?.project===repository?jump.current.path:'INBOX');jump.current=null;setSender(value.address);setFolders(emailFolders.peek(repository)||cachedMailFolders(repository,value)||[]);}else{emailFolders.clear(id=>id===repository);setFolders([]);setFolder('');}}).catch(reason=>{if(active)setError(String(reason));}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;generation.current++;treeGeneration.current++;};
  },[repository,revision]);
  // Identity API refresh is independent of folder discovery and message loading.
  useEffect(()=>{let active=true;if(configRepository!==repository||!config?.senderSync?.enabled)return;
@@ -51,7 +52,12 @@ export const EmailPage=memo(function EmailPage({repositories,initialRepositoryId
   }catch(reason){if(token===generation.current)setError(String(reason));}
   finally{if(token===generation.current){setRefreshing(false);if(!mutating.current)setBusy(false);}}
  };
- useEffect(()=>{if(configRepository===repository&&config?.enabled&&folder)void load(false,folders.length===0);return()=>{generation.current++;};},[repository,folder,configRepository,config?.enabled,config?.imapHost,config?.imapPort,config?.imapSecurity,config?.username,config?.certificatePath]);
+ useEffect(()=>{if(configRepository===repository&&config?.enabled&&folder)void load(false);return()=>{generation.current++;};},[repository,folder,configRepository,config?.enabled,config?.imapHost,config?.imapPort,config?.imapSecurity,config?.username,config?.certificatePath]);
+ // Tree discovery belongs to the project/account, not the selected message folder.
+ useEffect(()=>{if(configRepository!==repository||!config?.enabled)return;
+  void refreshFolders(repository,true).catch(reason=>{if(activeProject.current===repository)setError(String(reason));});
+  return()=>{treeGeneration.current++;};
+ },[repository,configRepository,revision,config?.enabled,config?.imapHost,config?.imapPort,config?.imapSecurity,config?.username,config?.certificatePath]);
  useEffect(()=>{let active=true;const key=selected?emailMessageKey(repository,selected):'',cached=selected?emailMessages.peek(key):undefined;setMessage(cached);setReading(false);setText('');setComposing(false);setConfirmSend(false);sendId.current=crypto.randomUUID();if(!selected||selectionRepository.current!==repository)return;setReading(!cached);setError('');
   void feedback.request<FeedbackMail>(repository,{action:'read',message:selected}).then(value=>{if(active){const size=value.body.length+(value.html?.length||0)+Object.values(value.inlineImages||{}).reduce((n,image)=>n+image.length,0);if(size<2_000_000)emailMessages.set(key,value);setMessage(value);}}).catch(reason=>{if(active)setError(String(reason));}).finally(()=>{if(active)setReading(false);});return()=>{active=false;};
  },[selected,repository]);
@@ -64,7 +70,7 @@ export const EmailPage=memo(function EmailPage({repositories,initialRepositoryId
  }catch(reason){setError(String(reason));}finally{mutating.current=false;setBusy(false);}};
  const flag=async(kind:'read'|'unread'|'star'|'unstar',target:MailRef|undefined=message)=>{if(!target||mutating.current)return;mutating.current=true;setBusy(true);setError('');try{await feedback.request(repository,{action:'flag',message:mailReference(target),flag:kind});const patch=kind==='read'||kind==='unread'?{read:kind==='read'}:{starred:kind==='star'};setMessage(current=>current&&mailKey(current)===mailKey(target)?{...current,...patch}:current);setRows(current=>current.map(row=>mailKey(row)===mailKey(target)?{...row,...patch}:row));if(kind==='read'||kind==='unread'){changed();await refreshFolders();}}catch(reason){setError(String(reason));}finally{mutating.current=false;setBusy(false);}};
  const inspect=(id:string,path:string)=>{setSelected(undefined);setMessage(undefined);if(id===repository&&configRepository===repository)setFolder(path);else{jump.current={project:id,path};setRepository(id);}};
- const organization=useMailOrganization({projects:scope,projectId:repository,config,nodes:folders,onSnapshot:(id,nodes)=>{invalidateEmailSnapshots(id);if(id!==activeProject.current)return;treeGeneration.current++;setLoadingFolders(false);setFolders(previous=>{const known=new Map(previous.map(node=>[node.path,node]));return nodes.map(node=>({...known.get(node.path),...node}));});},onRefresh:()=>{void refreshFolders(repository).catch(reason=>setError(String(reason)));},onInspect:inspect});
+ const organization=useMailOrganization({projects:scope,projectId:repository,config,nodes:folders,onSnapshot:(id,nodes)=>{emailFolders.set(id,nodes);invalidateEmailSnapshots(id);if(id!==activeProject.current)return;treeGeneration.current++;setLoadingFolders(false);setFolders(previous=>{const known=new Map(previous.map(node=>[node.path,node]));return nodes.map(node=>({...known.get(node.path),...node}));});},onRefresh:()=>{void refreshFolders(repository).catch(reason=>setError(String(reason)));},onInspect:inspect});
  const moveEmail=async(reference:MailRef,target:string)=>{if(mutating.current)throw Error('A mail operation is already running.');if(reference.folder===target)return;if(reference.folder!==folder)throw Error('Open the email’s original folder before moving it.');mutating.current=true;setBusy(true);setError('');try{await feedback.request(repository,{action:'move',message:mailReference(reference),destination:target});await load();changed();void refreshFolders().catch(reason=>setError(String(reason)));setNotice('Email moved.');}catch(reason){setError(String(reason));throw reason;}finally{mutating.current=false;setBusy(false);}};
  const openEmail=(mail:MailRef)=>{selectionRepository.current=repository;setSelected(mailReference(mail));};
  const showMenu=(event:React.MouseEvent|React.KeyboardEvent,mail:FeedbackMail)=>{event.preventDefault();event.stopPropagation();const bounds=event.currentTarget.getBoundingClientRect();setMailMenu({mail,x:'clientX' in event?event.clientX:bounds.left,y:'clientY' in event?event.clientY:bounds.bottom});};

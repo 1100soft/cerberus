@@ -1,3 +1,4 @@
+import {IssueFeedbackPage} from './components/IssueFeedbackPage';
 import {FeedbackPanel} from './components/FeedbackPanel';
 import { initializeAgentChats, useAgentsRunning } from './lib/agentChats';
 import { useAutomationRuns } from './lib/savedPrompts';
@@ -8,7 +9,7 @@ import { useWorkspaceFocus } from './lib/workspaceFocus';
 import { matchesShortcut, shortcuts } from './lib/shortcuts';
 import { ProviderSetup, type Provider } from "./components/ProviderSetup";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownWideNarrow, Bell, Clock3, FolderGit2, Mail, ListFilter, Menu, Plus, Search, Settings, ShieldCheck } from "lucide-react";
+import { ArrowDownWideNarrow, Bell, Clock3, FolderGit2, Mail, ListFilter, Menu, Plus, Search, Settings, ShieldCheck, MessageSquare } from "lucide-react";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { SavedPromptsPanel } from "./components/SavedPromptsPanel";
 import { Select } from "./components/Select";
@@ -143,12 +144,13 @@ export function App() {
   useEffect(() => { localStorage.setItem('sidebar-open', String(sidebarOpen)); }, [sidebarOpen]);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showFeedback,setShowFeedback]=useState(false);
+  const [showIssues,setShowIssues]=useState(false);
   const [emailVisited,setEmailVisited]=useState(false);
   useEffect(()=>{if(showFeedback)setEmailVisited(true);},[showFeedback]);
   const [showAgents, setShowAgents] = useState(false);
   const [showAutomation, setShowAutomation] = useState(false);
   const [automationDraft,setAutomationDraft]=useState<AutomationDraft>();
-  useEffect(()=>{const open=(event:Event)=>{setShowFeedback(false);setAutomationDraft((event as CustomEvent<AutomationDraft>).detail);setShowAutomation(true);setShowAgents(false);setShowIdentities(false);};window.addEventListener('new-automation-from-prompt',open);return()=>window.removeEventListener('new-automation-from-prompt',open);},[]);
+  useEffect(()=>{const open=(event:Event)=>{setShowIssues(false);setShowFeedback(false);setAutomationDraft((event as CustomEvent<AutomationDraft>).detail);setShowAutomation(true);setShowAgents(false);setShowIdentities(false);};window.addEventListener('new-automation-from-prompt',open);return()=>window.removeEventListener('new-automation-from-prompt',open);},[]);
   const [showIdentities, setShowIdentities] = useState(false);
   const [startGithubLogin, setStartGithubLogin] = useState(false);
   const [startExternalLogin, setStartExternalLogin] = useState<'cursor'|'claude'>();
@@ -157,7 +159,7 @@ export function App() {
   const [configRepo, setConfigRepo] = useState<Repository>();
   const [addRepo, setAddRepo] = useState<"choose" | "create">();
 
-  const projectsVisible=!showFeedback&&!showIdentities&&!showAgents&&!showAutomation;
+  const projectsVisible=!showFeedback&&!showIssues&&!showIdentities&&!showAgents&&!showAutomation;
   useEffect(()=>{if(projectsVisible)window.dispatchEvent(new Event('projects-page-visible'));},[projectsVisible]);
   async function syncGithub(force = false) {
     if (catalogInFlight.current) {
@@ -267,7 +269,7 @@ export function App() {
   const selectedRepository = visible[selectedIndex];
   const actionIndex = normalizedSelection.controlIndex;
   const historyRepository = selectedRepository && isLocal(selectedRepository) ? selectedRepository : undefined;
-  useWorkspaceFocus(!providerSetup && !configRepo && !addRepo && !menu && !showAgents && !showIdentities && !showAutomation && !showFeedback, historyRepository?.id);
+  useWorkspaceFocus(!providerSetup && !configRepo && !addRepo && !menu && !showAgents && !showIdentities && !showAutomation && !showFeedback&&!showIssues, historyRepository?.id);
   function selectControl(repositoryId: string, controlIndex = actionIndex, focus = false, list = visible) {
     const next = selectRepositoryControl(list, repositoryId, controlIndex);
     setSelection(next);
@@ -285,19 +287,19 @@ export function App() {
       if (!document.querySelector('[role=dialog]') && !providerSetup && !configRepo && !menu && !addRepo && !document.querySelector('[role=listbox]')) {
         if (matchesShortcut(event, 'repository.focus')) {
           event.preventDefault(); setSidebarOpen(false); setShowShortcuts(false);
-          if (!showFeedback && !showIdentities && !showAgents && !showAutomation && selectedRepository) selectControl(selectedRepository.id, actionIndex, true);
+          if (!showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation && selectedRepository) selectControl(selectedRepository.id, actionIndex, true);
           return;
         }
-        if (!showFeedback && !showIdentities && !showAgents && !showAutomation && (matchesShortcut(event, 'conversation.previous') || matchesShortcut(event, 'conversation.next'))) {
+        if (!showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation && (matchesShortcut(event, 'conversation.previous') || matchesShortcut(event, 'conversation.next'))) {
           event.preventDefault(); window.dispatchEvent(new CustomEvent('conversation-cycle', {detail: matchesShortcut(event, 'conversation.previous') ? -1 : 1})); return;
         }
       }
-      if (!document.querySelector('[role=dialog], [role=listbox]') && !showFeedback && !showIdentities && !showAgents && !showAutomation && matchesShortcut(event, 'search.repositories') && !(event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')) {
+      if (!document.querySelector('[role=dialog], [role=listbox]') && !showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation && matchesShortcut(event, 'search.repositories') && !(event.target as HTMLElement).closest('input,textarea,[contenteditable=true]')) {
         event.preventDefault(); document.querySelector<HTMLInputElement>('.search input')?.focus(); return;
       }
       if (event.defaultPrevented || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement;
-      if (target.closest("input, select, textarea, [role=listbox], .history-panel, .codex-panel") || (target.closest('button') && !target.closest('.row-actions')) || showShortcuts || providerSetup || showIdentities || showAgents || showAutomation || showFeedback || configRepo || menu || addRepo || busy) return;
+      if (target.closest("input, select, textarea, [role=listbox], .history-panel, .codex-panel") || (target.closest('button') && !target.closest('.row-actions')) || showShortcuts || providerSetup || showIdentities || showAgents || showAutomation || showFeedback || showIssues || configRepo || menu || addRepo || busy) return;
       const repo = selectedRepository;
       if (!repo) return;
       const controls = repositoryControls(repo);
@@ -321,9 +323,9 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [sidebarOpen, showShortcuts, providerSetup, visible, selectedIndex, actionIndex, showIdentities, showAgents, showAutomation, showFeedback, configRepo, menu, addRepo, busy]);
+  }, [sidebarOpen, showShortcuts, providerSetup, visible, selectedIndex, actionIndex, showIdentities, showAgents, showAutomation, showFeedback, showIssues, configRepo, menu, addRepo, busy]);
 
-  useEffect(()=>{const show=(event:Event)=>{const detail=(event as CustomEvent<{githubLogin?:boolean;externalLogin?:'cursor'|'claude'}>).detail;setShowFeedback(false);setProviderSetup(undefined);setStartGithubLogin(!!detail?.githubLogin);setStartExternalLogin(detail?.externalLogin);setShowIdentities(true);setShowAgents(false);setShowAutomation(false);};window.addEventListener('show-identities',show);return()=>window.removeEventListener('show-identities',show);},[]);
+  useEffect(()=>{const show=(event:Event)=>{const detail=(event as CustomEvent<{githubLogin?:boolean;externalLogin?:'cursor'|'claude'}>).detail;setShowIssues(false);setShowFeedback(false);setProviderSetup(undefined);setStartGithubLogin(!!detail?.githubLogin);setStartExternalLogin(detail?.externalLogin);setShowIdentities(true);setShowAgents(false);setShowAutomation(false);};window.addEventListener('show-identities',show);return()=>window.removeEventListener('show-identities',show);},[]);
   async function action(repo: Repository, name: string) {
     if (busy) return;
     if (name === 'chat') { requestAnimationFrame(() => document.querySelector<HTMLElement>('.codex-thread-list button.active, .codex-thread-list button.provider-codex, .codex-thread-list button, .conversation-search input')?.focus()); return; }
@@ -439,11 +441,12 @@ export function App() {
     <aside hidden={!sidebarOpen}>
       <div className="brand"><div><b>GitCerberus</b><span>Project guardian</span></div></div>
       <nav>
-        <button className={!showFeedback && !showIdentities && !showAgents && !showAutomation ? "active" : ""} onClick={() => { setShowFeedback(false); setShowIdentities(false); setShowAgents(false); setShowAutomation(false); setIdentityPrompt(undefined); }}><FolderGit2 /><span className="nav-label">Projects</span><span className="nav-count">{repositories.length}</span></button>
-        <button className={showIdentities ? "active" : ""} onClick={() => { setShowFeedback(false); setShowAgents(false); setShowAutomation(false); setShowIdentities(true); }}><ShieldCheck /><span className="nav-label">Identities</span><span className="nav-count">{identities.length}</span></button>
-        <button className={showAgents ? "active" : ""} onClick={() => { setShowFeedback(false); setShowAgents(true); setShowIdentities(false); setShowAutomation(false); }}><Bell /><span className="nav-label">Agents</span></button>
-        <button className={showAutomation ? "active" : ""} onClick={() => { setShowFeedback(false); setAutomationDraft(undefined); setShowAutomation(true); setShowAgents(false); setShowIdentities(false); }}><Clock3 /><span className="nav-label">Automation</span></button>
-        <button className={showFeedback?"active":""} onClick={()=>{setShowFeedback(true);setShowAgents(false);setShowIdentities(false);setShowAutomation(false);}}><Mail/><span className="nav-label">Email</span></button>
+        <button className={!showFeedback&&!showIssues && !showIdentities && !showAgents && !showAutomation ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowIdentities(false); setShowAgents(false); setShowAutomation(false); setIdentityPrompt(undefined); }}><FolderGit2 /><span className="nav-label">Projects</span><span className="nav-count">{repositories.length}</span></button>
+        <button className={showIdentities ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowAgents(false); setShowAutomation(false); setShowIdentities(true); }}><ShieldCheck /><span className="nav-label">Identities</span><span className="nav-count">{identities.length}</span></button>
+        <button className={showAgents ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setShowAgents(true); setShowIdentities(false); setShowAutomation(false); }}><Bell /><span className="nav-label">Agents</span></button>
+        <button className={showAutomation ? "active" : ""} onClick={() => { setShowIssues(false);setShowFeedback(false); setAutomationDraft(undefined); setShowAutomation(true); setShowAgents(false); setShowIdentities(false); }}><Clock3 /><span className="nav-label">Automation</span></button>
+        <button className={showFeedback?"active":""} onClick={()=>{setShowIssues(false);setShowFeedback(true);setShowAgents(false);setShowIdentities(false);setShowAutomation(false);}}><Mail/><span className="nav-label">Email</span></button>
+        <button className={showIssues?'active':''} onClick={()=>{setShowIssues(true);setShowFeedback(false);setShowAgents(false);setShowIdentities(false);setShowAutomation(false);}}><MessageSquare/><span className="nav-label">Feedback</span></button>
       </nav>
       <div className="aside-bottom"><label className="auto-fast-forward-setting" title="Fast-forward branches from their configured upstream when no agents are active and worktrees are clean. Diverged branches are left unchanged."><input type="checkbox" checked={autoFastForward} onChange={event=>setAutoFastForward(event.target.checked)}/>Auto fast-forward</label>{conversationStorageError&&<p className="config-error" role="alert">{conversationStorageError}</p>}<button onClick={() => { setShowShortcuts(open => !open); }}><Settings />Keyboard shortcuts</button><div className="watch-state"><i />Guardian running<span>Last scan just now</span></div></div>
     </aside>
@@ -532,6 +535,7 @@ export function App() {
       {providerSetup && <ProviderSetup provider={providerSetup} onClose={() => setProviderSetup(undefined)} />}
       <AgentsPanel identities={identities} onSetup={setProviderSetup} visible={showAgents} />
       {(emailVisited||showFeedback)&&<div className="email-page-cache" hidden={!showFeedback} style={{display:showFeedback?'contents':'none'}}><FeedbackPanel repositories={repositories} initialRepositoryId={selectedRepository?.id} active={showFeedback}/></div>}
+      <IssueFeedbackPage repositories={repositories} identities={identities} active={showIssues} initialRepositoryId={selectedRepository?.id}/>
       {showAutomation && <section className="automation-page" aria-label="Automation"><SavedPromptsPanel repositories={repositories} profiles={chatgptAccounts.profiles} chatgptSettings={chatgptAccounts.settings} external={externalAccounts} identities={identities} draft={automationDraft}/></section>}
       {showIdentities && <IdentitiesPanel identities={identities} inferredOwner={identityPrompt?.owner} pendingRepositoryId={identityPrompt?.repositoryId} startGithubLogin={startGithubLogin} startExternalLogin={startExternalLogin} onClose={() => { setShowIdentities(false); setIdentityPrompt(undefined); setStartGithubLogin(false); setStartExternalLogin(undefined); }} onChanged={reload} />}
       {menu && <RepositoryContextMenu repository={menu.repository} x={menu.x} y={menu.y} busy={busy === menu.repository.id} onAction={(name) => void contextAction(menu.repository, name)} onClose={() => setMenu(undefined)} />}

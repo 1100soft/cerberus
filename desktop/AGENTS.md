@@ -108,3 +108,31 @@ page polling/shortcuts; do not discard drafts, selection or scroll on navigation
 Keep mailbox content transient in memory, never localStorage or a local mail DB;
 never cache credentials. Test navigation with delayed backends, stale/failed
 reads, mutation invalidation, draft retention and hidden-page keyboard isolation.
+
+## Development server ownership
+
+Tauri starts Vite through beforeDevCommand on port 3000. Reuse an existing
+project dev server for browser/WebKit checks; never leave a standalone server
+started for tests running after the checks. Track the exact process/group you
+start and stop it in cleanup, including failures. Do not kill another project’s
+server, silently change ports, or run standalone Vite alongside `npm run tauri dev`.
+If port 3000 is occupied, identify its owner before taking action.
+
+- Feedback names are user-facing project names, not routing syntax. Hide internal
+  label prefixes in controls and summaries, preserve stored legacy/API mappings,
+  and let scoped tools resolve them. Default new feedback names to the project
+  name and retain the saved name across project renames. Agents must not ask
+  users to supply internal label syntax.
+
+- Preserve feedback name capitalization in defaults, storage, display and agent
+  instructions. Case folding is only for comparison, never normalization.
+
+- Changing a feedback name must migrate its existing GitHub issues before saving
+  the new mapping. Preserve issue IDs, comments, states, other labels and retry
+  receipts. Journal interrupted migrations, expose their destination on reopening
+  settings, and block issue operations until Save completes the migration.
+
+- Before a feedback-label migration, check the destination for open and closed
+  issues. If occupied, require an explicit acquisition decision before any
+  migration/settings write. Default to choosing a different name; focus the name
+  input on retry. A configured other project’s queue is never acquirable.

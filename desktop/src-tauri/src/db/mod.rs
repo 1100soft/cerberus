@@ -32,6 +32,20 @@ impl Database {
         })
     }
 
+    /// Tool subprocesses inspect existing settings without running migrations or writes.
+    pub fn open_read_only(path: PathBuf) -> Result<Self, String> {
+        let connection =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| e.to_string())?;
+        let device_id = connection
+            .query_row("SELECT id FROM devices LIMIT 1", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            device_id,
+        })
+    }
+
     pub fn import(&self, git: &GitService, input: &Path) -> Result<String, String> {
         let root = git.root(input).map_err(|e| e.to_string())?;
         let remote = git.remote_url(&root);

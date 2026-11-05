@@ -1700,3 +1700,291 @@ chat recovery writes. Validation above was reviewed; 13 publisher tests and both
 email-cache/chat-persistence checks were repeated successfully before staging.
 No credentials, generated build output or unrelated files are included. Commit
 only; no push requested or performed by this task.
+
+## 2026-11-05 — Project email agents
+
+Reviewed `/home/eh930/Downloads/writing-block.md` and replaced it with the revised
+architecture also saved in `desktop/docs/email-agents.md`. Versioned prompts and
+model/trigger metadata are under `desktop/docs/automation-prompts/email/`.
+Configured the existing Injection guard plus Triage, Support, Feedback, Follow-up,
+Administration and Security on Codex gpt-6.1-sol; Human Review uses Copilot provider
+default in analyze mode. Added a separate in-app Human Review notification.
+All nine live jobs are enabled and target all/future projects with
+`requiresMailbox: true`; unrelated automation definitions were preserved.
+Application-storage backup: `config-backups/email-agents-20261105-081343/` under
+app data (private, not in Git). Five missing queue folders were created per mailbox
+in Cerberus, Mountlet and 1100, using discovered server delimiters. Existing
+Support/Reports/Admin folders and mailbox settings were preserved. No mail was
+moved/sent or paid model inference initiated as a test. New polling subscriptions
+establish server baselines instead of replaying historical mail.
+
+Added editable Configured mailboxes only scope, enforced before handoff inspection/
+claim and again before execution (including manual/retry). Unavailable config does
+not consume a handoff or block unrelated scheduler jobs. Email conditions enforce
+this scope inherently. Added lightweight native `folderNames` discovery and
+`inReplyTo`/`references` thread hints. Prompts remain draft-only and bounded; a
+screening pass grants no trust. Note/draft retries are not exactly once and edit
+agents have no role-specific hard capability sandbox; these limits are documented.
+Missing named Support identities lead to Human Review rather than sender guessing.
+
+Validation: production build (dropdown/style checks, TypeScript, Vite) passed;
+Rust suite passed (188 unit tests, 3 integration tests, 5 ignored); WebKit email
+workflow and handoff fixtures passed, including new mailbox scope/manual/future
+mailbox eligibility assertions. The final email fixture printed its passed report
+and exited 0, with a WebKit allocator teardown warning after completion. Existing
+Vite chunk-size/dynamic-import and Rust warnings remain. Live definitions were
+read back after reopening the app: all nine jobs and scope settings persisted.
+No commit or push requested for this task.
+
+## 2026-11-05 — CI target authorization and Email project switching
+
+Updated both versioned and configured CI fix/Review prompts: a verified ordinary
+persistent workflow branch with its matching configured publication remote/merge
+ref now authorizes correction of that branch when no explicit policy overrides it.
+Tag/release and disposable branch failures still require an explicit target policy
+or existing integration contract. Conflicts block; execution checkout/default
+branch/ancestry never substitute for verified evidence. Classify infrastructure,
+missing configuration and runtime-resume failures before creating correction
+resources; do not manufacture source changes. Review uses the same authorization
+rule so the downstream chain does not reintroduce the blocker. Private app-storage
+backup: `config-backups/ci-target-policy-20261105-085916/`. Existing automation
+settings, enabled state and run logs were preserved; only those two prompts changed.
+
+EmailPage now owns folder discovery independently of message/folder list loading.
+Bounded per-project session snapshots restore trees immediately, including when
+configuration revalidation is slow. Hierarchy appears before count scans finish;
+failed refreshes preserve it. Project/generation checks discard stale tree results
+and errors, account config changes invalidate only affected trees, and folder
+mutations update cached snapshots. No mailbox bodies are persisted.
+
+Validation: production build (dropdown/style checks, TypeScript and Vite) passed;
+email-cache checks passed; WebKit email workflow assertions passed, including
+cached project switching during delayed/failed discovery. Its existing allocator
+teardown warning remains after the passed report. No CI rerun, source correction,
+commit or push performed as part of this request.
+
+## 2026-11-05 — Empty Bridge folders and duplicate polling warnings
+
+Investigated Mountlet's repeated `Cannot search email arrivals` warnings. Proton
+Bridge's actual logs show `UID SEARCH ... UID [1:*] UNDELETED` failing with
+`no such message`. Stored notification history contained 12 Mountlet warnings
+from six separate watchers; these are independent Mountlet checks, not evidence
+of 1100 agents accessing Mountlet. Empty new workflow folders exposed the issue.
+
+Native polling now keeps the selected mailbox's UIDNEXT/EXISTS snapshot, returns
+an empty result for empty/no-new-UID folders, and searches a finite UID interval.
+Checked arithmetic prevents rollover; arrivals after the snapshot are handled on
+the next poll. UIDVALIDITY validation and moved-old-mail detection remain intact.
+Native search errors now retain the folder and server reason for diagnosis.
+Project-level notification cooldown coalesces watchers and uses retained notice
+history across reloads. It survives brief successful polls; independent watcher
+retry/backoff and all enabled settings remain intact. Warnings include folder/
+automation context and distinguish monitoring from agent failure.
+
+Validation: 37 native feedback/parser/IMAP wire tests passed, including empty and
+unchanged queues without a SEARCH and old mail moved into a watched queue.
+Production build passed. WebKit email workflow passed with new multi-watcher
+outage, healthy-project polling, recovery/cooldown and enabled-state assertions.
+No credentials or mailbox settings were changed, and no email was moved/sent.
+No commit/push requested.
+
+## 2026-11-05 — Stray test dev server
+
+Port 3000 was occupied by the standalone Vite process started by this task for
+email WebKit checks (`/tmp/cerberus-email-tree-vite.log`). Stopped that exact
+project-owned process, leaving Mountlet's server and the existing Cerberus app
+alone. Verified fresh Vite startup and process-group cleanup; port 3000 is free.
+README clarifies standalone-browser and Tauri dev commands are alternatives;
+AGENTS.md requires cleanup of servers started for tests and ownership checks.
+Tauri's beforeDevCommand failure prevents a new dev session; an older open
+window is not evidence it succeeded. Earlier app log also contains native heap/
+stack corruption messages. No crash backtrace is available (core limit zero,
+Apport handler, no saved report found); that separate cause remains unresolved.
+No changes to native crash handling or system crash configuration were made.
+
+## 2026-11-05 — Shared GitHub project feedback
+
+Added a separate Feedback page and native `issue_feedback` layer. Global default
+repository/identity can be inherited, overridden or disabled per project; each
+project has a distinct issue label. Native list/read/comments/create/comment/
+update operations enforce the resolved scope, reject PRs/ambiguous foreign scope
+labels and prevent adding another project's label. Updates preserve labels.
+Analyze mode is read-only. Native IPC/network/disk work uses workers; CLI tools
+open the app database read-only, without migrations. All Agent provider paths and
+Script automations receive project-bound issue tool environment/instructions.
+
+Writes require stable operation IDs. Cross-process locks and local metadata-only
+receipts return confirmed references and block uncertain duplicate writes. No
+report bodies or credentials are saved in receipts. Scope is enforced by the
+Cerberus tool, not a whole-agent sandbox or GitHub per-label ACL; independent
+broad credentials can bypass it. This limitation is documented explicitly.
+Feedback UI supports scoped open/closed/all lists, pagination, body/comments,
+create/comment/close/reopen and default/project settings. Bounded session caches,
+stale-request guards and draft retention keep navigation responsive. Narrow
+layouts stack panes; Markdown is memoized, raw HTML skipped, remote images require
+an explicit click, and links open through native protocol-checked browser helpers.
+No new implicit issue-to-code trigger was added.
+
+Inspected Mountlet's real report function and private repository. Kept
+`1100soft/mountlet-report` private and at its existing name/URL so deployed clients,
+server configuration and scoped tokens remain valid. All 46 historical issues
+already carry `mountlet-report`; no issue migration/renumbering/recreation needed.
+Updated repository description, added project:cerberus/project:1100 labels and a
+README documenting shared queues (remote README commit authorized by the user's
+repository-restructuring request). No test issue/comment was posted.
+
+Configured app-local default feedback target to that shared repository using the
+existing eric-holt GitHub identity. Mountlet retains `mountlet-report`; Cerberus
+uses `project:cerberus`; 1100 uses `project:1100`. Other/future projects generate
+unique project-ID labels. Native live status verified private/write access;
+scoped reads returned Mountlet's 46 reports and no Cerberus reports. A real
+cross-project read was refused without exposing content.
+
+Updated both the versioned and configured Email feedback prompt to consolidate a
+redacted email summary into a matching issue or new issue, save its confirmed URL
+plus original reference in an IMAP note, and only then mark Processed. Original
+mail stays on IMAP; no raw bodies/contacts/logs/attachments go into issues. Missing
+setup/uncertain operations need human inspection. Model (gpt-6.1-sol), enabled
+state, trigger and mailbox-only scope were preserved. Private backup:
+`config-backups/shared-feedback-20261105-145535/`. Two idle desktop instances
+(including an orphan) were stopped after verifying no running automations or
+conversations; one current Tauri development instance was then started normally.
+
+Mountlet local source changes are limited to functions/_lib/reports.js,
+web/tools/test-report-delivery.mjs and web/README.md. Its reporter now always uses
+REPORT_GITHUB_PROJECT_LABEL (default existing mountlet-report), retaining this
+label on a 422 retry while dropping optional classification labels. Previously it
+retried completely unlabeled. Existing unrelated dirty Mountlet work is untouched.
+No Mountlet commit/push/deployment performed; this hardening needs normal review
+and deployment. Current deployed reporting remains compatible with the unchanged
+repository/label. Cloudflare skill used for that Pages Functions change.
+
+Validation: production build (dropdown/style checks, TypeScript, Vite) passed;
+198 Rust unit tests and 3 integration tests passed (5 ignored). New native tests
+cover scope/PR isolation, creation scope, additive labels, read-only mode/database,
+colliding project settings, confirmed retry deduplication and uncertain writes.
+New WebKit feedback checks passed at 900x620 and 1720x700, 100/140/150% zoom,
+including project-switch latency/races, draft retention, settings overrides,
+comments and menu bounds/keyboard/Escape/outside dismissal. Existing email WebKit
+regressions, email-cache checks and Mountlet report-delivery tests passed. Build
+warnings remain as before. No local checkpoint commit or application-code push
+requested or performed for this task.
+
+## 2026-11-05 — Issue browser links and fixed issue actions
+
+Fixed the issue external-link button: open_external_url's allowlist supported
+GitHub repository pages but omitted issue paths. It now accepts canonical HTTPS
+GitHub owner/repository/issues/positive-number URLs, rejecting spoofed hosts,
+credentials, custom ports, queries, malformed issue numbers and control text.
+Moved issue title/browser/close-reopen controls into a fixed reader header outside
+a dedicated scrolling body/comments area; creation forms remain scrollable.
+
+Read the real Mountlet #49 through GitHub and its events. It existed since
+2026-10-29 22:29:54Z, labeled mountlet-report/support. Its metadata says
+source=website and category=other, matching the existing report endpoint's
+[ support ] title/body format. The message is a domain-sale enquiry, not a bug.
+Mountlet's report endpoint submits support messages to GitHub when configured and
+can also send a Resend email copy. This predates the Cerberus feedback feature;
+no evidence of an issue transfer/import by Cerberus. No issue content/state or
+reporting routing was changed in this task.
+
+Validation: production build passed; 3 native external-URL tests passed, covering
+valid issue links and unsafe/incorrect URLs. WebKit issue checks passed at the
+minimum viewport and 100/140/150% zoom, including external-link dispatch and
+fixed action bounds while scrolling a long issue. The native dev watcher reloaded
+the change; one current desktop instance remains. No commit/push requested.
+
+
+## 2026-11-05 — Shared feedback repository rename
+
+Renamed the same private GitHub repository to `1100soft/1100-shared-feedback`,
+preserving issues/comments and Mountlet's `mountlet-report` label. Updated this
+machine's feedback default/overrides from the old canonical name, with a private
+settings backup. Explicit labels now include CI (`project:ci`) and InDEx
+(`project:index`), alongside Cerberus and 1100. Published shared policy and one
+project guide each for Mountlet, Cerberus, 1100, CI and InDEx under `projects/`
+in the shared repository. Guides cover mandatory labels, CLI/REST intake, native
+scoped tools, privacy, deduplication and project onboarding. Mountlet application
+compatibility, credentials and deployment updates are delegated to its agent.
+
+
+## 2026-11-05 — Generic shared-feedback instructions
+
+Supersedes the project-specific guides above: shared README now describes
+onboarding any project, resolving its repository/label from configuration,
+parameterized submissions and scoped agent handling. Removed individual project
+guides and fixed label tables. Local integration documentation follows the same
+rule. Existing configured labels remain configuration data; no application
+label constants or project registry were introduced.
+
+
+## 2026-11-05 — Friendly feedback names
+
+Feedback settings now show a Feedback name, defaulting to the project's display
+name. Legacy routing prefixes remain in stored labels/API calls but are hidden
+in the input and queue toolbar. Editing a legacy name preserves its prefix; new
+queues use plain names. Native save materializes defaults so later project name
+changes do not move queues. Agent instructions and shared README distinguish user
+requests from resolved GitHub labels; scoped tools handle mapping automatically.
+
+
+## 2026-11-05 — Migrate feedback labels on rename
+
+Supersedes the earlier “select a different queue” behavior: saving a feedback name
+now migrates existing GitHub labels/issues first. Uses GitHub label rename when
+possible; an existing destination is merged by adding the new label before
+removing only the old label, including closed issues, fetching page one as the
+source set shrinks. Settings and scoped requests share cross-process locking.
+A private pending migration journal survives interruptions; settings reopen with
+the intended destination, and Save resumes safely. Incomplete migrations block
+scoped issue operations. Label history keeps old operation receipts valid after
+renames. Cross-project existing-name collisions are rejected; rename and repository
+changes must be separate actions. Updated UI help, guide and shared README.
+
+Repaired live Mountlet migration: renamed the existing mountlet-report GitHub
+label to Mountlet after verifying the previously-created destination was empty.
+All 46 open/closed issue IDs, title/body hashes, states, comment counts and other
+labels match the private pre-migration snapshot under config-backups. Recorded
+the old/new label mapping for receipt compatibility. External intake endpoints
+need to resolve the new configured label; Mountlet application/deployment remains
+its agent's responsibility.
+
+
+## 2026-11-05 — Confirm acquiring an occupied feedback name
+
+Native feedback save now returns a structured conflict if a renamed destination
+already has issues (state=all), before migration journaling or remote mutation.
+Default save never implicitly adopts the occupied queue; the explicit
+acquireExisting request approves merging. Case-only renames and empty targets do
+not prompt. Existing cross-project name protections remain unconditional.
+The settings prompt displays friendly names, defaults/focuses “Use a different
+name,” returns focus/selection to the input, and offers “Acquire issues.”
+Keyboard focus stays in the prompt; Escape/outside-click choose another name.
+Conflict responses do not invalidate caches or publish saved-settings events.
+Already-journaled, approved migrations resume without another acquisition prompt.
+Updated shared/local guides and native/WebKit regression coverage.
+
+
+## 2026-11-05 — Checkpoint validation
+
+Reviewed the full tracked/untracked checkpoint: shared issue feedback and native
+scoped tools, friendly label names and resumable/confirmed label migrations,
+email agent prompts/mailbox eligibility, faster cached folder switching, bounded
+IMAP arrival searches, warning cooldown and CI-fix authorization guidance. No
+credentials, mailbox bodies, private app configuration, generated build artifacts
+or unrelated project changes are included. Cleaned up unrelated Rust formatting.
+The broader folder regression fixture now strips imports once and supplies the
+real PageSnapshots dependency; the saved-prompts fixture waits for streamed log
+text instead of asserting as soon as an empty log container mounts.
+Validation includes production build (dropdown/style checks, TypeScript, Vite),
+210 native unit tests and three integration tests (five unit tests ignored),
+email cache/folder checks, shared-feedback WebKit at 100/140/150% and automation
+WebKit checks. Existing bundle-size and native dead-code warnings remain.
+
+Email WebKit assertions also passed with process exit 0; WebKit emitted
+`free(): corrupted unsorted chunks` during teardown, as observed in this session
+before the checkpoint. Treat this as an unresolved runtime diagnostic, not a
+clean teardown result. No further application changes were made for that issue.
+Secret scan hits were existing invalid private-key rejection test strings, not
+credentials. All repository changes are included in this checkpoint; app-private
+settings/backups and other project working trees remain outside this repository.

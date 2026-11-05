@@ -24,7 +24,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'feedback' | 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {requiresMailbox?:boolean;feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export type AutomationRetry={feedback?:MailRef;inputValues?:AutomationInputValues;job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
 const blockedRuns=new Map<string,AutomationLog>();
 const retryingRuns=new Set<string>();
@@ -225,6 +225,14 @@ async function releaseIncomingHandoff(incoming:HandoffClaim){
   if(incoming.retained)await api.finishHandoff(incoming.repositoryId,incoming.name,incoming.id);
   else await api.releaseHandoff(incoming.repositoryId,incoming.name,incoming.id);
 }
+// Email-triggered jobs and their handoff stages must stay within configured mailboxes.
+export async function mailboxEligible(job:SavedPrompt,repositoryId:string):Promise<boolean>{
+  return !(job.requiresMailbox||automationConditions(job).includes('feedback'))||!!(await feedback.config(repositoryId))?.enabled;
+}
+async function scheduledMailboxEligible(job:SavedPrompt,repositoryId:string){
+  try{return await mailboxEligible(job,repositoryId);}
+  catch(error){console.warn('Could not inspect automation mailbox scope:',error);return false;}
+}
 export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?:string,incoming?:HandoffClaim,ciRun?:GithubCiRun,eventBranch?:string,eventSha?:string,matchedConditions?:Trigger[],retry?:AutomationRetry,manualInputValues?:AutomationInputValues,feedbackInput?:MailRef):Promise<void>{
   const originalMail=retry?.feedback||feedbackInput;
   const mail=originalMail?mailReference(originalMail):undefined;
@@ -235,6 +243,18 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
     if(!targets.length)return;
     change(id,{nextAt:Date.now()+job.minutes*60_000});
     await Promise.all(targets.map(repositoryId=>runSavedPrompt(id,false,repositoryId,incoming,ciRun,eventBranch,eventSha,matchedConditions)));return;
+  }
+  try{
+    if(!await mailboxEligible(job,runtimeRepositoryId||job.repositoryId)){
+      if(manual)throw new Error('Configure Email for this project before running this automation.');
+      if(incoming)await releaseIncomingHandoff(incoming);
+      return;
+    }
+  }catch(error){
+    // Leave pending handoffs available when mailbox configuration cannot be read.
+    if(incoming)await releaseIncomingHandoff(incoming);
+    if(manual)throw error;
+    console.warn('Could not check automation mailbox scope:',error);return;
   }
   const executionKey=contextKey(id,runtimeRepositoryId||'',eventBranch||ciRun?.headBranch||undefined,eventSha||ciRun?.headSha,incoming,mail);
   if(executions.has(executionKey)){if(incoming)await releaseIncomingHandoff(incoming);return;}
@@ -413,6 +433,7 @@ async function tick(now=Date.now()){
       if(conditions.includes('handoff')&&validHandoffName(job.handoffName||'')){
         const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
         for(const repositoryId of targets){
+          if(!await scheduledMailboxEligible(job,repositoryId))continue;
           if([...pendingConditionEvents.values()].some(pending=>pending.jobId===job.id&&pending.repositoryId===repositoryId&&pending.events.handoff))continue;
           try{if(await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))recordConditionEvent(repositoryId,'handoff',now);}catch(error){console.warn('Could not inspect handoff:',error);}
         }
@@ -424,6 +445,7 @@ async function tick(now=Date.now()){
       }
       for(const [key,pending] of pendingConditionEvents){
         if(pending.jobId!==job.id)continue;
+        if(!await scheduledMailboxEligible(job,pending.repositoryId))continue;
         const conditions=automationConditionSets(job)[pending.setIndex];
         if(!conditions||conditions.includes('manual'))continue;
         const latest=Math.max(...Object.values(pending.events).map(event=>event?.at||0));
@@ -455,7 +477,7 @@ async function tick(now=Date.now()){
       if(job.includeFutureRepositories&&!futureHandoffTargets)futureHandoffTargets=inTauri()?[...watchedRepositoryIds]:(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id);
       const targets=job.includeFutureRepositories?futureHandoffTargets!:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
       for(const repositoryId of targets){
-        if(!repositoryId)continue;
+        if(!repositoryId||!await scheduledMailboxEligible(job,repositoryId))continue;
         try{if(!await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))continue;}catch(error){console.warn('Could not inspect handoff:',error);continue;}
         if(job.kind!=='notification'&&job.kind!=='prompt'&&await repositoryAgentBusy(repositoryId))continue;
         let claim:{id:string;path:string}|null;
@@ -682,6 +704,14 @@ export async function recoverFeedbackRuns(){
 }
 let feedbackPolling=false;
 const feedbackErrors=new Map<string,{count:number;next:number;notice:boolean}>();
+const feedbackNoticeAt=new Map<string,number>();
+function reportEmailPollingFailure(repositoryId:string,repositoryLabel:string,automationTitle:string,folder:string,reason:unknown){
+  const title=`${repositoryLabel}: email checks delayed`,now=Date.now();
+  const previous=Math.max(feedbackNoticeAt.get(repositoryId)||0,...currentAutomationNotices().filter(notice=>notice.repositoryId===repositoryId&&(notice.automationId==='email-monitor'||notice.title===title)).map(notice=>notice.createdAt));
+  if(now-previous<60*60_000)return;
+  feedbackNoticeAt.set(repositoryId,now);
+  addAutomationNotice({automationId:'email-monitor',repositoryId,title,message:`Mailbox polling could not check ${folder||'the watched folder'} (${automationTitle}). This does not mean an email agent failed. Checks will retry automatically; automations remain enabled.`,details:String(reason),steps:['Open Email and select this project to inspect the affected folder.','For a local mail bridge, check that it is running. Change connection settings only if the mailbox itself cannot be opened.'],status:'message'});
+}
 export async function pollFeedback(){
   if(feedbackPolling)return;feedbackPolling=true;
   try{
@@ -693,6 +723,7 @@ export async function pollFeedback(){
         if(health&&Date.now()<health.next)continue;
         if([...pendingConditionEvents.values()].some(pending=>pending.jobId===job.id&&pending.repositoryId===repo.id&&pending.events.feedback))continue;
         if(currentAutomationRuns().some(run=>run.automationId===job.id&&run.repositoryId===repo.id&&run.feedback))continue;
+        let watchedFolder=job.feedbackFolder||job.feedbackPath?.filter(part=>part!=='\0mailbox').join('/')||'INBOX';
         try{
           const config=await feedback.config(repo.id);if(!config?.enabled)continue;
           // Legacy/imported jobs start observing now; never replay the mailbox accidentally.
@@ -705,6 +736,7 @@ export async function pollFeedback(){
             if(!resolved){feedbackErrors.delete(key);continue;} // Partial folder coverage is intentional.
             folder=resolved;
           }
+          watchedFolder=folder;
           const events=await feedback.request<MailRef[]>(repo.id,{action:'poll',folder,subscription:job.id,since:job.feedbackSince});
           feedbackErrors.delete(key);
           const latestConfig=await feedback.config(repo.id);
@@ -721,7 +753,7 @@ export async function pollFeedback(){
         }catch(reason){
           const count=(health?.count||0)+1,notice=health?.notice||count>=3;
           feedbackErrors.set(key,{count,next:Date.now()+Math.min(900000,60000*2**Math.min(count-1,4)),notice});
-          if(count>=3&&!health?.notice)addAutomationNotice({automationId:job.id,repositoryId:repo.id,title:`${repo.displayName}: email checks delayed`,message:`${String(reason)} Open Email → mailbox settings to check the connection. Automation remains enabled.`,status:'message'});
+          if(count>=3&&!health?.notice)reportEmailPollingFailure(repo.id,repo.displayName,job.title,watchedFolder,reason);
         }
       }
     }

@@ -232,7 +232,7 @@ script = r"""
  await wait(()=>!defaultRunButton.disabled);assert(!defaultRunButton.disabled,'Run once requires interacting with a visibly selected project');
  const defaultRepositoryLabel=document.querySelector('.automation-runtime-dialog [aria-label="Project"]').textContent;
  document.querySelector('.automation-runtime-dialog footer button:last-child').click();
- assert((await wait(()=>document.querySelector('.automation-detail-pane[aria-label="Automation log"] .automation-log-lines'))).textContent.includes('fixture result'),'Read-only live terminal did not display shell output');await wait(()=>shellCalls.length===1);
+ await wait(()=>document.querySelector('.automation-detail-pane[aria-label="Automation log"] .automation-log-lines')?.textContent.includes('fixture result'));await wait(()=>shellCalls.length===1);
  assert(shellCalls[0].repo===jobs[0].repositoryIds[0],'Run now did not target the default in-scope project');
  assert(defaultRepositoryLabel.includes(shellCalls[0].repo)||defaultRepositoryLabel.includes('backend-api'),'Displayed project did not match the default run');
  await wait(()=>document.querySelector('[aria-label="Automation log run"]')?.textContent.includes('completed'));

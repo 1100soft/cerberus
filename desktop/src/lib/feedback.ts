@@ -11,7 +11,7 @@ export type FolderOperation={operation:'create'|'rename'|'delete'|'move';parent:
 export type FolderChange={forward:FolderOperation;inverse:FolderOperation};
 export type FolderBatch={nodes:MailFolder[];changes:FolderChange[];processed:number;error?:string|null};
 export type MailRef={folder:string;validity:number;uid:number;messageId:string};
-export type FeedbackMail=MailRef&{subject:string;from:string;replyTo:string;date:string;timestamp:number;body:string;html?:string;inlineImages?:Record<string,string>;read?:boolean;starred?:boolean;attachments:string[]};
+export type FeedbackMail=MailRef&{subject:string;from:string;replyTo:string;inReplyTo?:string;references?:string;date:string;timestamp:number;body:string;html?:string;inlineImages?:Record<string,string>;read?:boolean;starred?:boolean;attachments:string[]};
 export const defaultMailbox=():MailboxConfig=>({autoSpecialFolders:true,provider:'custom',enabled:true,address:'',username:'',imapHost:'',imapPort:993,imapSecurity:'tls',smtpHost:'',smtpPort:465,smtpSecurity:'tls',inbox:'INBOX',drafts:'Drafts',sent:'Sent',notes:'Cerberus Notes',metadata:'Cerberus Receipts',certificatePath:'',allowSend:false});
 // Preview data stays in memory. Real mail never goes into localStorage or a DB.
 const preview=new Map<string,MailboxConfig>();
@@ -28,6 +28,7 @@ const overviews=new PageSnapshots<{value:unknown;at:number}>(32);
 const configurations=new PageSnapshots<{value:MailboxConfig|null;at:number}>(64);
 window.addEventListener('feedback-mail-changed',event=>{const id=(event as CustomEvent<string>).detail;overviews.clear(key=>!id||key===id);});
 window.addEventListener('feedback-config-changed',event=>{const id=(event as CustomEvent<string>).detail;configurations.clear(key=>!id||key===id);overviews.clear(key=>!id||key===id);});
+export const cachedMailboxConfiguration=(id:string)=>configurations.peek(id)?.value;
 async function mailboxConfiguration(id:string):Promise<MailboxConfig|null>{
  const cached=configurations.peek(id);if(cached&&Date.now()-cached.at<30_000)return cached.value;
  return (await configurations.load(id,async()=>({value:inTauri()?await invoke<MailboxConfig|null>('feedback_config',{repositoryId:id}):preview.get(id)||null,at:Date.now()}))).value;
