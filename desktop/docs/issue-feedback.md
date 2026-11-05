@@ -7,12 +7,16 @@ project has a distinct project label. Empty labels generate stable project-ID
 labels; changing a project's display name never changes its queue. Existing
 reports are not automatically migrated when a repository/label changes.
 
-One private repository can serve many projects. Mountlet continues using
-`1100soft/mountlet-report` and its existing `mountlet-report` label; the URL,
-issue numbers, reporting endpoint, deployed credentials and history are unchanged.
-Cerberus uses `project:cerberus`; 1100 uses `project:1100`. Other/future projects
-inherit the default with unique generated labels. The feedback repository need
-not contain application source and need not be cloned locally.
+One private repository serves the configured projects:
+[`1100soft/1100-shared-feedback`](https://github.com/1100soft/1100-shared-feedback).
+It was renamed from `1100soft/mountlet-report`; existing issue numbers, comments
+and labels remain intact. Mountlet retains `mountlet-report`; Cerberus uses
+`project:cerberus`, 1100 uses `project:1100`, CI uses `project:ci`, and InDEx uses
+`project:index`. These readable labels are explicitly configured on this machine;
+other installations must configure the same labels. Future projects otherwise
+inherit the default with generated project-ID labels. The repository contains
+[per-project instructions](https://github.com/1100soft/1100-shared-feedback#project-queues)
+with exact labels, submission examples and routing policy; it need not be cloned.
 
 The Feedback page lists scoped open/closed issues, reads bodies/comments, creates
 issues, comments and closes/reopens issues. Lists are bounded to 50 per page and
@@ -34,7 +38,8 @@ set its own project label rather than trusting the client's requested label.
 Mountlet's source now supports `REPORT_GITHUB_PROJECT_LABEL` (defaults to its
 existing `mountlet-report`). Its 422 retry drops optional labels only, retaining
 that project label. These source changes need Mountlet's usual review/deployment;
-its already-deployed reporter continues working with the preserved existing label.
+its agent owns updating the deployed repository setting and verifying token access
+after the rename. Repository redirects must not be relied on for API writes.
 
 ## Project-bound agent and script tools
 

@@ -1893,3 +1893,16 @@ valid issue links and unsafe/incorrect URLs. WebKit issue checks passed at the
 minimum viewport and 100/140/150% zoom, including external-link dispatch and
 fixed action bounds while scrolling a long issue. The native dev watcher reloaded
 the change; one current desktop instance remains. No commit/push requested.
+
+
+## 2026-11-05 — Shared feedback repository rename
+
+Renamed the same private GitHub repository to `1100soft/1100-shared-feedback`,
+preserving issues/comments and Mountlet's `mountlet-report` label. Updated this
+machine's feedback default/overrides from the old canonical name, with a private
+settings backup. Explicit labels now include CI (`project:ci`) and InDEx
+(`project:index`), alongside Cerberus and 1100. Published shared policy and one
+project guide each for Mountlet, Cerberus, 1100, CI and InDEx under `projects/`
+in the shared repository. Guides cover mandatory labels, CLI/REST intake, native
+scoped tools, privacy, deduplication and project onboarding. Mountlet application
+compatibility, credentials and deployment updates are delegated to its agent.
