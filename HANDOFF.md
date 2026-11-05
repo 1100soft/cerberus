@@ -2046,3 +2046,11 @@ card height, tray opacity/keyboard navigation, account menus, scrolling and the
 removed action. The shared-feedback fixture also passed its delayed mailbox
 selected-project regression, and minimum-window viewport checks passed. WebKit
 continues emitting the previously recorded heap diagnostic during teardown.
+
+Checkpoint verification (2026-11-06): production build (including dropdown/style
+checks and TypeScript), inbox triage, repository selection, email cache/folder
+checks, release tooling tests, shell syntax and focused Rust formatting passed.
+The native suite passed on retry: 212 unit tests and 3 integration tests, with
+5 ignored; its first attempt hit transient ETXTBSY in the Codex login fixture.
+Previously completed minimum/wide WebKit layout and shared-selection checks
+remain documented above. No push performed for this checkpoint.
