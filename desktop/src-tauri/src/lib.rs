@@ -469,7 +469,13 @@ fn launch_cursor(args: &[String]) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn list_repositories(state: State<AppState>) -> Result<Vec<Repository>, String> { state.db.list() }
+async fn list_repositories(state: State<'_, AppState>) -> Result<Vec<Repository>, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || db.list())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn sync_repository_remotes(state:State<'_,AppState>)->Result<Vec<Repository>,String>{
     let db=state.db.clone();let git=state.git.clone();
@@ -621,62 +627,93 @@ async fn list_identities(state: State<'_,AppState>) -> Result<Vec<Identity>, Str
 }
 
 #[tauri::command]
-fn disconnect_github_identity(identity_id: String) -> Result<(), String> {
-    oauth::disconnect_github_identity(&identity_id)
+async fn disconnect_github_identity(identity_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || oauth::disconnect_github_identity(&identity_id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn github_auth_status() -> GithubAuthStatus {
-    oauth::auth_status()
+async fn github_auth_status() -> Result<GithubAuthStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || oauth::auth_status())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn begin_github_oauth(client_id: Option<String>) -> Result<GithubDeviceFlow, String> {
-    oauth::begin(client_id.as_deref().unwrap_or(""))
+async fn begin_github_oauth(client_id: Option<String>) -> Result<GithubDeviceFlow, String> {
+    tauri::async_runtime::spawn_blocking(move || oauth::begin(client_id.as_deref().unwrap_or("")))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn complete_github_oauth(
+async fn complete_github_oauth(
     client_id: String,
     device_code: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Option<Identity>, String> {
-    oauth::complete(&state.db, &client_id, &device_code)
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || oauth::complete(&db, &client_id, &device_code))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn complete_github_token(token: String, state: State<AppState>) -> Result<Identity, String> {
-    oauth::identity_from_token(&state.db, token.trim())
+async fn complete_github_token(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<Identity, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || oauth::identity_from_token(&db, token.trim()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn import_github_cli_identity(state: State<AppState>) -> Result<Identity, String> {
-    let token = oauth::github_cli_token()?;
-    oauth::identity_from_token(&state.db, &token)
+async fn import_github_cli_identity(state: State<'_, AppState>) -> Result<Identity, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = oauth::github_cli_token()?;
+        oauth::identity_from_token(&db, &token)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn assign_repository_identity(
+async fn assign_repository_identity(
     repository_id: String,
     identity_id: String,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if !identity_id.trim().is_empty() {
-        let remote = state
-            .db
-            .list()?
-            .into_iter()
-            .find(|repo| repo.id == repository_id)
-            .and_then(|repo| repo.canonical_remote);
-        github::ensure_identity_access(&identity_id, remote.as_deref())?;
-    }
-    state.db.assign_identity(&repository_id, &identity_id)
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if !identity_id.trim().is_empty() {
+            let remote = db
+                .list()?
+                .into_iter()
+                .find(|repo| repo.id == repository_id)
+                .and_then(|repo| repo.canonical_remote);
+            github::ensure_identity_access(&identity_id, remote.as_deref())?;
+        }
+        db.assign_identity(&repository_id, &identity_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn import_repository(path: String, state: State<AppState>) -> Result<ImportResult, String> {
-    let id = state.db.import(&state.git, Path::new(&path))?;
-    let repository = refresh_repository(id, state)?;
+async fn import_repository(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<ImportResult, String> {
+    let db = state.db.clone();
+    let git = state.git.clone();
+    let id = tauri::async_runtime::spawn_blocking(move || db.import(&git, Path::new(&path)))
+        .await
+        .map_err(|error| error.to_string())??;
+    let repository = refresh_repository(id, state).await?;
     let mut warnings = Vec::new();
     if repository.canonical_remote.is_none() {
         warnings.push("Imported without a remote; hosted actions are unavailable.".into());
@@ -688,31 +725,45 @@ fn import_repository(path: String, state: State<AppState>) -> Result<ImportResul
 }
 
 #[tauri::command]
-fn refresh_repository(repository_id: String, state: State<AppState>) -> Result<Repository, String> {
-    let repository = state
-        .db
-        .list()?
-        .into_iter()
-        .find(|r| r.id == repository_id)
-        .ok_or("Repository not found")?;
-    let previous_remote = repository.canonical_remote.clone();
-    let previous_host = repository.host_type.clone();
-    let repository = scan(&state.git, repository)?;
-    if repository.canonical_remote != previous_remote || repository.host_type != previous_host {
-        state.db.save_remote(
-            &repository_id,
-            repository.canonical_remote.as_deref(),
-            &repository.host_type,
-        )?;
-    }
-    state.db.save_snapshot(&repository_id, &repository)?;
-    Ok(repository)
+async fn refresh_repository(
+    repository_id: String,
+    state: State<'_, AppState>,
+) -> Result<Repository, String> {
+    let db = state.db.clone();
+    let git = state.git.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let repository = db
+            .list()?
+            .into_iter()
+            .find(|r| r.id == repository_id)
+            .ok_or("Repository not found")?;
+        let previous_remote = repository.canonical_remote.clone();
+        let previous_host = repository.host_type.clone();
+        let repository = scan(&git, repository)?;
+        if repository.canonical_remote != previous_remote || repository.host_type != previous_host {
+            db.save_remote(
+                &repository_id,
+                repository.canonical_remote.as_deref(),
+                &repository.host_type,
+            )?;
+        }
+        db.save_snapshot(&repository_id, &repository)?;
+        Ok(repository)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn list_branches(repository_id: String, state: State<AppState>) -> Result<Vec<String>, String> {
+async fn list_branches(
+    repository_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
     let path = state.db.repository_path(&repository_id)?;
-    state.git.branches(&path).map_err(|e| e.to_string())
+    let git = state.git.clone();
+    tauri::async_runtime::spawn_blocking(move || git.branches(&path).map_err(|e| e.to_string()))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -727,7 +778,20 @@ async fn auto_fast_forward(repository_id:String,app:tauri::AppHandle,state:State
 #[tauri::command]
 async fn sync_email_senders(repository_id:String,config:Option<feedback::Config>,token:Option<String>,push:bool,state:State<'_,AppState>)->Result<feedback::Config,String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||sender_sync::synchronize(&root,&repository_id,config,token,push)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
-fn feedback_config(repository_id:String,state:State<AppState>)->Result<Option<feedback::Config>,String>{state.db.repository_path(&repository_id)?;feedback::config(&state.data_dir,&repository_id)}
+async fn feedback_config(
+    repository_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<feedback::Config>, String> {
+    let db = state.db.clone();
+    let root = state.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        db.repository_path(&repository_id)?;
+        feedback::config(&root, &repository_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn save_feedback_config(repository_id:String,config:feedback::Config,password:Option<String>,state:State<'_,AppState>)->Result<(),String>{state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||feedback::save(&root,&repository_id,config,password)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
@@ -788,11 +852,11 @@ async fn create_repository(update:RepositoryUpdate,state:State<'_,AppState>)->Re
 }
 
 #[tauri::command]
-fn run_git_action(
+async fn run_git_action(
     repository_id: String,
     operation: String,
     args: Value,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     let path = state.db.repository_path(&repository_id)?;
     let owned: Vec<String> = match operation.as_str() {
@@ -826,8 +890,13 @@ fn run_git_action(
         ],
         other => return Err(format!("Unsupported Git operation: {other}")),
     };
-    let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
-    state.git.mutate(&path, &refs).map_err(|e| e.to_string())
+    let git = state.git.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+        git.mutate(&path, &refs).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

@@ -48,3 +48,52 @@ rules across projects. `feedback.rs` owns server-backed operations and scoped
 agent tools; `sender_sync.rs` handles supported provider identity APIs. Mail
 content stays on the server, while configuration and reference-only automation
 context remain local. See [Email](email.md) for synchronization and client limits.
+
+
+## Project navigation snapshots
+
+The Projects overview remains in App state across sidebar navigation. Commit
+history, branch listings and repository activity additionally retain bounded,
+session-only snapshots so returning to a page paints known data immediately and
+revalidates in the background. Pending reads are shared across remounts. Explicit
+history refresh supersedes an older read; late results cannot overwrite it, and
+failed reads do not erase the last successful snapshot. Snapshots are keyed by
+project and (for commits) branch, never stored as another copy of credentials or
+message bodies. Commit snapshots keep the first 50 entries, with up to 40 branch
+keys; branch/activity caches keep up to 32 project keys each. Existing Git-change,
+focus, polling and log-deletion refresh paths remain active.
+
+Native repository refresh/import scans and branch enumeration execute on blocking
+workers instead of the Tauri UI thread, keeping navigation responsive while Git
+runs. Repository import preserves the same result and validation semantics.
+
+### Retained Projects and Email views
+
+Projects remains mounted while hidden; Email mounts on its first visit and then
+remains mounted. This preserves expensive rendered conversation/message content,
+folder expansion, scroll, mailbox selection and unsaved reply text. Layout rules
+match the active wrapper only, so a cached hidden page cannot change another
+page's geometry. Hidden Projects shortcuts, conversation subscriptions and
+provider/activity polling are suspended. Returning triggers background
+revalidation without clearing the retained reader/draft or disabling cached mail
+interactions. Folder discovery and message listing start independently; sender
+identity-only refreshes do not reload the message list.
+
+Mail folder lists retain up to 100 metadata-only rows for each of 32 folder keys.
+Recently opened message snapshots retain up to 12 messages, each below two
+million characters including inline-image data. Both caches are session-only,
+keyed by project/folder/UID validity, and invalidated by mailbox configuration,
+mail or folder mutations. Configuration reads coalesce and reuse a 30-second
+snapshot; folder count overviews coalesce and reuse a 60-second snapshot. Explicit
+refresh bypasses overview reuse. Invalidated in-flight reads cannot repopulate
+stale snapshots. Mail bodies are never added to localStorage or a local mail DB.
+
+The shell subscribes to agent running presence rather than every transcript
+change, and heavy views are memoized. Streaming chat fallback serialization is
+batched and scheduled for idle time; full native conversation persistence keeps
+its existing asynchronous path, and completion/page exit flush recovery content.
+Repository list reads, mailbox configuration reads, Git actions, GitHub OAuth,
+CLI credential probes and account assignment now use native blocking workers
+rather than the UI dispatch thread. Concurrent project-list reads are shared;
+post-mutation reads still request fresh data. See the responsiveness/caching rule
+in AGENTS.md when adding future commands or views.

@@ -19,12 +19,12 @@ if len(sys.argv) == 1:
 
 css = (Path(__file__).resolve().parents[1] / "src/styles.css").read_text()
 css = "\n".join(line for line in css.splitlines() if not line.startswith("@import"))
-html = """<div class="shell"><aside><div class="brand">GitCerberus</div><nav>Repositories</nav></aside><main>
+html = """<div class="shell"><aside><div class="brand">GitCerberus</div><nav>Repositories</nav></aside><main><div class="projects-page" style="display:contents">
 <section class="toolbar">Repository controls</section><div class="summary">Repositories</div>
 <div class="repository-workspace"><div class="repository-list-column"><div class="repo-list-controls">Filters and sort</div><section class="repo-grid">Repositories</section></div>
 <section class="history-panel">Commit history</section></div>
 <div class="pane-divider"></div><section class="codex-panel"><header>Conversations</header>
-<div class="codex-body"><div class="provider-controls">Codex · Cursor</div><div class="codex-conversations"><div class="codex-thread-list"><button>Conversation with a long title that should wrap</button></div><div class="codex-messages"><article class="codex-message user"><div>A prompt with enough text to exercise wrapping within the available pane width.</div></article></div></div></div></section></main></div>"""
+<div class="codex-body"><div class="provider-controls">Codex · Cursor</div><div class="codex-conversations"><div class="codex-thread-list"><button>Conversation with a long title that should wrap</button></div><div class="codex-messages"><article class="codex-message user"><div>A prompt with enough text to exercise wrapping within the available pane width.</div></article></div></div></div></section></div></main></div>"""
 script = """JSON.stringify([false, true].flatMap(open => [0.75, 1, 1.4, 1.5].map(zoom => {
  document.querySelector('.shell').classList.toggle('sidebar-open', open);
  document.querySelector('aside').hidden = !open;
@@ -46,7 +46,7 @@ for (const zoom of [0.75, 1, 1.4, 1.5]) {
  document.querySelector('.shell').classList.add('sidebar-open');
  document.querySelector('aside').hidden = false;
  for (const page of ['repository-workspace','identities-page','agents-panel','automation-page','feedback-page']) {
-  main.innerHTML = `<section class="${page}">Page content</section>`;
+  main.innerHTML = page==='repository-workspace'?`<div class="projects-page" style="display:contents"><section class="${page}">Page content</section></div>`:page==='feedback-page'?`<div class="email-page-cache" style="display:contents"><section class="${page}">Page content</section></div>`:`<section class="${page}">Page content</section>`;
   const aside = document.querySelector('aside'), rect = aside.getBoundingClientRect();
   const style = getComputedStyle(aside), head = getComputedStyle(aside, '::before');
   sidebarChecks.push({zoom,page,width:rect.width,height:rect.height,left:rect.left,top:rect.top,

@@ -8,6 +8,13 @@ target_branch="${CERBERUS_RELEASE_TARGET_BRANCH:-main}"
 tag_prefix="${CERBERUS_RELEASE_TAG_PREFIX:-v}"
 source_tag_prefix="${CERBERUS_RELEASE_SOURCE_TAG_PREFIX:-cerberus/source/}"
 handoff="${CERBERUS_HANDOFF_RELEASE:-}"
+approved_sha="${CERBERUS_RELEASE_APPROVED_SHA:-}"
+expected_source="${CERBERUS_RELEASE_EXPECTED_SOURCE:-}"
+request_source_sha="${CERBERUS_RELEASE_ORIGINAL_SOURCE:-}"
+expected_target="${CERBERUS_RELEASE_EXPECTED_TARGET:-}"
+requested_tag="${CERBERUS_RELEASE_TAG:-}"
+request_run="${CERBERUS_RELEASE_REQUEST_RUN:-${CERBERUS_RUN_ID:-}}"
+original_repository="$(git rev-parse --show-toplevel)"
 
 case "$level" in
   major|minor|patch) ;;
@@ -45,7 +52,7 @@ emit_handoff() {
   local reason="$1"
   local details
 
-  details="Release could not complete.
+  details="Release preparation/publication context.
 Stage: $stage
 Reason: $reason
 Progress level: $level
@@ -63,34 +70,41 @@ Release architecture:
 - Subsequent releases add exactly one commit after the previous target tip.
 - Every release commit contains the exact captured source tree.
 - Version tags point to release commits on the target branch.
-- Source tags identify the captured source commits.
+- Source tags identify the reviewed prepared source commits.
 - Publication is atomic; an expected-tip lease guards the target against races.
 
 Independently verify current remote state before acting.
 Preserve release intent, existing tags, and source history.
 Do not rewrite either branch, discard concurrent changes,
 or modify active worktrees.
-A version-validation failure requires a reviewed metadata correction on the verified development branch before release retry. Do not publish mismatched tags, select another version, move existing tags, or rewrite target history. Complete the exact requested release only if all validation and publication guards pass."
+A version-validation failure requires a reviewed metadata correction on the verified development branch before release retry. Do not publish mismatched tags, select another version, move existing tags, or rewrite target history. Always prepare and review release version metadata AND release documentation before publication. A numerically valid version check alone is not documentation approval. Complete the exact requested release only if all validation and publication guards pass."
 
   echo "$details" >&2
 
   if [[ -n "$handoff" ]]; then
     mkdir -p -- "$(dirname -- "$handoff")"
 
-    python3 - "$handoff" "$details" <<'PY'
+    python3 - "$handoff" "$details" "$request_run" "$remote_name" "$remote" "$source_branch" "${request_source_sha:-${original_source_sha:-$source_sha}}" "$target_branch" "$target_sha" "$tag" "$source_tag" "$level" "$stage" <<'PY'
 import json
 import os
 import sys
 import tempfile
 
-path, details = sys.argv[1:]
+path, details, run, remote_name, remote, source_branch, source_sha, target_branch, target_sha, tag, source_tag, level, stage = sys.argv[1:]
+context = {"details": details, "releasePlan": {"schema": 1, "requestRun": run,
+    "remoteName": remote_name, "remoteUrl": remote, "sourceBranch": source_branch,
+    "sourceSha": source_sha, "targetBranch": target_branch, "previousTargetSha": target_sha,
+    "tag": tag, "sourceTag": source_tag, "progressLevel": level, "stage": stage,
+    "tagPrefix": os.environ.get("CERBERUS_RELEASE_TAG_PREFIX", "v"),
+    "sourceTagPrefix": os.environ.get("CERBERUS_RELEASE_SOURCE_TAG_PREFIX", "cerberus/source/"),
+    "versionCheck": os.environ.get("CERBERUS_RELEASE_VERSION_CHECK", "")}}
 directory = os.path.dirname(os.path.abspath(path))
 
 fd, temp = tempfile.mkstemp(dir=directory)
 
 try:
     with os.fdopen(fd, "w") as f:
-        json.dump({"details": details}, f)
+        json.dump(context, f)
         f.write("\n")
 
     os.replace(temp, path)
@@ -230,6 +244,36 @@ git check-ref-format "refs/tags/$tag"
 source_tag="$source_tag_prefix$tag"
 [[ "$source_tag" != "$tag" ]] || fail "Source and release tags must differ"
 git check-ref-format "refs/tags/$source_tag"
+
+# Every manual request goes through the documentation/version agent, even when
+# the existing manifests happen to match. Only a separately reviewed snapshot
+# can enter the publication path below.
+if [[ -z "$approved_sha" ]]; then
+  stage="prepare release documentation"
+  [[ -n "$request_run" ]] || fail "Original automation run ID is required"
+  [[ -n "$handoff" ]] || fail "Configure the optional release handoff; no release was published"
+  emit_handoff "Prepare version metadata and release documentation, then request Review. Nothing has been published."
+  trap - ERR
+  echo "AWAITING_RELEASE_PREPARATION $tag"
+  exit 0
+fi
+stage="verify reviewed release plan"
+[[ "$approved_sha" =~ ^([a-fA-F0-9]{40}|[a-fA-F0-9]{64})$ ]] || fail "Approval must identify a full commit SHA"
+[[ -n "$expected_source" && "$source_sha" == "$expected_source" ]] || fail "Remote source no longer matches the reviewed release plan"
+[[ "$source_sha" == "$approved_sha" ]] || fail "Reviewed preparation must be published to the development source before release"
+[[ "$request_source_sha" =~ ^([a-fA-F0-9]{40}|[a-fA-F0-9]{64})$ ]] || fail "Original release source SHA is required"
+[[ "$target_sha" == "$expected_target" ]] || fail "Remote target no longer matches the reviewed release plan"
+[[ -n "$requested_tag" && "$tag" == "$requested_tag" ]] || fail "Requested release tag no longer matches the reviewed release plan"
+[[ -n "$request_run" ]] || fail "Original release request run is required"
+original_source_sha="$source_sha"
+# Fetch the already published, reviewed preparation object explicitly. The
+# release publisher never updates the development branch or original checkout.
+git -C "$tmp" fetch -q --no-tags -- "$original_repository" "$approved_sha"
+resolved_approval="$(git -C "$tmp" rev-parse --verify "$approved_sha^{commit}")"
+[[ "$resolved_approval" == "$approved_sha" ]] || fail "Reviewed commit could not be verified"
+git -C "$tmp" merge-base --is-ancestor "$request_source_sha" "$approved_sha" || fail "Prepared release discarded original source history"
+source_sha="$approved_sha"
+tree_sha="$(git -C "$tmp" rev-parse "$source_sha^{tree}")"
 
 # Validate the exact source snapshot against the proposed release tag BEFORE any
 # publication. Project-owned checks retain responsibility for their own metadata.
@@ -388,7 +432,7 @@ remote_wip="$(
 [[ "$remote_main" == "$target_sha" ]] ||
   fail "Remote target branch changed during release preparation"
 
-[[ "$remote_wip" == "$source_sha" ]] ||
+[[ "$remote_wip" == "$original_source_sha" ]] ||
   fail "Remote source branch changed during release preparation"
 
 for name in "$tag" "$source_tag"; do

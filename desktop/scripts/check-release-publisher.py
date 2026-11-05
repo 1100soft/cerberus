@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the documented publisher against disposable local remotes only."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -34,7 +35,7 @@ class ReleasePublisher(unittest.TestCase):
         self.base = git(self.repo, 'rev-parse', 'HEAD')
         self.handoff = self.root / 'handoff.json'
         self.env = {**os.environ, 'CERBERUS_INPUT_PROGRESS_LEVEL': 'patch',
-                    'CERBERUS_HANDOFF_RELEASE': str(self.handoff), 'GIT_TERMINAL_PROMPT': '0'}
+                    'CERBERUS_HANDOFF_RELEASE': str(self.handoff), 'CERBERUS_RUN_ID': 'release-fixture', 'GIT_TERMINAL_PROMPT': '0'}
         # Do not inherit per-user release overrides in the fixture.
         for key in list(self.env):
             if key.startswith('CERBERUS_RELEASE_'):
@@ -54,8 +55,15 @@ class ReleasePublisher(unittest.TestCase):
         git(self.repo, 'push', '-q', 'origin', 'wip')
         return git(self.repo, 'rev-parse', 'HEAD')
 
-    def run_release(self):
-        return subprocess.run(['bash', str(SCRIPT)], cwd=self.repo, env=self.env,
+    def run_release(self, approved=True):
+        env = dict(self.env)
+        if approved:
+            env.update(CERBERUS_RELEASE_APPROVED_SHA=git(self.repo, 'rev-parse', 'HEAD'),
+                       CERBERUS_RELEASE_EXPECTED_SOURCE=self.remote_git('rev-parse', 'refs/heads/wip'),
+                       CERBERUS_RELEASE_EXPECTED_TARGET=self.base,
+                       CERBERUS_RELEASE_ORIGINAL_SOURCE=self.base,
+                       CERBERUS_RELEASE_TAG='v1.2.4', CERBERUS_RELEASE_REQUEST_RUN='release-fixture')
+        return subprocess.run(['bash', str(SCRIPT)], cwd=self.repo, env=env,
                               text=True, capture_output=True, timeout=30)
 
     def remote_git(self, *args):
@@ -66,6 +74,114 @@ class ReleasePublisher(unittest.TestCase):
 
     def refs(self):
         return self.remote_git('show-ref')
+
+    def test_manual_request_always_requests_agent_documentation(self):
+        self.prepare()  # Numeric validation alone must never bypass the agent.
+        before = self.refs()
+        result = self.run_release(approved=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('AWAITING_RELEASE_PREPARATION', result.stdout)
+        self.assertEqual(self.refs(), before)
+        plan = json.loads(self.handoff.read_text())['releasePlan']
+        self.assertEqual(plan['tag'], 'v1.2.4')
+        self.assertEqual(plan['sourceSha'], self.remote_git('rev-parse', 'refs/heads/wip'))
+        self.assertEqual(plan['previousTargetSha'], self.base)
+        self.assertEqual(plan['stage'], 'prepare release documentation')
+
+    def test_missing_handoff_cannot_bypass_preparation(self):
+        self.prepare()
+        self.env.pop('CERBERUS_HANDOFF_RELEASE')
+        before = self.refs()
+        result = self.run_release(approved=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.refs(), before)
+
+    def test_reviewed_documentation_is_in_both_release_and_development(self):
+        source = self.prepare()
+        (self.repo / 'CHANGELOG.md').write_text('# 1.2.4\nReviewed release notes.\n')
+        self.commit('prepare reviewed release documentation')
+        approved = git(self.repo, 'rev-parse', 'HEAD')
+        self.assertEqual(self.remote_git('rev-parse', 'refs/heads/wip'), source)
+        git(self.repo, 'push', '-q', 'origin', 'wip')  # Integrate/Publish precedes release.
+        result = self.run_release()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.remote_git('rev-parse', 'refs/heads/wip'), approved)
+        release = self.remote_git('rev-parse', 'refs/heads/main')
+        self.assertEqual(self.remote_git('show', release+':CHANGELOG.md'), '# 1.2.4\nReviewed release notes.')
+        self.assertEqual(self.remote_git('rev-list', '--parents', '-n', '1', release), release+' '+self.base)
+        self.assertEqual(self.remote_git('rev-parse', 'refs/tags/cerberus/source/v1.2.4^{}'), approved)
+
+    def test_publish_requires_documentation_approval(self):
+        self.prepare()
+        self.assertEqual(self.run_release(approved=False).returncode, 0)
+        plan = json.loads(self.handoff.read_text())['releasePlan']
+        payload = self.root / 'approved.json'
+        approval = {'releasePlan': plan, 'reviewedSha': git(self.repo, 'rev-parse', 'HEAD'),
+                    'reviewRun': 'review-fixture', 'documentationPaths': ['version'],
+                    'variables': {'release': True, 'releaseReady': True}, 'documentationReviewed': False,
+                    'sourcePublished': True, 'publishedSha': git(self.repo, 'rev-parse', 'HEAD'), 'publishRun': 'publish-fixture'}
+        payload.write_text(json.dumps(approval))
+        env = {**self.env, 'CERBERUS_HANDOFF_INPUT': str(payload)}
+        publisher = SCRIPT.with_name('release-publish.sh')
+        before = self.refs()
+        result = subprocess.run(['bash', str(publisher)], cwd=self.repo, env=env, text=True, capture_output=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.refs(), before)
+        approval['documentationReviewed'] = True
+        approval['sourcePublished'] = False
+        payload.write_text(json.dumps(approval))
+        result = subprocess.run(['bash', str(publisher)], cwd=self.repo, env=env, text=True, capture_output=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.refs(), before)
+        self.assertIn("Publish's verification", result.stderr)
+        approval['sourcePublished'] = True
+        payload.write_text(json.dumps(approval))
+        result = subprocess.run(['bash', str(publisher)], cwd=self.repo, env=env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('RELEASED v1.2.4', result.stdout)
+
+    def test_unpublished_preparation_cannot_be_released(self):
+        self.prepare()
+        original = self.remote_git('rev-parse', 'refs/heads/wip')
+        (self.repo / 'CHANGELOG.md').write_text('Release notes still local')
+        self.commit('chore(release): prepare v1.2.4')
+        before = self.refs()
+        result = self.run_release()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('must be published', result.stderr)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(self.remote_git('rev-parse', 'refs/heads/wip'), original)
+
+    def test_stale_approval_does_not_publish(self):
+        self.prepare()
+        self.assertEqual(self.run_release(approved=False).returncode, 0)
+        plan = json.loads(self.handoff.read_text())['releasePlan']
+        approved = git(self.repo, 'rev-parse', 'HEAD')
+        (self.repo / 'new-work').write_text('concurrent development')
+        self.commit('concurrent source update')
+        git(self.repo, 'push', '-q', 'origin', 'wip')
+        payload = self.root / 'stale.json'
+        payload.write_text(json.dumps({'releasePlan': plan, 'reviewedSha': approved,
+            'reviewRun': 'review-fixture', 'documentationPaths': ['version'],
+            'documentationReviewed': True, 'variables': {'release': True, 'releaseReady': True},
+            'sourcePublished': True, 'publishedSha': approved, 'publishRun': 'publish-fixture'}))
+        before = self.refs()
+        result = subprocess.run(['bash', str(SCRIPT.with_name('release-publish.sh'))],
+            cwd=self.repo, env={**self.env, 'CERBERUS_HANDOFF_INPUT': str(payload)}, text=True, capture_output=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.refs(), before)
+        self.assertIn('Remote source no longer matches', result.stderr)
+
+    def test_unprepared_version_also_goes_to_documentation_agent(self):
+        self.prepare('1.2.3')
+        before = self.refs()
+        result = self.run_release(approved=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.refs(), before)
+        self.assertEqual(json.loads(self.handoff.read_text())['releasePlan']['tag'], 'v1.2.4')
+
+    def test_publish_snapshot_uses_current_publisher(self):
+        self.assertIn(SCRIPT.read_text(), SCRIPT.with_name('release-publish.sh').read_text())
 
     def test_version_mismatch_cannot_publish(self):
         self.prepare('1.2.3')

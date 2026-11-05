@@ -324,3 +324,11 @@ provenance tags from release triggers, and preserves append-only release history
 The matching CI fix/Review prompts use verified correction-target metadata rather
 than guessing an upstream. CI ref names may be tags; agent startup retrieves a
 missing exact commit without advancing the user's checkout.
+
+Release requests now always route through agent preparation of versions and
+release documentation, followed by the normal Review → Integrate (when needed) → Publish flow, then a
+guarded release publication script. Release-preparation commit trailers identify
+the intent; verified plans and release flags propagate through corrections. Both
+normal and recovery paths use this chain. Only Publish emits `release-ready`
+after confirming the exact reviewed development commit. See the templates for
+handoff names, required flags and approval fields.

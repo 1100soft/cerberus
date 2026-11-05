@@ -31,7 +31,7 @@ import type { CodexMessage, FileEdit, Repository } from "../types";
 
 const RelatedAutomationLogDialog=lazy(()=>import('./AutomationLogDialog').then(module=>({default:module.AutomationLogDialog})));
 
-export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConversation }: { repository?: Repository; unlinkedName?: string; onSetup: (provider: import("./ProviderSetup").Provider) => void; onCursorConversation?: (repositoryId: string, conversationId?: string) => void }) {
+export const CodexHistory=memo(function CodexHistory({ active=true, repository, unlinkedName, onSetup, onCursorConversation }: { active?:boolean;repository?: Repository; unlinkedName?: string; onSetup: (provider: import("./ProviderSetup").Provider) => void; onCursorConversation?: (repositoryId: string, conversationId?: string) => void }) {
   const [settings, setEnabled] = useProviderPreferences();
   const [scripts,setScripts]=useState(()=>localStorage.getItem('gitcerberus.showScripts')!=='false');
   const changeScripts=(value:boolean)=>{setScripts(value);localStorage.setItem('gitcerberus.showScripts',String(value));};
@@ -51,25 +51,25 @@ export function CodexHistory({ repository, unlinkedName, onSetup, onCursorConver
     </div></header>
     <div className="provider-controls" aria-label="Conversation providers">{providers.map(provider => <div className="provider-control" key={provider}><label className={`provider-name provider-${provider}`} title={`Show ${providerName(provider)} conversations`}><input type="checkbox" checked={settings[provider] === true} onChange={event => setEnabled(provider, event.target.checked)} />{providerIcon[provider]}<span>{providerName(provider)}</span></label><button type="button" className={`provider-name provider-${provider}`} aria-label={`Set up ${providerName(provider)}`} title={`Set up ${providerName(provider)}`} onClick={() => onSetup(provider)}><Settings2 size={14} /></button></div>)}<label className="provider-name provider-script"><input type="checkbox" checked={scripts} onChange={event=>changeScripts(event.target.checked)}/><SquareTerminal size={14}/><span>Script</span></label></div>
     <div className="codex-body">
-    {repository && <ConversationBrowser key={repository.id} repository={repository} revision={revision} scripts={scripts} enabled={enabled} onCursorConversation={reportCursorConversation} />}
+    {repository && <ConversationBrowser active={active} key={repository.id} repository={repository} revision={revision} scripts={scripts} enabled={enabled} onCursorConversation={reportCursorConversation} />}
     {!repository && <p className="panel-copy">{unlinkedName ? "Link an existing local checkout, or clone a new one, to see its agent and script activity." : "Select a project to see its agent and script activity."}</p>}
     </div>
     {editCheckpoint&&<CheckpointPromptDialog onClose={()=>setEditCheckpoint(false)}/>}
   </section>;
-}
+});
 
 type Provider = import("../lib/conversationCache").Provider;
 const providerIcon = {codex:<OpenAILogo/>,cursor:<CursorIcon/>,copilot:<Github/>,claude:<ClaudeIcon/>};
 const providers: Provider[] = ["codex", "cursor", "copilot", "claude"];
 
 
-function ConversationBrowser({ repository, revision, enabled, scripts, onCursorConversation }: { repository: Repository; revision: number; enabled: Provider[];scripts:boolean; onCursorConversation: (id?: string) => void }) {
+function ConversationBrowser({ active, repository, revision, enabled, scripts, onCursorConversation }: { active:boolean;repository: Repository; revision: number; enabled: Provider[];scripts:boolean; onCursorConversation: (id?: string) => void }) {
   const [archived, setArchived] = useState(false);
   const [,setRetryRevision]=useState(0);
   useEffect(()=>{void refreshBlockedAutomations();return subscribeSavedPrompts(()=>setRetryRevision(value=>value+1));},[]);
-  const chats = useAgentChats().filter(chat => chat.repositoryId === repository.id);
+  const chats = useAgentChats(active).filter(chat => chat.repositoryId === repository.id);
   const listedChats = chats.filter(chat => enabled.includes(chat.profile.provider as Provider) && !chat.originKey && !!chat.archived === archived);
-  const activity=useRepositoryActivity(repository.id,revision);
+  const activity=useRepositoryActivity(repository.id,revision,active);
   const scriptRuns=scripts&&!archived?activity.runs.filter(run=>run.kind==='shell'):[];
   const enabledKey = enabled.join(",");
   const [contextMenu,setContextMenu]=useState<{x:number;y:number;chat?:AgentChat;thread?:Thread}>();
@@ -189,7 +189,7 @@ function ConversationBrowser({ repository, revision, enabled, scripts, onCursorC
   };
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{
-      if(event.defaultPrevented || document.querySelector('[role=dialog], [role=listbox]'))return;
+      if(!messagePane.current?.getClientRects().length || event.defaultPrevented || document.querySelector('[role=dialog], [role=listbox]'))return;
       if(matchesShortcut(event,'search.conversations')){event.preventDefault();document.querySelector<HTMLInputElement>('[aria-label="Search project conversations"]')?.focus();return;}
       if(matchesShortcut(event,'search.messages')){event.preventDefault();searchInput.current?.focus();return;}
       for(const command of ['message.first','message.last','message.previous','message.next'] as const)if(matchesShortcut(event,command)){event.preventDefault();void navigate(command);return;}
@@ -236,11 +236,11 @@ function ConversationBrowser({ repository, revision, enabled, scripts, onCursorC
     return true;
   }
 
-  useEffect(() => subscribe(() => {
+  useEffect(() => active?subscribe(() => {
     const next = peekList(listKey(repository.id, archived, enabled));
     if (next) { setThreads(next.threads); setCursors(next.cursors); setListError(next.error); setLoading(false); }
     if (selectedKey) showCached(selectedKey, undefined);
-  }), [repository.id, archived, enabledKey, selectedKey]);
+  }):undefined, [repository.id, archived, enabledKey, selectedKey,active]);
 
   useEffect(() => {
     const next = peekList(listKey(repository.id, archived, enabled));
@@ -281,16 +281,18 @@ function ConversationBrowser({ repository, revision, enabled, scripts, onCursorC
   }, [repository.id, selectedThread?.key, selectedThread?.updatedAt]);
 
   useEffect(() => {
-    const revalidate = () => { void refreshThreadList(repository.id, archived, enabled).catch(() => {}); };
+    const revalidate = () => { if(!messagePane.current?.getClientRects().length||document.hidden)return;void refreshThreadList(repository.id, archived, enabled).catch(() => {}); };
     window.addEventListener("focus", revalidate);
+    window.addEventListener("projects-page-visible",revalidate);
     const timer = window.setInterval(revalidate, 20000);
-    return () => { window.removeEventListener("focus", revalidate); window.clearInterval(timer); };
+    return () => { window.removeEventListener("focus", revalidate);window.removeEventListener("projects-page-visible",revalidate); window.clearInterval(timer); };
   }, [repository.id, archived, enabledKey]);
 
   const cursorWorking = threads.some((thread) => thread.provider === "cursor" && thread.working);
   useEffect(() => {
     if (!cursorWorking) return;
     const timer = window.setInterval(() => {
+      if(!messagePane.current?.getClientRects().length||document.hidden)return;
       void refreshThreadList(repository.id, archived, enabled, "cursor").then((list) => {
         const open = list.threads.find((item) => item.key === selectedKey);
         if (open?.working) return refreshMessages(repository.id, open, true);
@@ -322,6 +324,7 @@ function ConversationBrowser({ repository, revision, enabled, scripts, onCursorC
 
   useEffect(() => {
     const cycle = (event: Event) => {
+      if(!messagePane.current?.getClientRects().length)return;
       const keys = ['new', ...listedChats.map(chat => `app:${chat.id}`), ...visible.map(thread => thread.key)];
       const index = Math.max(0, keys.indexOf(selected || selectedKey || 'new'));
       const delta = (event as CustomEvent<number>).detail;

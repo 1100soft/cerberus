@@ -1576,3 +1576,127 @@ contract without inventing an ordinary upstream. Agent worktree preparation can
 fetch a missing exact SHA without moving existing refs/FETCH_HEAD; CI context
 identifies ref names as potentially tags. Existing published tags/history and
 pending correction branches were not repaired, pushed or integrated by this task.
+
+## 2026-11-04 — Continue configuration-only revisions
+
+The next Cerberus review found the publisher test's implicit bare-repository
+reads failed with safe.bareRepository=explicit. Revise fixed them in 2120726.
+Review then blocked its missing destination metadata; a second Revise configured
+an upstream but created no commit or handoff, so approval/publication stopped.
+Revise had correctly avoided an empty commit; the missing continuation was a
+workflow contract/configuration gap. The revised prompt now requires committed
+tracked-file repairs or an explicit optional review handoff after a successful
+no-commit repair. Review accepts independently verified ordinary revision target
+metadata and does not require a new SHA for configuration-only changes. Existing
+CI/release authorization remains distinct. Templates and live configuration are
+kept in sync; enabled settings are preserved.
+
+Current repair: fast-forwarded local wip to the validated correction 2120726 and
+pushed wip normally to origin/wip; both refs agree. All five publisher tests pass
+with safe.bareRepository=explicit, and the WebKit handoff fixture passes (4 claims,
+4 finishes, 9 calls). Revise's optional (review) output and both live prompts were
+verified after app reload; all automation enabled settings were preserved. These
+new prompt/documentation edits remain uncommitted for the next checkpoint.
+
+
+## 2026-11-04 — Release documentation gate
+
+The prior successful script path could publish without agent-authored release
+notes/current-version docs. The manual Release script now always emits a
+structured release plan for preparation, even when numeric metadata matches.
+Release preparation/recovery updates versions and relevant docs together, commits
+for Review (or explicitly hands off an already-correct SHA), and cannot publish.
+Review verifies docs and the original release plan, then emits release-ready with
+releaseReady=true. The new Release publish Bash automation consumes that approval
+and atomically advances the development source, appends one release-target commit
+with the exact reviewed tree, and creates new annotated tags. It rechecks both
+branch tips, exact requested version and remote URL. Revise preserves preparation
+phase/plan across corrections. Historical references/tags remain immutable.
+No real release is executed by this configuration change.
+
+Validation: 12 publisher tests pass with safe.bareRepository=explicit, including
+mandatory preparation on numerically valid/invalid sources, reviewed docs in both
+published trees, rejection of missing documentation approval and stale source
+approval, and preservation of concurrent target updates. Bash syntax, whitespace,
+production TypeScript/style/dropdown/Vite build and WebKit handoff checks pass.
+All five live templates and release-ready/required-flag wiring were verified
+after reload; original automations' enabled settings remain unchanged.
+
+
+## 2026-11-04 — Release continuation after Publish
+
+Supersedes the direct Review → release-ready route above. Preparation commits use
+chore(release): prepare <tag> plus Cerberus-Release/Run/Tag/Source trailers. Review
+verifies the original manual release evidence and docs, then propagates release
+intent through ordinary integrate/publish/revise handoffs. Integrate explicitly
+hands already-integrated release work to Publish; Publish independently verifies
+the exact reviewed prepared SHA at the development upstream and alone emits
+release-ready with release + releaseReady flags, sourcePublished/publishedSha and
+publishRun evidence. Final release publication refuses unpublished preparation,
+never moves development refs, and appends one release-target commit plus tags.
+A changed SHA requires fresh Review; missing release evidence is blocked rather
+than silently dropping the original goal. No real release is run by this change.
+
+Validation for the post-Publish continuation: 13 publisher tests pass under
+safe.bareRepository=explicit, including required Publish confirmation, refusal to
+release an unpublished preparation, stale-source protection, version/docs checks
+and append-only release history. Bash syntax and diff whitespace checks pass.
+All seven live templates/configurations were verified after reload; Publish is
+the only release-ready emitter and the consumer requires both release flags.
+Existing enabled settings are unchanged. New workflow edits remain uncommitted;
+no live release, tag mutation or push was performed for this configuration change.
+
+
+## 2026-11-04 — Project navigation responsiveness
+
+The successful Mountlet Review was on correction/release-v0.7.4-b577849a, not the
+primary wip branch. Its integrate handoff therefore matches the temporary-branch
+contract; review outcome does not determine publication destination by itself.
+No routing change was needed for that run.
+
+Projects now reuse bounded session snapshots for history, branches and activity,
+paint cached content during background refresh, and share pending reads across
+remounts. Explicit refresh wins races with older reads, failures preserve usable
+data, and existing event/poll refreshes remain in place. Native refresh/import
+Git scans and branch listing moved off the UI thread. Regression validation:
+production build; 187 Rust unit tests plus 3 integration tests (5 ignored); WebKit
+history refresh including navigation under a stalled backend, coalescing,
+eviction, failure preservation and forced-refresh races; repository activity
+including log streaming/linkage and zoom 100/140/150. All passed. Existing build
+warnings remain. No push/commit performed for this task.
+
+## 2026-11-04 — Retain expensive pages and eliminate UI-thread I/O
+
+The earlier data snapshots still remounted heavy Projects/Email DOM. Projects now
+stays mounted; Email is retained after first visit, including reader/mailbox
+selection, folder state and reply text. Hidden keyboard handlers/provider/activity
+polling are suspended; active-wrapper layout selectors keep page geometry isolated.
+Email lists/discovery run in parallel and background refresh preserves usable
+content/drafts. Added bounded per-project folder/message snapshots, cached and
+coalesced config/count reads with force refresh and mutation invalidation. Mail
+content remains transient in memory. Sender-only sync no longer reloads mail.
+
+The shell now subscribes to running presence instead of every agent token; heavy
+views are memoized. Streaming fallback serialization is batched at idle rather
+than rebuilding all chats for each output event, preserving immediate completion
+and exit recovery. Remaining project/config reads, Git operations and GitHub
+credential/network/CLI commands in these paths moved to native workers. Added
+standing responsiveness/cache rules to desktop/AGENTS.md.
+
+Validation: production build; 187 Rust unit + 3 integration tests (5 ignored);
+WebKit cached-history/navigation tests; complete Email fixture including retained
+reader/mailbox/draft under a stalled backend and all prior folder/mail workflows;
+activity/streaming fixture; four viewport sizes at 75/100/140/150% zoom; email-cache
+coalescing/account isolation/forced refresh/invalidation/race checks; chat-backup
+batching/completion/exit checks. All passed. Existing build warnings remain. No
+live mailbox mutation, new release, commit or push performed for this task.
+
+## 2026-11-05 — Checkpoint
+
+Checkpoint includes the pending release-preparation → Review/Integrate/Publish →
+release publication templates and configuration documentation, plus retained
+Projects/Email views, bounded session caches, native worker dispatch, and batched
+chat recovery writes. Validation above was reviewed; 13 publisher tests and both
+email-cache/chat-persistence checks were repeated successfully before staging.
+No credentials, generated build output or unrelated files are included. Commit
+only; no push requested or performed by this task.

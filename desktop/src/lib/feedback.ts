@@ -1,3 +1,4 @@
+import {PageSnapshots} from './pageSnapshots';
 import {invoke} from '@tauri-apps/api/core';
 import {inTauri} from './api';
 export type SenderIdentity={identityName?:string;id?:string;mayDelete?:boolean;address:string;name:string};
@@ -21,8 +22,16 @@ const folderVersion=(id:string)=>`${folderEpoch}:${folderEpochs.get(id)||0}`;
 const folderPending=new Map<string,Promise<MailFolder[]>>();
 const folderScope=(id:string,c:MailboxConfig)=>JSON.stringify([id,c.imapHost,c.imapPort,c.imapSecurity,c.username,c.certificatePath]);
 export const cachedMailFolders=(id:string,c:MailboxConfig)=>folderSnapshots.get(folderScope(id,c))?.nodes;
-export function invalidateMailFolders(id?:string){if(id)folderEpochs.set(id,(folderEpochs.get(id)||0)+1);else folderEpoch++;for(const key of folderPending.keys())if(!id||JSON.parse(key)[0]===id)folderPending.delete(key);for(const key of folderSnapshots.keys())if(!id||JSON.parse(key)[0]===id)folderSnapshots.delete(key);}
+export function invalidateMailFolders(id?:string){overviews.clear(key=>!id||key===id);if(id)folderEpochs.set(id,(folderEpochs.get(id)||0)+1);else folderEpoch++;for(const key of folderPending.keys())if(!id||JSON.parse(key)[0]===id)folderPending.delete(key);for(const key of folderSnapshots.keys())if(!id||JSON.parse(key)[0]===id)folderSnapshots.delete(key);}
 window.addEventListener('feedback-config-changed',event=>invalidateMailFolders((event as CustomEvent<string>).detail));
+const overviews=new PageSnapshots<{value:unknown;at:number}>(32);
+const configurations=new PageSnapshots<{value:MailboxConfig|null;at:number}>(64);
+window.addEventListener('feedback-mail-changed',event=>{const id=(event as CustomEvent<string>).detail;overviews.clear(key=>!id||key===id);});
+window.addEventListener('feedback-config-changed',event=>{const id=(event as CustomEvent<string>).detail;configurations.clear(key=>!id||key===id);overviews.clear(key=>!id||key===id);});
+async function mailboxConfiguration(id:string):Promise<MailboxConfig|null>{
+ const cached=configurations.peek(id);if(cached&&Date.now()-cached.at<30_000)return cached.value;
+ return (await configurations.load(id,async()=>({value:inTauri()?await invoke<MailboxConfig|null>('feedback_config',{repositoryId:id}):preview.get(id)||null,at:Date.now()}))).value;
+}
 export const feedback={
  syncSenders:(repositoryId:string,config:MailboxConfig|null,token?:string,push=false):Promise<MailboxConfig>=>invoke('sync_email_senders',{repositoryId,config,token:token||null,push}),
  setup:async(repositoryId:string,config:MailboxConfig,password?:string,parent?:string,name?:string,force=false):Promise<MailFolder[]>=>{
@@ -35,9 +44,14 @@ export const feedback={
  },
  manage:(repositoryId:string,config:MailboxConfig,password:string,parent:string,operation:'rename'|'delete',name?:string):Promise<MailFolder[]>=>{invalidateMailFolders(repositoryId);return invoke('feedback_setup',{repositoryId,config,password:password||null,parent,name:name??null,operation});},
  batch:async(repositoryId:string,config:MailboxConfig,password:string,operations:FolderOperation[]):Promise<FolderBatch>=>{invalidateMailFolders(repositoryId);const epoch=folderVersion(repositoryId),result=await invoke<FolderBatch>('feedback_folder_batch',{repositoryId,config,password:password||null,operations});if(!password&&epoch===folderVersion(repositoryId))folderSnapshots.set(folderScope(repositoryId,config),{nodes:result.nodes,at:Date.now()});return result;},
- config:(repositoryId:string):Promise<MailboxConfig|null>=>inTauri()?invoke('feedback_config',{repositoryId}):Promise.resolve(preview.get(repositoryId)||null),
+ config:mailboxConfiguration,
  save:async(repositoryId:string,config:MailboxConfig,password?:string):Promise<void>=>{if(inTauri())await invoke('save_feedback_config',{repositoryId,config,password:password||null});else preview.set(repositoryId,config);window.dispatchEvent(new CustomEvent('feedback-config-changed',{detail:repositoryId}));},
- request:<T,>(repositoryId:string,request:Record<string,unknown>):Promise<T>=>inTauri()?invoke('feedback_request',{repositoryId,request}):Promise.resolve((request.action==='folderTree'?['INBOX','Email/Ready','Email/Resolved','Drafts','Sent'].map(path=>({path,delimiter:'/',selectable:true,count:0,unread:0})):request.action==='folders'?['INBOX','Email/Ready','Email/Resolved','Drafts','Sent']:request.action==='list'||request.action==='poll'?[]:{}) as T),
+ request:async<T,>(repositoryId:string,request:Record<string,unknown>,force=false):Promise<T>=>{
+  const read=():Promise<T>=>inTauri()?invoke('feedback_request',{repositoryId,request}):Promise.resolve((request.action==='folderTree'?['INBOX','Email/Ready','Email/Resolved','Drafts','Sent'].map(path=>({path,delimiter:'/',selectable:true,count:0,unread:0})):request.action==='folders'?['INBOX','Email/Ready','Email/Resolved','Drafts','Sent']:request.action==='list'||request.action==='poll'?[]:{}) as T);
+  if(request.action!=='folderTree')return read();
+  const cached=overviews.peek(repositoryId);if(!force&&cached&&Date.now()-cached.at<60_000)return cached.value as T;
+  const result=await overviews.load(repositoryId,async()=>({value:await read(),at:Date.now()}),force);return result.value as T;
+ },
 };
 export const mailKey=(mail:MailRef)=>JSON.stringify([mail.folder,mail.validity,mail.uid,mail.messageId]);
 
