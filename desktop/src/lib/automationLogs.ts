@@ -2,14 +2,19 @@ import { api, type AutomationLog } from './api';
 const entries=new Map<string,AutomationLog>();
 const listeners=new Set<(id:string)=>void>();
 const writes=new Map<string,Promise<void>>();
+const queued=new Map<string,AutomationLog>();
 const timers=new Map<string,number>();
 const key=(entry:AutomationLog)=>`${entry.automationId}:${entry.repositoryId}:${entry.runId}`;
-function publish(entry:AutomationLog){entries.set(key(entry),entry);if(entries.size>200){const oldest=[...entries.values()].filter(item=>item.status!=='running'&&key(item)!==key(entry)).sort((a,b)=>a.createdAt-b.createdAt)[0];if(oldest)entries.delete(key(oldest));}for(const listener of listeners)listener(entry.automationId);}
+function publish(entry:AutomationLog){entry={...entry,stdout:entry.stdout.slice(-100000),stderr:entry.stderr.slice(-100000),response:entry.response.slice(-100000),activity:entry.activity.slice(-100000)};entries.set(key(entry),entry);if(entries.size>32){const oldest=[...entries.values()].filter(item=>item.status!=='running'&&key(item)!==key(entry)).sort((a,b)=>a.createdAt-b.createdAt)[0];if(oldest)entries.delete(key(oldest));}for(const listener of listeners)listener(entry.automationId);}
 function persist(entry:AutomationLog){
   // The Rust limit is bytes; JS string length counts UTF-16 code units.
   entry={...entry,stdout:entry.stdout.slice(-450000),stderr:entry.stderr.slice(-450000),response:entry.response.slice(-450000),activity:entry.activity.slice(-450000)};
-  const id=key(entry),previous=writes.get(id)||Promise.resolve();
-  const pending=previous.catch(()=>{}).then(()=>api.writeAutomationLog(entry));
+  const id=key(entry);
+  queued.set(id,entry);
+  const existing=writes.get(id);if(existing)return existing;
+  // One in-flight write plus the latest checkpoint, not a promise chain holding
+  // every historical copy when native storage falls behind token updates.
+  const pending=(async()=>{while(queued.has(id)){const next=queued.get(id)!;queued.delete(id);await api.writeAutomationLog(next);}})();
   writes.set(id,pending);
   void pending.finally(()=>{if(writes.get(id)===pending)writes.delete(id);}).catch(()=>{});
   return pending;

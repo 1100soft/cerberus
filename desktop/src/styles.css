@@ -1372,3 +1372,6 @@ input[type="number"] { text-align: right; }
 
 .row-heading button.feedback-mailbox-badge { padding:.15rem .3rem; gap:.25rem; background:transparent; }
 .item-agent-working { display:flex; align-items:center; gap:.3rem; color:var(--accent); overflow-wrap:anywhere; }
+
+.stacked-input-field { display:flex; flex-direction:column; align-items:stretch; gap:8px; min-width:0; }
+.stacked-input-field > input { min-width:0; width:100%; box-sizing:border-box; }

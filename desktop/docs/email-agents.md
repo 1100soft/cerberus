@@ -63,3 +63,8 @@ present; deleting it is respected. Its `inboxBatch` setting is retained when
 editing it. Working indicators on email cards use the original triggering
 reference and/or reference-only tool activity, matched to currently running tasks.
 They disappear on completion, and do not infer identity from message subjects.
+
+Live diagnostic traces use bounded recent-output windows so processing large
+mailboxes cannot retain every command payload in memory. Saved automation logs
+remain accessible from the log dialog; provider session history remains the
+source for longer agent transcripts.

@@ -131,10 +131,14 @@ export async function sendAgentMessage(repositoryId: string, profile: AgentProfi
       if (event.type === 'assistant') response += (event.message?.content || []).filter((item: {type:string}) => item.type === 'text').map((item: {text:string}) => item.text).join('\n') + '\n';
       if (event.type === 'result' && !response && typeof event.result === 'string') response = event.result;
     } catch { /* Raw stderr belongs in activity, not the assistant reply. */ }
+    // Command output can include whole MIME messages/base64 attachments. Keep a
+    // bounded live trace rather than retaining every command payload forever.
+    for(const step of steps){step.text=step.text.slice(-12000);step.title=step.title.slice(0,1000);}
+    while(steps.length>100||steps.reduce((size,step)=>size+step.text.length+step.title.length,0)>200000)steps.shift();
     response = response.slice(-200_000);
     updateAgentChat(id, {activity, messages: [...messages.slice(0,-1), {...messages[messages.length-1], text:response, edits, steps:[...steps]}]});
   };
-  void invoke('run_agent', {profileId:profile.id, repositoryId, prompt:task, mode, model:model || null, reasoningEffort:reasoningEffort || null, resume:target || null, automationRunId:automationContext?.runId||null,automationCommit:automationContext?.commit||null,trackingRunId:trackingRunId||automationContext?.runId||id,output}).then(() => {updateAgentChat(id, {running:false, status:failure || 'Completed',automationRetry:false});window.dispatchEvent(new Event('chatgpt-usage-refresh'));}).catch(error => {if(profile.subscription)window.dispatchEvent(new Event('chatgpt-usage-refresh'));updateAgentChat(id, {running:false, status:agentFailure(String(error),activity), retryable:!started && !response && !edits.length});if(profile.subscription && /ChatGPT authentication was rejected|ChatGPT credentials are unavailable|does not match the assigned identity/.test(String(error)))window.dispatchEvent(new Event('agent-configuration-changed'));});
+  void invoke('run_agent', {profileId:profile.id, repositoryId, prompt:task, mode, model:model || null, reasoningEffort:reasoningEffort || null, resume:target || null, automationRunId:automationContext?.runId||null,automationCommit:automationContext?.commit||null,trackingRunId:trackingRunId||automationContext?.runId||id,output}).then(() => {updateAgentChat(id, {running:false, status:failure || 'Completed',automationRetry:false});window.dispatchEvent(new Event('chatgpt-usage-refresh'));}).catch(error => {if(profile.subscription)window.dispatchEvent(new Event('chatgpt-usage-refresh'));updateAgentChat(id, {running:false, status:agentFailure(String(error),activity), retryable:!started && !response && !edits.length});if(profile.subscription && /ChatGPT authentication was rejected|ChatGPT credentials are unavailable|does not match the assigned identity/.test(String(error)))window.dispatchEvent(new Event('agent-configuration-changed'));}).finally(()=>{output.onmessage=()=>{};});
   return id;
 }
 export const stopAgentChat = (repositoryId:string,chatId?:string) => {
