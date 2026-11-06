@@ -1,3 +1,4 @@
+import {api} from '../lib/api';
 import {FeedbackMailboxBadge} from './FeedbackMailboxBadge';
 import {FeedbackSettings} from './FeedbackPanel';
 import { useEffect, useState } from "react";
@@ -35,6 +36,10 @@ export function RepositoryConfigDialog({ repository: repo, identities, catalog, 
   const [createGithub,setCreateGithub]=useState(creating||repo?.hostType==='github'&&!repo.canonicalRemote);
   const [repositoryName,setRepositoryName]=useState("");
   const [organization,setOrganization]=useState("");
+  const [organizations,setOrganizations]=useState<string[]>([]);
+  const [organizationLoading,setOrganizationLoading]=useState(false);
+  const [organizationError,setOrganizationError]=useState('');
+  const [organizationRetry,setOrganizationRetry]=useState(0);
   const githubDestination=creating&&value.hostType==='github';
   const [privateGithub,setPrivateGithub]=useState(true);
   const [busy, setBusy] = useState(false);
@@ -43,6 +48,13 @@ export function RepositoryConfigDialog({ repository: repo, identities, catalog, 
   const assignable = value.hostType==='github'?identities.filter(identity=>!!identity.providerUsername||identity.id===repo?.identity?.id):identitiesWithRepositoryAccess(identities, { ...repo, canonicalRemote: value.canonicalRemote, github: repo?.github, accessibleIdentityIds: repo?.accessibleIdentityIds, identity: repo?.identity }, catalog);
 
   const selectedIdentity=identities.find(identity=>identity.id===value.identityId);
+  useEffect(()=>{
+    let active=true;setOrganization('');setOrganizations([]);setOrganizationError('');
+    if(!githubDestination||!value.identityId){setOrganizationLoading(false);return;}
+    setOrganizationLoading(true);
+    void api.githubOrganizations(value.identityId).then(rows=>{if(active)setOrganizations(rows);}).catch(error=>{if(active)setOrganizationError(String(error));}).finally(()=>{if(active)setOrganizationLoading(false);});
+    return()=>{active=false;};
+  },[githubDestination,value.identityId,organizationRetry]);
   const githubName=githubDestination?repositoryName.trim():value.displayName.trim().replace(/[^A-Za-z0-9_.-]+/g,'-');
   const githubOwner=organization.trim()||selectedIdentity?.providerUsername;
   const generatedRemote=githubOwner&&githubName?`https://github.com/${githubOwner}/${githubName}.git`:'';
@@ -66,9 +78,11 @@ export function RepositoryConfigDialog({ repository: repo, identities, catalog, 
         <div><p>Project</p><h2>{creating ? "Create a new project" : `Configure ${repo.displayName}`}</h2></div>
         <button type="button" onClick={onClose}><X /></button>
       </header>
-      {creating && <p className="panel-copy">GitCerberus will initialize a Git repository at this path, remember it in your workspace, and, for GitHub, create and link a remote repository.</p>}
-      <RepositoryFields value={value} identities={assignable} identityRequired={!!remoteCreation||githubDestination} githubDestination={githubDestination?{name:repositoryName,organization,remote:generatedRemote,onNameChange:setRepositoryName,onOrganizationChange:setOrganization}:undefined} onChange={setValue} browseTitle={creating ? "Choose a folder for the new project" : "Choose folder"} />
-      {value.hostType==='github'&&<section className="github-create-options"><label><input type="checkbox" checked={!!createGithub} onChange={event=>setCreateGithub(event.target.checked)}/>Create remote repository on GitHub</label>{createGithub&&<><Select label="GitHub repository visibility" value={privateGithub?'private':'public'} options={[{value:'private',label:'Private'},{value:'public',label:'Public'}]} onChange={value=>setPrivateGithub(value==='private')}/><p className="panel-copy">{proposedRemote||'Choose a GitHub account to set the destination.'} · Creates an empty remote; files are not pushed. {creating?'Use the organization field to create under an organization.':'Enter an organization repository URL above to use an organization.'} Turn this off to link an existing remote.</p></>}</section>}
+      {creating && <p className="panel-copy">GitCerberus creates a local repository with an empty initial commit and, for GitHub, creates and links a remote. Existing files are left uncommitted.</p>}
+      <RepositoryFields value={value} identities={assignable} identityRequired={!!remoteCreation||githubDestination} githubDestination={githubDestination?{name:repositoryName,organization,organizations,owner:selectedIdentity?.providerUsername||'',loading:organizationLoading,remote:generatedRemote,onNameChange:setRepositoryName,onOrganizationChange:setOrganization}:undefined} onChange={setValue} browseTitle={creating ? "Choose a folder for the new project" : "Choose folder"} />
+      {githubDestination&&organizationLoading&&<p role="status">Loading organizations…</p>}
+      {githubDestination&&organizationError&&<p role="alert" className="config-error">{organizationError} <button type="button" onClick={()=>setOrganizationRetry(value=>value+1)}>Retry</button></p>}
+      {value.hostType==='github'&&<section className="github-create-options"><label><input type="checkbox" checked={!!createGithub} onChange={event=>setCreateGithub(event.target.checked)}/>Create remote repository on GitHub</label>{createGithub&&<><Select label="GitHub repository visibility" value={privateGithub?'private':'public'} options={[{value:'private',label:'Private'},{value:'public',label:'Public'}]} onChange={value=>setPrivateGithub(value==='private')}/><p className="panel-copy">{proposedRemote||'Choose a GitHub account to set the destination.'} · Creates an empty remote; files are not pushed. {creating?'Choose the owner to create under your account or an organization.':'Enter an organization repository URL above to use an organization.'} Turn this off to link an existing remote.</p></>}</section>}
       {repo&&<button type="button" onClick={()=>setMailbox(true)}><FeedbackMailboxBadge repositoryId={repo.id} showEmpty/>Email settings</button>}
       {repo && <section className="config-status">
         <h3>Live Git status</h3>

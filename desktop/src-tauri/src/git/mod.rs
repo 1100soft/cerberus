@@ -60,6 +60,39 @@ impl GitService {
         self.output(repo, args).map(|_| ())
     }
 
+    /// User-requested checkout only: never carry edits across branches or force.
+    pub fn change_branch(&self, repo: &Path, branch: &str, create: bool, base: &str) -> Result<(), String> {
+        let _sync=crate::awake::try_explicit_change().ok_or("Another branch update is in progress. Retry shortly.")?;
+        if branch.starts_with('-') || branch.contains("@{") { return Err("Invalid branch name".into()); }
+        self.text(repo, &["check-ref-format", "--branch", branch]).map_err(|e| e.to_string())?;
+        if !self.text(repo, &["status", "--porcelain", "--untracked-files=all"]).map_err(|e| e.to_string())?.is_empty() {
+            return Err("Commit or stash pending changes before switching branches".into());
+        }
+        for marker in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG"] {
+            let path=self.text(repo, &["rev-parse", "--git-path", marker]).map_err(|e|e.to_string())?;
+            let path=PathBuf::from(path);
+            if (if path.is_absolute(){path}else{repo.join(path)}).exists(){return Err("Finish the current Git operation first".into());}
+        }
+        if create {
+            let reference=format!("refs/heads/{base}");
+            let hash=match self.text(repo, &["rev-parse", "--verify", "--end-of-options", &format!("{reference}^{{commit}}")]) {
+                Ok(hash)=>hash,
+                Err(error)=>{
+                    // A new repository has a symbolic HEAD but no branch ref yet.
+                    if self.text(repo,&["symbolic-ref","-q","HEAD"]).ok().as_deref()==Some(reference.as_str())
+                        && self.text(repo,&["show-ref","--verify",&reference]).is_err() {
+                        return Err(format!("Create the first commit on {base} before creating another branch. Without a commit, Git can only change the initial branch name."));
+                    }
+                    return Err(error.to_string());
+                }
+            };
+            self.mutate(repo, &["switch", "-c", branch, &hash]).map_err(|e| e.to_string())
+        } else {
+            self.text(repo, &["show-ref", "--verify", &format!("refs/heads/{branch}")]).map_err(|e|e.to_string())?;
+            self.mutate(repo, &["switch", "--no-guess", branch]).map_err(|e| e.to_string())
+        }
+    }
+
     pub fn branches(&self, repo: &Path) -> Result<Vec<String>, GitError> {
         Ok(self.text(repo, &["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"])?
             .lines().map(str::to_owned).collect())
@@ -165,6 +198,39 @@ pub fn host_type(remote: Option<&str>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn creating_before_first_commit_preserves_initial_branch() {
+        let _test=crate::awake::TEST_ACTIVITY_LOCK.lock().unwrap();
+        let dir=tempfile::tempdir().unwrap();let git=GitService::default();
+        git.init(dir.path(),"main").unwrap();
+        let _other=crate::awake::acquire();
+        assert!(git.change_branch(dir.path(),"first",true,"main").unwrap_err().contains("first commit"));
+        assert_eq!(git.text(dir.path(),&["branch","--show-current"]).unwrap(),"main");
+        assert!(git.history(dir.path(),None,0).unwrap().is_empty());
+    }
+    #[test]
+    fn checkout_actions_preserve_dirty_and_other_worktrees() {
+        let _test=crate::awake::TEST_ACTIVITY_LOCK.lock().unwrap();
+        let dir=tempfile::tempdir().unwrap();let git=GitService::default();let path=dir.path();
+        git.init(path,"main").unwrap();
+        git.text(path,&["config","user.name","Test"]).unwrap();
+        git.text(path,&["config","user.email","test@example.test"]).unwrap();
+        git.mutate(path,&["commit","--allow-empty","-m","initial"]).unwrap();
+        git.change_branch(path,"feature/test",true,"main").unwrap();
+        assert_eq!(git.text(path,&["branch","--show-current"]).unwrap(),"feature/test");
+        git.change_branch(path,"main",false,"").unwrap();
+        std::fs::write(path.join("pending"),"preserve").unwrap();
+        assert!(git.change_branch(path,"feature/test",false,"").unwrap_err().contains("pending"));
+        assert!(git.change_branch(path,"new",true,"main").is_err());
+        std::fs::remove_file(path.join("pending")).unwrap();
+        let linked=tempfile::tempdir().unwrap();let worktree=linked.path().join("worktree");
+        git.mutate(path,&["worktree","add",worktree.to_str().unwrap(),"feature/test"]).unwrap();
+        assert!(git.change_branch(path,"feature/test",false,"").is_err());
+        assert_eq!(git.text(path,&["branch","--show-current"]).unwrap(),"main");
+        assert!(git.change_branch(path,"-bad",true,"main").is_err());
+        assert!(git.change_branch(path,"main",true,"main").is_err());
+        assert!(git.change_branch(path,"new",true,"missing").is_err());
+    }
     #[test]
     fn branch_history_preserves_worktree() {
         let dir = tempfile::tempdir().unwrap();

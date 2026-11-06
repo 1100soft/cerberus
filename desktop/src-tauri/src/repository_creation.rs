@@ -86,6 +86,41 @@ pub fn create(
         .map(|plan| Box::new(move || plan.create()) as Box<dyn FnOnce() -> Result<String, String>>);
     create_prepared(db, git, update, remote)
 }
+fn initial_commit(
+    db: &Database,
+    git: &GitService,
+    path: &std::path::Path,
+    identity_id: Option<&str>,
+) -> Result<(), String> {
+    if git.text(path, &["rev-parse", "--verify", "HEAD"]).is_ok() {
+        return Err("Repository already has a commit".into());
+    }
+    let identity = db
+        .identities()?
+        .into_iter()
+        .find(|identity| Some(identity.id.as_str()) == identity_id);
+    // An empty-tree commit never stages existing project files or secrets.
+    let tree = git.text(path, &["mktree"]).map_err(|e| e.to_string())?;
+    let mut args = Vec::new();
+    if let Some(identity) = identity {
+        args.extend([
+            "-c".to_owned(),
+            format!("user.name={}", identity.git_name),
+            "-c".into(),
+            format!("user.email={}", identity.git_email),
+        ]);
+    }
+    args.extend([
+        "commit-tree".into(),
+        tree,
+        "-m".into(),
+        "Initial commit".into(),
+    ]);
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    let hash=git.text(path,&args).map_err(|e|format!("Could not create initial commit. Choose a Git identity or configure Git user.name and user.email: {e}"))?;
+    git.mutate(path, &["update-ref", "HEAD", &hash, ""])
+        .map_err(|e| e.to_string())
+}
 fn create_prepared(
     db: &Database,
     git: &GitService,
@@ -102,11 +137,21 @@ fn create_prepared(
     git.init(&path, branch).map_err(|error| error.to_string())?;
     let id = db.import(git, &path)?;
     let mut warnings = Vec::new();
+    let mut local = update.clone();
+    local.canonical_remote = None;
+    local.github_create = None;
+    db.update(&id, git, local)?;
+    if let Err(error) = initial_commit(db, git, &path, update.identity_id.as_deref()) {
+        warnings.push(format!(
+            "Local repository preserved; {error} No remote repository was created."
+        ));
+        return Ok(ImportResult {
+            repository: snapshot(db, git, &id)?,
+            warnings,
+        });
+    }
+
     if let Some(create_remote) = remote {
-        let mut local = update.clone();
-        local.canonical_remote = None;
-        local.github_create = None;
-        db.update(&id, git, local)?;
         match create_remote() {
             Ok(remote) => update.canonical_remote = Some(remote),
             Err(error) => {
@@ -168,15 +213,29 @@ mod tests {
             "keep me"
         );
         assert_eq!(db.list().unwrap().len(), 1);
+        assert!(git
+            .text(&path, &["ls-tree", "--name-only", "HEAD"])
+            .unwrap()
+            .is_empty());
+        assert!(git
+            .text(&path, &["status", "--porcelain"])
+            .unwrap()
+            .contains("notes.txt"));
     }
     #[test]
-    fn created_remote_is_linked_without_commit_or_push() {
+    fn created_remote_has_empty_initial_commit_without_push() {
+        let _test = crate::awake::TEST_ACTIVITY_LOCK.lock().unwrap();
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("app");
         let db = Database::open(root.path().join("app.db")).unwrap();
         let git = GitService::default();
         let mut data = update(&path);
         data.host_type = "github".into();
+        data.identity_id = Some(
+            db.save_github_identity("owner", "Owner", "owner@example.test")
+                .unwrap()
+                .id,
+        );
         let result = create_prepared(
             &db,
             &git,
@@ -189,7 +248,11 @@ mod tests {
             git.remote_url(&path).as_deref(),
             Some("https://github.com/owner/new.git")
         );
-        assert!(git.history(&path, None, 0).unwrap().is_empty());
+        let commits = git.history(&path, None, 0).unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].summary, "Initial commit");
+        git.change_branch(&path, "wip", true, "main").unwrap();
+        assert_eq!(git.branches(&path).unwrap(), vec!["main", "wip"]);
     }
     #[test]
     fn invalid_branch_does_not_initialize_a_checkout() {

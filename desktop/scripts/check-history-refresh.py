@@ -29,6 +29,21 @@ script = r"""
  assert(calls>before&&!document.querySelector('.commit-tag'),'Focus refresh retained deleted tags');
  version=4;for(const poll of pollers)poll();
  await wait(()=>document.querySelector('.commit-history')?.textContent.includes('Commit 4'));
+ // Branch creation/switch controls submit the viewed branch as the base.
+ const actions=[];api.changeBranch=async(...args)=>{actions.push(args);};
+ document.querySelector('[aria-label="Create branch"]').click();
+ const dialog=await wait(()=>document.querySelector('[aria-label="Create branch"][role="dialog"]'));
+ assert(!dialog.querySelector('[role=combobox]'),'Branch creation repeats the existing branch selector');
+ const label=dialog.querySelector('.stacked-input-field > span');
+ const input=dialog.querySelector('input');const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+ input.focus();await pause();
+ assert(input.getBoundingClientRect().top-label.getBoundingClientRect().bottom>=6,'Focused branch field overlaps its label');
+ setter.call(input,'feature/ui-test');input.dispatchEvent(new Event('input',{bubbles:true}));
+ await pause();dialog.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+ await wait(()=>actions.length===1&&!document.querySelector('[role="dialog"]'));
+ assert(actions[0][1]==='feature/ui-test'&&actions[0][2]===true&&actions[0][3],'Create did not use selected base');
+ const alternative=[...document.querySelectorAll('.history-tabs [role="tab"]')].find(node=>node.getAttribute('aria-label')!=='main');
+ if(alternative){alternative.click();await pause();const switcher=document.querySelector('[aria-label="Switch to selected branch"]');if(!switcher.disabled){switcher.click();await wait(()=>actions.length===2);assert(actions[1][2]===false,'Switch unexpectedly creates a branch');}}
  // Navigation must paint cached history while the replacement read is stalled.
  document.querySelector('[aria-label="Toggle navigation"]').click();
  const nav=name=>[...document.querySelectorAll('aside nav button')].find(node=>node.textContent.includes(name));

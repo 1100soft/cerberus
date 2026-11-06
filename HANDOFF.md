@@ -2054,3 +2054,143 @@ The native suite passed on retry: 212 unit tests and 3 integration tests, with
 5 ignored; its first attempt hit transient ETXTBSY in the Codex login fixture.
 Previously completed minimum/wide WebKit layout and shared-selection checks
 remain documented above. No push performed for this checkpoint.
+
+## New project owner and directory selection (2026-11-06)
+
+The folder browser remembers its last successful directory selection in UI
+preferences and passes it to subsequent native folder dialogs; cancellation does
+not overwrite it. New GitHub projects select an Owner (personal account or an
+organization returned by /user/orgs for the selected identity), without manual
+organization input. Organization discovery paginates on a blocking worker,
+rejects stale identity responses, displays loading/errors and supports retry.
+GitHub sign-in now requests read:org for private organization discovery; existing
+accounts may need reconnection to authorize that additional scope. Organization
+membership does not guarantee permission to create repositories; GitHub remains
+the authority when creation is submitted.
+
+## Project field grouping, bounded traces and checkout controls (2026-11-06)
+
+New project fields now start with Host type / Identity, then Owner / Repository
+name, followed by the generated remote and local/display settings. Owner no longer
+spans a full row.
+
+Memory investigation found two concrete retention amplifiers: automation log
+publish retained up to 200 untrimmed multi-megabyte records (only persistence had
+limits), and Codex command steps retained unlimited outputs, including email tool
+payloads. Live log streams now retain 100k characters per stream for up to 32
+cached runs (active runs are not evicted). Persisted logs retain their existing
+450k stream limit. Steps retain the latest <=100 entries / 200k characters,
+12k per output. Slow log storage coalesces superseded checkpoints instead of
+retaining a promise-chain of large snapshots. Stream handlers release captured
+state on completion. This is a source-level retention fix, not a measured proof
+of the entire reported multi-GB increase; completed conversation history still
+remains available and may grow over time. Diagnostic traces are bounded windows.
+
+Commit history offers icon buttons to create a branch from the viewed local
+branch (and switch to it), or switch to the viewed branch. Creation uses the
+selected base's resolved SHA. Native execution runs off the UI thread, obtains
+an idle lease, refuses dirty checkouts and unfinished Git operations, validates
+names, and uses non-forced git switch (including Git's other-worktree refusal).
+Errors remain visible; successful changes refresh history and project status.
+
+Validation: production build/type/style/dropdown checks passed; native branch
+safety regression passed; WebKit history fixture passed creation/switch wiring
+and existing refresh/tag/cache checks. Agent/chat, bounded trace, bounded log
+cache and slow-write coalescing checks passed. Existing dev server was reused.
+
+Final verification: full native tests passed serially (including integration
+checks); the minimum-window project UI fixture passed at 100/140/150% zoom on
+the final run. Earlier attempts hit intermittent scroll/account-menu assertions;
+branch controls were compacted into the existing history header. No separate
+server was started. Local conversation storage inspection found 328 records /
+~140 MB of JSON, so those records alone do not explain the entire memory spike.
+
+Branch creation dialog follow-up: removed the redundant base-branch dropdown;
+the dialog displays the branch selected in history as its fixed starting point.
+The branch-name field uses a stacked label/control with an explicit 8px gap,
+including room for focus outlines. Recorded this as a general UI convention in
+desktop/AGENTS.md and extended the history fixture to inspect focused spacing.
+
+## Explicit branch creation false-positive activity block (2026-11-06)
+
+The initial checkout UI reused awake::try_sync, an intentionally app-wide idle
+policy for unattended fast-forwarding. It rejected explicit actions because of
+unrelated projects/jobs or broad local-agent presence (90-second expiry). Explicit
+checkout changes now obtain a project-scoped activity lease shared with agent
+and script entry points; concurrent startup in that project is rejected while
+the checkout changes, and unrelated projects do not veto the action. A short
+Git-update lease still coordinates with automatic fast-forwards, without their
+all-jobs/presence policy. Dirty/unfinished Git and worktree checks remain.
+
+Creation also handles a new repository's unborn selected branch: git switch -c
+without a start commit creates the new unborn branch. No history is fabricated.
+Regression tests cover same-project exclusion, unrelated activity, released
+leases and creation before the first commit.
+
+## Unborn branch naming correction (2026-11-06)
+
+Read-only inspection confirmed Floating Desktop has HEAD=wip, zero branch refs
+and zero commits/reflog entries. The previous unborn fallback changed the initial
+HEAD name from main to wip; it did not create a second durable branch. No commits
+were lost. Removed this misleading fallback: native creation now refuses with
+an explanation requiring the first commit, and the dialog explains/disables
+creation for an empty history. Once a commit exists, normal branch creation
+preserves both refs. No user repository state was changed during investigation.
+The earlier handoff note describing unborn creation is superseded by this rule.
+
+New project creation now makes an empty-tree Initial commit on the requested
+default branch before remote creation, using the selected identity or configured
+Git author. It never stages pre-existing files, and never pushes. Author failure
+preserves the configured local project with an actionable warning before any
+remote write. Creation tests cover the empty tree, untracked file preservation,
+remote-failure preservation and creation of wip while retaining main.
+
+Floating Desktop repair: verified no refs/commits/files, set unborn HEAD to main,
+created f4deda5 (Initial commit) using its assigned identity, then created/switched
+to wip. Both refs resolve to that commit, working tree clean. Nothing pushed.
+Validation: three repository-creation tests and production build passed.
+
+Checkpoint verification (2026-11-06): production build (TypeScript, stylesheet
+and dropdown checks) passed. Native tests passed both serially and with default
+parallel execution: 215 unit tests plus 3 integration tests, 5 ignored. Parallel
+verification exposed independent branch fixtures competing for the global activity
+lease; they now share the existing activity-fixture lock. This is test isolation,
+not relaxed production checks. Activity logs, large command traces, slow-write
+coalescing, agent/chat behavior, repositories, inbox triage and email cache checks
+passed. The current WebKit history fixture passed focused field spacing and
+branch-control wiring as well as existing tag/refresh/cache assertions. Existing
+minimum-window 100/140/150% project UI results are recorded above. Build emits
+the existing bundle-size warning; WebKit emits the existing EGL diagnostic.
+No push is included in this checkpoint. Floating Desktop repair is in that
+separate repository and is described above, not part of Cerberus's commit.
+
+## Receipt explanation and interactive email loading (2026-11-06)
+
+Investigated receipt generation: baseline/dispatch receipts use IMAP APPEND, not
+SMTP. Send-attempt markers are appended before SMTP to prevent uncertain-delivery
+retries. They consume server storage but are safety state, not incoming delivery
+notifications. No receipts were deleted and no safeguards removed; documented
+their purpose and cost distinction.
+
+Loading improvements: list requests fetch only display/thread/MIME header fields,
+apply older-page UID bounds server-side, and skip SEARCH on empty mailboxes or
+exhausted UID ranges. Read-only actions now bypass in-process and cross-process
+mutation queues, using a separate short config/credential snapshot lock shared
+with settings saves; poll/ack and writes stay serialized. Independent sessions
+retain UIDVALIDITY/message identity checks. Folder discovery no longer forces a
+fresh read on every project switch; explicit refresh still does. List reads share
+pending snapshots; reopening cached immutable message bodies skips the network.
+
+Wire tests cover HEADER.FIELDS parsing, server UID filtering, empty/exhausted
+pages, and lock/action classification. UI fixture now resolves live Vite module
+URLs for its activity mocks and explicitly invalidates its synthetic same-UID MIME
+changes (real IMAP message contents are immutable). It checks that reopening a
+cached body does not issue another read. No persistent mail archive, credential
+cache or automatic retry of mutating requests was introduced.
+
+Verification: production build passed; full native suite passed (217 unit + 3
+integration tests, 5 ignored), as did email cache/inbox checks and the full email
+WebKit fixture, including cached-body reuse. Full-suite validation caught and
+fixed an ordering issue where an unconfigured mailbox tried opening its operation
+lock before reporting missing configuration. Existing bundle-size and EGL
+warnings remain. No real mailbox content/state was modified during investigation.

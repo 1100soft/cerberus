@@ -72,6 +72,15 @@ pub fn try_sync() -> Option<SyncGuard> {
     state.syncing = true;
     Some(SyncGuard)
 }
+/// Explicit checkout changes already hold a project-specific activity guard.
+/// Coordinate with automatic Git updates without treating unrelated jobs or
+/// broad local-agent presence as a veto.
+pub fn try_explicit_change() -> Option<SyncGuard> {
+    let mut state=activity().0.lock().ok()?;
+    if state.syncing {return None;}
+    state.syncing=true;
+    Some(SyncGuard)
+}
 impl Drop for SyncGuard {
     fn drop(&mut self) {
         if let Ok(mut state) = activity().0.lock() {
@@ -263,3 +272,7 @@ mod integration_tests {
         assert_eq!(count(), before);
     }
 }
+
+// Fixtures exercising global activity coordination must not compete with each other.
+#[cfg(test)]
+pub(crate) static TEST_ACTIVITY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

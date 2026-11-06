@@ -95,4 +95,14 @@ assert.equal(useAgentChats().find(chat=>chat.id===namedChat).name,'Revision auto
 complete.resolve();await new Promise(resolve=>setTimeout(resolve,0));
 console.log('Explicit conversation names are used at creation and preserved on continuation');
 
+const boundedChat=await sendAgentMessage('bounded',profile,'Inspect emails','analyze');
+const stream=calls.at(-1).args.output;
+for(let n=0;n<150;n++)stream.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'command_execution',command:'read email '+n,aggregated_output:'x'.repeat(50000),exit_code:0}})});
+const trace=useAgentChats().find(chat=>chat.id===boundedChat).messages.at(-1).steps;
+assert(trace.length<=100);
+assert(trace.reduce((sum,step)=>sum+step.text.length+step.title.length,0)<=200000);
+assert(trace.at(-1).title.includes('149'));
+complete.resolve();await new Promise(resolve=>setTimeout(resolve,0));
+console.log('Large email command traces remain bounded and retain the latest steps');
+
 delete globalThis.__chatTestInvoke;

@@ -514,3 +514,24 @@ read the message through the tool. Only references and activity timestamps are
 recorded; message bodies remain on the server. Work performed in an unrelated
 external client cannot be attributed automatically. See [manual Inbox triage](email-agents.md#manual-inbox-triage)
 for applying the email-agent chain to existing Inbox messages deliberately.
+
+### Automation receipts and loading
+
+Cerberus receipt messages are machine bookkeeping, not user notifications. They
+are appended directly to the reserved IMAP folder; they are not sent or delivered
+through SMTP. They still use mailbox storage. Dispatch receipts prevent the same
+message from starting an automation repeatedly after a restart. Observation
+baselines exclude existing mail when a trigger first starts watching a folder.
+Send-attempt receipts prevent a retry from sending a duplicate reply when SMTP's
+outcome was uncertain. Keep these records while relying on those safeguards;
+they are not a useful folder for routine reading.
+
+Folder discovery reuses its short-lived account cache; explicit refresh and
+configuration changes invalidate it. Message headers are fetched separately from
+bodies, with only display/thread headers downloaded for lists. Older-page UID
+bounds are applied on the server. Reopening a cached message reuses its immutable
+UIDVALIDITY/UID body; mailbox changes clear the cache. Interactive reads use
+independent IMAP sessions and a short settings/credential snapshot lock, rather
+than waiting behind scheduler or mutation network operations. Cold reads still
+require authentication and network round trips, and full folder counts remain
+background work. Mail contents remain transient in memory.

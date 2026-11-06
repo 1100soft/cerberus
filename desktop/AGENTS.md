@@ -147,3 +147,7 @@ If port 3000 is occupied, identify its owner before taking action.
 - Manual automation defaults must preserve the current project while async
   eligibility checks are pending; only choose another project after establishing
   that the current one is ineligible. Preserve explicit dialog choices.
+
+- Stack field labels and text inputs with an explicit gap (use stacked-input-field)
+  so focus outlines cannot overlap labels. Verify focused fields, not only idle
+  fields, at 100/140/150% zoom. Do not rely on inline label flow for text inputs.

@@ -43,6 +43,9 @@ export const api = {
     if (!inTauri()) throw new Error("Linking a checkout is available in the desktop app.");
     return invoke("link_repository_folder", { expectedRemote, path, repositoryId: repositoryId ?? null });
   },
+  async githubOrganizations(identityId:string):Promise<string[]> {
+    return inTauri()?invoke('github_organizations',{identityId}):[];
+  },
   async githubRepositories(): Promise<GithubCatalog> {
     if (inTauri()) return invoke("github_repositories");
     return { repositories: [
@@ -243,12 +246,16 @@ export const api = {
   },
   async selectRepositoryDirectory(title = "Choose a folder"): Promise<string | null> {
     if (!inTauri()) return window.prompt("Absolute path to a local Git repository");
+    let defaultPath:string|undefined;
+    try{defaultPath=localStorage.getItem('gitcerberus.lastRepositoryDirectory')||undefined;}catch{}
     const selected = await open({
+      defaultPath,
       directory: true,
       multiple: false,
       title
     });
-    return typeof selected === "string" ? selected : null;
+    if(typeof selected==='string'){try{localStorage.setItem('gitcerberus.lastRepositoryDirectory',selected);}catch{}return selected;}
+    return null;
   },
   async syncRepositoryRemotes(): Promise<Repository[]> {
     return inTauri() ? invoke('sync_repository_remotes') : [...demoRepositories];
@@ -257,6 +264,10 @@ export const api = {
     if(repositoryRead)return repositoryRead;
     const read=(inTauri()?invoke<Repository[]>("list_repositories"):Promise.resolve([...demoRepositories])).finally(()=>{if(repositoryRead===read)repositoryRead=undefined;});
     repositoryRead=read;return read;
+  },
+  async changeBranch(repositoryId:string,branch:string,create=false,base=''):Promise<void>{
+    if(!inTauri())throw Error('Branch switching requires the desktop app.');
+    await invoke('change_branch',{repositoryId,branch,create,base});
   },
   async branches(repositoryId: string): Promise<string[]> {
     if (inTauri()) return invoke("list_branches", { repositoryId });

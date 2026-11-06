@@ -281,6 +281,23 @@ fn assign_unique_catalog_identities(db:&Database,catalog:&Catalog)->Result<(),St
     }
     Ok(())
 }
+/// Memberships visible to this authenticated identity, including private organizations.
+pub fn organizations(db: &Database, identity_id: &str) -> Result<Vec<String>, String> {
+    if !db.identities()?.iter().any(|identity| identity.id == identity_id && identity.provider_username.is_some()) {
+        return Err("Choose a connected GitHub identity".into());
+    }
+    let secret = token(identity_id)?;
+    let http = client()?;
+    let mut names = Vec::new();
+    for page in 1..=100 {
+        let rows: Vec<Owner> = get(&http, &secret, &format!("/user/orgs?per_page=100&page={page}"))?
+            .json().map_err(|_| "Invalid GitHub organization response")?;
+        let done = rows.len() < 100;
+        names.extend(rows.into_iter().map(|row| row.login));
+        if done { return Ok(names); }
+    }
+    Err("Too many GitHub organizations to list; retry with another identity".into())
+}
 pub struct CreationPlan { http:Client, secret:String, endpoint:String, name:String, full_name:String, private:bool }
 fn creation_endpoint(owner:&str,login:&str)->String {
     if owner.eq_ignore_ascii_case(login){"/user/repos".into()}else{format!("/orgs/{owner}/repos")}

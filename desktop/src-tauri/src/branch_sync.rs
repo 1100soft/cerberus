@@ -212,7 +212,7 @@ mod tests {
     use super::*;
     // Production deliberately skips automatic updates when another update holds
     // the global lock. Keep independent repository fixtures from competing.
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use crate::awake::TEST_ACTIVITY_LOCK as TEST_LOCK;
     #[test]
     fn automatic_updates_wait_for_idle_and_skip_unsafe_branches() {
         let _test = TEST_LOCK.lock().unwrap();

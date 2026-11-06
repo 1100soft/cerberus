@@ -68,7 +68,7 @@ pub fn begin(client_id: &str) -> Result<GithubDeviceFlow, String> {
         .header("Accept", "application/json")
         .form(&[
             ("client_id", client_id.as_str()),
-            ("scope", "read:user user:email repo"),
+            ("scope", "read:user user:email repo read:org"),
         ])
         .send()
         .map_err(|e| format!("GitHub device authorization failed: {e}"))?;

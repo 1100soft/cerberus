@@ -1,3 +1,4 @@
+mod repository_activity;
 mod item_activity;
 mod issue_feedback;
 pub use issue_feedback::cli_main as issue_feedback_cli_main;
@@ -248,6 +249,7 @@ fn local_activity_presence(active:bool){awake::presence(active);}
 async fn cleanup_automation_checkout(repository_id:String,run_id:String,state:State<'_,AppState>)->Result<bool,String>{let repo=state.db.repository_path(&repository_id)?;let root=state.data_dir.clone();tauri::async_runtime::spawn_blocking(move||automation_worktrees::cleanup(&root,&repo,&repository_id,&run_id)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
 async fn run_agent(profile_id: String, repository_id: String, prompt: String, mode: String, model: Option<String>, reasoning_effort: Option<String>, resume: Option<agent_sessions::ResumeTarget>, automation_run_id:Option<String>, automation_commit:Option<String>, tracking_run_id:Option<String>, output: tauri::ipc::Channel<setup_terminal::SetupOutput>, state: State<'_, AppState>) -> Result<(), String> {
+    let _project_activity=repository_activity::job(&repository_id)?;
     let _awake=awake::acquire();
     let _checkout_activity=automation_run_id.as_deref().map(automation_worktrees::activate);
     let mut repo = state.db.list()?.into_iter().find(|r| r.id == repository_id).ok_or("Repository not found")?;
@@ -287,6 +289,7 @@ async fn submit_saved_prompt(repository_id:String,provider:String,thread_id:Stri
 }
 #[tauri::command]
 async fn run_new_agent_conversation(repository_id:String,provider:String,identity_id:String,mode:String,prompt:String,session_id:Option<String>,request_id:Option<String>,automation_run_id:Option<String>,automation_commit:Option<String>,tracking_run_id:Option<String>,output:tauri::ipc::Channel<serde_json::Value>,state:State<'_,AppState>)->Result<serde_json::Value,String>{
+    let _project_activity=repository_activity::job(&repository_id)?;
     let _awake=awake::acquire();
     let _checkout_activity=automation_run_id.as_deref().map(automation_worktrees::activate);
     let record=state.db.list()?.into_iter().find(|item|item.id==repository_id).ok_or("Repository not found")?;
@@ -390,6 +393,7 @@ async fn run_automation_shell(
     context: Option<std::collections::HashMap<String, String>>,
     state: State<'_, AppState>,
 ) -> Result<shell_automation::ShellRun, String> {
+    let _project_activity=repository_activity::job(&repository_id)?;
     let _awake = awake::acquire();
     let repository = state.db.repository_path(&repository_id)?;
     let runtime = match runtime {
@@ -527,6 +531,11 @@ async fn link_repository_folder(expected_remote: String, path: String, repositor
     tauri::async_runtime::spawn_blocking(move || github::link_existing(&db, &git, &expected_remote, Path::new(&path), repository_id.as_deref())).await.map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn github_organizations(identity_id: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || github::organizations(&db, &identity_id)).await.map_err(|e| e.to_string())?
+}
 #[tauri::command]
 async fn github_repositories(state: State<'_, AppState>) -> Result<github::Catalog, String> {
     let db = state.db.clone();
@@ -959,6 +968,13 @@ async fn repository_automation_logs(repository_id:String,state:State<'_,AppState
 #[tauri::command]
 async fn branch_sync_status(repository_id:String,branch:String,state:State<'_,AppState>)->Result<branch_sync::Status,String>{let path=state.db.repository_path(&repository_id)?;tauri::async_runtime::spawn_blocking(move||branch_sync::status(&path,&branch)).await.map_err(|e|e.to_string())?}
 #[tauri::command]
+async fn change_branch(repository_id:String,branch:String,create:bool,base:String,app:tauri::AppHandle,state:State<'_,AppState>)->Result<(),String>{
+    let _project_activity=repository_activity::change(&repository_id)?;
+    let db=state.db.clone();let git=state.git.clone();let id=repository_id.clone();
+    tauri::async_runtime::spawn_blocking(move||{let path=db.repository_path(&id)?;git.change_branch(&path,&branch,create,&base)}).await.map_err(|e|e.to_string())??;
+    let _=app.emit("automation-git-change",serde_json::json!({"repositoryId":repository_id}));Ok(())
+}
+#[tauri::command]
 async fn fast_forward_branch(repository_id:String,branch:String,app:tauri::AppHandle,state:State<'_,AppState>)->Result<branch_sync::Status,String>{let path=state.db.repository_path(&repository_id)?;let result=tauri::async_runtime::spawn_blocking(move||branch_sync::advance(&path,&branch)).await.map_err(|e|e.to_string())?;let _=app.emit("automation-git-change",serde_json::json!({"repositoryId":repository_id}));result}
 #[tauri::command]
 async fn branch_removal_plan(repository_id:String,branch:String,state:State<'_,AppState>)->Result<branch_removal::Plan,String>{
@@ -1359,12 +1375,13 @@ pub fn run() {
             codex_update_thread,
             list_repositories, sync_repository_remotes,
             github_repositories,
+            github_organizations,
             github_ci_runs,
             github_repository_events,
             link_repository_folder,
             clone_github_repository,
             open_in_cursor,
-            list_branches, branch_listing, auto_fast_forward, branch_sync_status, fast_forward_branch, branch_removal_plan, remove_branch,
+            list_branches, branch_listing, auto_fast_forward, branch_sync_status, change_branch, fast_forward_branch, branch_removal_plan, remove_branch,
             commit_history,
             list_identities,
             disconnect_github_identity,
