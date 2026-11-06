@@ -129,3 +129,8 @@ show Disconnected with Reconnect. Network, runtime and credential-store errors
 show Unavailable with Retry check and the specific error. Verification snapshots
 do not persist a user logout or clear account assignments. A restart may expose
 a credential persistence problem, but warnings do not claim it caused sign-out.
+
+Cursor editor history is read locally without changing Cursor's databases.
+The reader supports both older inline message indexes and the newer chunked
+conversation indexes. Keep Cursor checked in the Agent/Script pane to include
+these conversations; updating Cerberus's native reader requires an app restart.

@@ -2194,3 +2194,42 @@ WebKit fixture, including cached-body reuse. Full-suite validation caught and
 fixed an ordering issue where an unconfigured mailbox tried opening its operation
 lock before reporting missing configuration. Existing bundle-size and EGL
 warnings remain. No real mailbox content/state was modified during investigation.
+
+## Cursor v18 conversation discovery compatibility (2026-11-06)
+
+Read-only local inspection confirmed Floating Desktop's current Cursor composer
+uses _v=18: fullConversationHeadersOnly and conversationMap are empty, with the
+index stored as composerConvHeaders:<composer>:000000... chunks. The old listing
+reader required a user preview from the inline index, then filtered this real
+conversation out. Added bounded chunk-index preview discovery and ordered chunk
+loading for message reads, respecting headerLog.count and preserving legacy
+inline/indexed formats. Preview discovery does not scan bubble payloads wholesale.
+Queries remain scoped to exact composer key prefixes and workspace authorization.
+
+Synthetic regression covers a large composer, chunk order, slash-containing
+bubble IDs and project isolation. Cursor reader tests passed; explicit read-only
+live fixture found 1 Floating Desktop editor conversation and 10 messages. No
+provider requests/inference or Cursor database writes were performed. Restart the
+native app to load the updated reader, then refresh with Cursor checked.
+
+## Floating Desktop review publication-context repair (2026-11-06)
+
+The completed BLOCKED Review run 2838ce9c-a3f9-4a91-9eb5-73bdca2ec822 targeted
+3c24c5ea286791ff12b46e3f1831b2db49d28a9f on wip. It stopped on missing ordinary
+publication configuration, not a code/test finding. Verified origin URL is
+https://github.com/1100soft/floatdesk.git; authenticated remote listing showed
+only the autosave ref and no wip. Explicitly set branch.wip.remote=origin and
+branch.wip.merge=refs/heads/wip. No commits, branches or files were changed and
+no push was performed by this repair. A missing first-publication remote ref is
+not authority to use main or an autosave ref.
+
+Clarified source Review/Publish prompt documents: a successfully verified absent
+remote target can be represented as firstPublication:true/upstreamSha:null;
+auth failures remain unknown, and review approval plus exact-ref race checks
+still precede publication. Live saved prompts were not edited under the running
+app. Queued one explicit independent review request via an atomic pending review
+handoff, documenting the user-requested config repair and exact original SHA,
+without fabricating an approval or setting release/integration flags. The app
+claimed it and started Review run 79668188-3c60-4946-8e21-f05ac5237929.
+Floating Desktop's cargo test passed (14 tests); no display/network runtime
+benchmark or unrequested publication was executed by this agent.
