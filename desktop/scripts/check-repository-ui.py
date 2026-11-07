@@ -345,7 +345,7 @@ script = r"""
   window.__TAURI_INTERNALS__ = {transformCallback:()=>++callbackId,unregisterCallback:()=>{},invoke: async (command,args) => {
     if(command==='agent_conversations')return [];
     if(command==='save_agent_conversation')return;
-    if(command==='run_agent'){chatCalls.push(args);args.output.onmessage({text:JSON.stringify({type:'thread.started',thread_id:args.resume?.sessionId||'ui-session-'+zoom})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'Streaming fixture reply'}})});return new Promise(resolve=>finishTurn=resolve);}
+    if(command==='run_agent'){chatCalls.push(args);args.output.onmessage({text:JSON.stringify({type:'thread.started',thread_id:args.resume?.sessionId||'ui-session-'+zoom})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'command_execution',command:'internal command',aggregated_output:'Internal command output must stay hidden',exit_code:0}})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',phase:'commentary',text:'Streaming fixture reply'}})});return new Promise(resolve=>finishTurn=()=>{args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'Finished fixture response'}})});resolve();});}
     if(command==='cancel_agent'){cancelled++;finishTurn?.();return;}
     if(command==='chatgpt_capabilities')return {models:[{model:'fixture-model',displayName:'Fixture model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Medium'}]}]};
     if (command === 'provider_setup_status') return [{tool:'codex',path:'/fixture/codex',error:null}];
@@ -394,6 +394,10 @@ script = r"""
   allowResume = false; importedThreads[1].click(); await pause(); await pause();
   assert(document.querySelector('.chat-composer [aria-label="Start new chat"]'), 'Unavailable resume does not offer an explicit separate chat');
   if(zoom===1.5){
+  window.dispatchEvent(new CustomEvent('chat-storage-error',{detail:'Local storage fixture warning'}));await pause();
+  assert(document.querySelector('.aside-bottom .config-error')?.textContent.includes('Local storage fixture warning')&&document.querySelector('.chat-composer [role="alert"]')?.textContent.includes('Local storage fixture warning'),'Storage failure did not reach sidebar and composer');
+  window.dispatchEvent(new CustomEvent('chat-storage-error',{detail:''}));await pause();
+  assert(!document.querySelector('.aside-bottom .config-error')&&!document.querySelector('.chat-composer').textContent.includes('Local storage fixture warning'),'Recovered storage warning remained visible');
   allowResume=true;importedThreads[0].click();await pause();await pause();
   const inputDraft=text=>{const node=document.querySelector('[aria-label="Message agent"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(node,text);node.dispatchEvent(new Event('input',{bubbles:true}));return node;};
   let composerInput=inputDraft('Continue the existing main agent');await pause();
@@ -403,6 +407,7 @@ script = r"""
   assert(chatCalls.length===1&&chatCalls[0].resume.source==='codex-history','Imported Codex conversation did not resume its session');
   for(let i=0;!document.querySelector('.codex-messages').textContent.includes('Streaming fixture reply')&&i<30;i++)await pause();
   assert(document.querySelector('.codex-messages').textContent.includes('Streaming fixture reply'),'Streaming reply was not rendered');
+  assert(!document.querySelector('.codex-messages .agent-steps, .codex-messages .turn-edits-button')&&!document.querySelector('.codex-messages').textContent.includes('Internal command output'),'Running conversation exposed command details');
   document.querySelector('[aria-label="Stop Codex"]').click();await pause();await pause();assert(cancelled===1,'Stop did not cancel the selected conversation');
   document.querySelector('[aria-label="New Codex conversation"]').click();await pause();
   composerInput=inputDraft('New project conversation');await pause();composerInput.form.requestSubmit();
@@ -410,6 +415,7 @@ script = r"""
   assert(chatCalls.length===2&&!chatCalls[1].resume,'New conversation unexpectedly resumed existing history');
   assert(chatCalls[1].mode==='edit','New conversation permissions should default to project access');
   finishTurn();await pause();await pause();
+  assert(document.querySelector('.codex-messages .agent-steps:not([open])'),'Completed trace should remain available and collapsed');
   const composerRect=document.querySelector('.chat-composer').getBoundingClientRect(),columnRect=document.querySelector('.chat-message-column').getBoundingClientRect();
   assert(composerRect.bottom<=columnRect.bottom+2&&composerRect.right<=columnRect.right+2,'Composer exceeds the conversation pane at '+zoom);
   }

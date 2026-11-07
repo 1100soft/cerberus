@@ -18,7 +18,7 @@ import { EditReview } from './EditReview';
 import { completeMessages, textMatches, type ConversationHit } from '../lib/conversationSearch';
 import { matchesShortcut, shortcuts, type ShortcutCommand } from '../lib/shortcuts';
 import { AgentActivity } from './AgentActivity';
-import { foldIntermediateMessages } from '../lib/conversationDisplay';
+import { authoredPromptText, checkpointMessages, foldIntermediateMessages } from '../lib/conversationDisplay';
 import { ConversationContextMenu } from './ConversationContextMenu';
 import { matchingHistoryThread } from '../lib/conversationIdentity';
 import { api } from '../lib/api';
@@ -145,12 +145,15 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const [reviewEdits,setReviewEdits] = useState<FileEdit[]>();
   const [navigationBusy,setNavigationBusy] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
-  const providerHasLocalPrompt=!!appChat && messages.some(message=>message.role==='user' && message.text===appChat.messages.filter(item=>item.role==='user').at(-1)?.text);
-  const displayedMessages = appChat && (appChat.running || !selectedThread || !messages.length || (messages.length < appChat.messages.length && !providerHasLocalPrompt)) ? appChat.messages : messages;
-  const renderedMessages=foldIntermediateMessages(displayedMessages);
+  const providerMessages=appChat?messages.map(message=>message.role==='user'?{...message,text:authoredPromptText(message.text,appChat.messages)}:message):messages;
+  const providerHasLocalPrompt=!!appChat && providerMessages.some(message=>message.role==='user' && message.text===appChat.messages.filter(item=>item.role==='user').at(-1)?.text);
+  const displayedMessages = appChat && (appChat.running || !selectedThread || !providerMessages.length || (providerMessages.length < appChat.messages.length && !providerHasLocalPrompt)) ? appChat.messages : providerMessages;
+  const conversationRunning=!!appChat?.running||!!selectedThread?.working;
+  const foldedMessages=foldIntermediateMessages(displayedMessages);
+  const renderedMessages=conversationRunning?checkpointMessages(foldedMessages):foldedMessages;
   const continuedOutside=!!appChat && !!selectedThread && !appChat.running && updatedMillis(selectedThread.updatedAt)>appChat.updatedAt
-    && messages.filter(message=>message.role==='user').at(-1)?.text!==appChat.messages.filter(message=>message.role==='user').at(-1)?.text;
-  const matchedMessages = textMatches(displayedMessages,messageQuery);
+    && providerMessages.filter(message=>message.role==='user').at(-1)?.text!==appChat.messages.filter(message=>message.role==='user').at(-1)?.text;
+  const matchedMessages = textMatches(renderedMessages,messageQuery);
   const jumpToMessage = (id:string, occurrence?:number) => {
     const pane=messagePane.current; if(!pane)return;
     const article=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')].find(node=>node.dataset.messageId===id);

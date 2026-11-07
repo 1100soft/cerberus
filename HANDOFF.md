@@ -2282,3 +2282,61 @@ all configured sizes and zoom levels. The wide fixture emitted the existing
 `free(): corrupted unsorted chunks` teardown diagnostic after successful assertions;
 it is not claimed as a clean WebKit process teardown. Existing bundle-size/EGL
 warnings remain. No live inference, pushes or commits were performed for this task.
+
+## Conversation browser quota fix (2026-11-07)
+
+The repeated QuotaExceededError was WebKit localStorage, not account credit. A
+read-only size inspection found gitcerberus.agentChats occupying 4,886,166 bytes
+plus settings in the same small quota; the native conversation database already
+held 345 records (~146 MB). The old fallback rebuilt every historical chat on
+each completion, duplicating durable data until WebKit rejected writes.
+
+Desktop recovery snapshots now include only dirty records after native restore,
+with <=8 recent/active chats, <=4 messages each, <=2k chars/message and <=48k total
+JSON chars. Durable histories remain full in SQLite. Legacy recovery records are
+not truncated/replaced until migrated to native storage (including browser copies
+newer than the same native record). Fully durable duplicates are removed. Optional
+browser-backup quota failures no longer masquerade as failed native saves;
+genuine native save/restore errors remain visible. Error status is deduplicated,
+scoped by source, and successful recovery publishes an empty status to clear both
+sidebar and composer. Rename/archive now save the affected record instead of
+rewriting every conversation.
+
+Verified on this machine: the oversized browser key is now absent and all 345
+native conversation records remain. No identity, credential, mail data or native
+history was deleted; no private storage DB was edited directly. Tests simulate
+exhausted browser quota, failed/recovered native writes, gated legacy migration,
+bounded browser-only backup and credit-independent wording. Chat/recovery checks
+and production build passed. WebKit assertions passed at 900×620 with
+100/140/150% zoom, including error appearance/clearing in sidebar and composer;
+the existing heap diagnostic appeared after successful assertions during teardown.
+
+## Tool context separation and live checkpoints (2026-11-07)
+
+The quoted Project feedback tools text was intentionally injected by agents.rs
+whenever scoped issue tools were bound, but incorrectly appended to the user
+prompt. Codex now receives original user text unchanged. ChatGPT app-server turns
+set developerInstructions on thread start/resume; Codex API exec uses the runtime
+developer_instructions config instead. Other provider execution retains its
+existing behavior. Scope enforcement and tool environment remain native. The
+installed Codex protocol's generated schema confirms developerInstructions is
+supported; the CLI config argument was checked via help without inference.
+
+For old app-created histories, UI matches the saved authored prompt before
+removing a recognized appended email/issue helper suffix from the displayed copy.
+It never edits raw provider/native history or strips arbitrary quoted user text.
+Normalized text also prevents falsely reporting those turns as continued outside
+the app. During a running conversation, render only checkpoint/status text (use
+the latest commentary checkpoint when no final reply exists) and omit detailed
+steps/command output/edit buttons. Completed traces remain available collapsed.
+Visible message search ignores hidden live traces.
+
+Tests cover developer context separate from turn input in native resume, exact
+legacy prompt restoration with quoted-text protection, raw trace preservation,
+and checkpoint-only rendering. Full native tests passed (218 unit + 3 integration,
+5 ignored); production build and display checks passed. No inference was run for
+validation. Frontend changes retain the previously restored chat/stop/draft paths.
+WebKit assertions also passed at 900×620 for 100/140/150% zoom, explicitly checking
+that a running checkpoint is visible while command traces/edit controls are not,
+and completed activity becomes available collapsed. The existing heap teardown
+diagnostic appeared after successful assertions; no clean teardown is claimed.

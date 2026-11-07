@@ -3,11 +3,13 @@ import {readFile} from 'node:fs/promises';
 import ts from 'typescript';
 const moduleUrl=source=>`data:text/javascript;base64,${Buffer.from(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64')}`;
 const stored=new Map(),durable=new Map();
+let forceQuota=false;const storageNotices=[];
 const scheduled=new Map();
 let interval,now=1000,scheduleCount=0;
 globalThis.window=Object.assign(new EventTarget(),{__TAURI_INTERNALS__:{},setTimeout:callback=>{const id=++scheduleCount;scheduled.set(id,callback);return id;},clearTimeout:id=>{scheduled.delete(id);},setInterval:callback=>{interval=callback;return 2;},clearInterval:()=>{}});
 globalThis.CustomEvent=class extends Event{constructor(type,options){super(type);this.detail=options.detail;}};
-globalThis.localStorage={getItem:key=>stored.get(key)||null,setItem:(key,value)=>{if(value.length>100000)throw Error('Quota exceeded');stored.set(key,value);}};
+globalThis.localStorage={getItem:key=>stored.get(key)||null,removeItem:key=>stored.delete(key),setItem:(key,value)=>{if(forceQuota||value.length>100000)throw new DOMException('The quota has been exceeded.','QuotaExceededError');stored.set(key,value);}};
+window.addEventListener('chat-storage-error',event=>storageNotices.push(event.detail));
 globalThis.__recoveryApi={agentConversations:async()=>[...durable.values()],saveAgentConversation:async chat=>{durable.set(chat.id,structuredClone(chat));}};
 let source=await readFile(new URL('../src/lib/agentChats.ts',import.meta.url),'utf8');
 source=source.replace("'./api'",JSON.stringify(moduleUrl('export const api=globalThis.__recoveryApi;'))).replace("'react'",JSON.stringify(moduleUrl('export const useSyncExternalStore=(_,read)=>read();'))).replace("'@tauri-apps/api/core'",JSON.stringify(moduleUrl('export class Channel{};export const invoke=async()=>{};')));
@@ -18,7 +20,7 @@ const record={id:'large-chat',repositoryId:'repo',profile:{id:'account',provider
 chats.restoreAgentConversation(record);
 await new Promise(resolve=>setTimeout(resolve,0));
 assert.equal(durable.get(record.id).activity,record.activity);
-assert.ok(stored.get('gitcerberus.agentChats').length<100000,'Browser fallback still exceeds its quota');
+assert.ok(!stored.has('gitcerberus.agentChats'),'Durably saved history should not be duplicated in browser storage');
 assert.equal(durable.get(record.id).status,'Completed');
 const patch=chats.externalEventPatch({type:'session.start',data:{sessionId:'provider-session'}},record);
 assert.equal(patch.session.sessionId,'provider-session');
@@ -47,3 +49,36 @@ const preserved=conversationFromLog({...log,activity:'Partial output'},record.pr
 assert.equal(preserved.activity,record.activity);assert.deepEqual(preserved.messages,record.messages);assert.match(preserved.status,/Interrupted/);
 assert.equal(conversationFromLog({...log,activity:'Partial output'},record.profile,'Review',{...newerInterrupted,status:'Completed'}).status,'Completed');
 console.log('Durable conversations survive browser quota, live sessions persist, suspend gaps preserve waits, and recovery uses exact run context');
+
+// Exhausted WebKit storage must not masquerade as a failed native save.
+forceQuota=true;storageNotices.length=0;
+for(let i=0;i<40;i++)chats.restoreAgentConversation({...record,id:'quota-'+i,activity:'',messages:[{id:'q',role:'user',text:'x'.repeat(15000)}]});
+await new Promise(resolve=>setTimeout(resolve,0));
+assert(durable.has('quota-39'));assert(!storageNotices.some(Boolean),'Optional backup quota failures reported native save failure');
+const saveNative=globalThis.__recoveryApi.saveAgentConversation;
+globalThis.__recoveryApi.saveAgentConversation=async()=>{throw Error('disk full');};
+chats.restoreAgentConversation({...record,id:'failed-database',activity:''});await new Promise(resolve=>setTimeout(resolve,0));
+assert(storageNotices.at(-1).includes('disk full'),'Native database failures were hidden');
+globalThis.__recoveryApi.saveAgentConversation=saveNative;
+chats.updateAgentChat('failed-database',{status:'Completed'});await new Promise(resolve=>setTimeout(resolve,0));
+assert.equal(storageNotices.at(-1),'','Recovered native writes did not clear both UI warnings');
+// Keep a legacy browser recovery source intact until every imported record is durable.
+const legacy={...record,id:'legacy',activity:'',updatedAt:500,messages:[{id:'legacy-prompt',role:'user',text:'original'.repeat(20000)}]};
+const legacyJson=JSON.stringify([legacy]);stored.set('gitcerberus.agentChats',legacyJson);durable.clear();
+let releaseSave;const gate=new Promise(resolve=>releaseSave=resolve);
+globalThis.__recoveryApi.saveAgentConversation=async chat=>{await gate;await saveNative(chat);};
+const migrated=await import(moduleUrl(source+'\n// independent migration fixture'));
+await migrated.initializeAgentChats();migrated.restoreAgentConversation(legacy);await new Promise(resolve=>setTimeout(resolve,0));
+assert.equal(stored.get('gitcerberus.agentChats'),legacyJson,'Legacy recovery source was truncated before migration');
+releaseSave();await new Promise(resolve=>setTimeout(resolve,0));
+assert.equal(durable.get('legacy').messages[0].text,legacy.messages[0].text);
+assert(!stored.has('gitcerberus.agentChats'),'Migrated browser duplicate was not removed');
+// Browser-only mode has no native history: keep a strict bounded recent backup.
+globalThis.__recoveryApi.saveAgentConversation=saveNative;delete window.__TAURI_INTERNALS__;forceQuota=false;stored.clear();
+const browser=await import(moduleUrl(source+'\n// independent browser fixture'));
+for(let i=0;i<40;i++)browser.restoreAgentConversation({...record,id:'browser-'+i,activity:'',messages:[{id:'p',role:'user',text:'long'.repeat(10000)}]});
+assert(stored.get('gitcerberus.agentChats').length<=48000);
+forceQuota=true;browser.updateAgentChat('browser-39',{status:'Completed'});
+assert(storageNotices.at(-1).includes('not agent credits'),'Browser-only storage error was not explained');
+forceQuota=false;browser.updateAgentChat('browser-39',{status:'Completed'});assert.equal(storageNotices.at(-1),'');
+console.log('Native saves survive exhausted browser quota; backup migration, bounds, real failures and warning recovery passed');

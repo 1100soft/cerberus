@@ -30,6 +30,7 @@ pub fn run(
     path: &Path,
     mode: &str,
     prompt: &str,
+    developer_instructions: Option<&str>,
     resume: Option<&str>,
     model: Option<&str>,
     reasoning_effort: Option<&str>,
@@ -45,6 +46,7 @@ pub fn run(
         return Err("Run stopped.".into());
     }
     let mut params = settings(path, mode, model);
+    if let Some(instructions)=developer_instructions{params["developerInstructions"]=json!(instructions);}
     let method = if let Some(id) = resume {
         params["threadId"] = json!(id);
         if let Some(path)=rollout {params["path"]=json!(path);}
@@ -234,6 +236,7 @@ for line in sys.stdin:
   verified=True;result={'account':{'type':'chatgpt','email':'fixture@example.test'}}
  elif m=='thread/resume':
   assert verified and p['threadId']=='session-test'
+  assert p['developerInstructions']=='Project tools stay separate from user text'
   assert p['approvalPolicy']=='never' and p['sandbox']==('danger-full-access' if mode=='full' else 'workspace-write') and p['model']=='recorded-model'
   result={'thread':{'id':'session-test'}}
  elif m=='turn/start':
@@ -266,6 +269,7 @@ for line in sys.stdin:
             Path::new("/repo"),
             mode,
             "fixture prompt",
+            Some("Project tools stay separate from user text"),
             Some("session-test"),
             Some("recorded-model"),
             Some("high"),
@@ -298,7 +302,7 @@ for line in sys.stdin:
  else:break
  print(json.dumps({'id':r['id'],'result':result}),flush=True)
 "#]);
-        let error=run(command,&Profile::default(),Path::new("/repo"),"analyze","task",None,None,None,None,Arc::new(AtomicBool::new(false)),Channel::new(|_|Ok(()))).unwrap_err();
+        let error=run(command,&Profile::default(),Path::new("/repo"),"analyze","task",None,None,None,None,None,Arc::new(AtomicBool::new(false)),Channel::new(|_|Ok(()))).unwrap_err();
         assert!(error.contains("ChatGPT authentication was rejected"));
     }
     #[test]
@@ -322,6 +326,7 @@ for line in sys.stdin:
             Path::new("/repo"),
             "analyze",
             "task",
+            None,
             None,
             None,
             None,

@@ -29,6 +29,32 @@ Codex work; its extension does not need to be running.
 
 The Identity page manages ChatGPT, GitHub, Cursor, and Claude identities. Each identity icon carries editable initials beside the account name. ChatGPT rate limits display on its account card when available. GitHub cards try Copilot CLI quota and always offer a web usage link. Cursor and Claude cards link to their web usage pages. A web link uses the browser's current login, which may differ from the card's account.
 
+Codex's project email/feedback tool guidance is supplied as runtime developer
+context, separately from the message you type. Native project/repository/label
+checks still enforce scope. Older app-created histories restore the original
+visible prompt when a recognized helper suffix can be matched to the saved
+message; raw history is preserved. Ordinary authored or quoted instructions are
+not removed by guessing.
+
+While a conversation runs, the pane shows assistant checkpoint/status responses
+without tool commands, raw activity or file-edit details. Completed activity
+remains available in collapsed details. Conversation search follows what is
+currently visible rather than matching hidden live traces.
+
+## Conversation storage
+
+Desktop conversations are saved in Cerberus's native SQLite database. WebKit's
+localStorage quota is separate from agent credits and disk capacity. The desktop
+keeps only a small pending recovery snapshot in browser storage, removing it once
+the corresponding full conversation records are durable. Legacy browser backups
+are preserved until their records have migrated successfully. Browser-only demo
+backups are bounded recent-message previews, not a complete history archive.
+
+A browser backup quota failure does not mean a successful native database save
+failed. Genuine database/restore failures remain visible, and successful recovery
+clears the sidebar and composer warning. Do not clear all application data to fix
+a quota warning: that would also remove unrelated settings.
+
 ## Copilot startup and quota
 
 Copilot conversations are the editor chat sessions saved for the project folder. Listing them does not start the Copilot CLI. Quota still uses the official Copilot SDK with the connected GitHub account's saved token. A connected GitHub identity does not by itself install a CLI.

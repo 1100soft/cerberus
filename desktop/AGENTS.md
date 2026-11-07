@@ -157,3 +157,6 @@ If port 3000 is occupied, identify its owner before taking action.
   account binding and unavailable-session fallback explicit; never silently turn
   a follow-up into another session or bill a different account. Hide/suspend the
   composer on inactive pages and preserve drafts across navigation.
+- Keep Codex runtime tool guidance separate from authored user messages. While a
+  conversation runs, present checkpoint/status responses without command traces
+  or edit details; preserve the full trace for collapsed inspection afterward.
