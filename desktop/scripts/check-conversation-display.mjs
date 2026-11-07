@@ -29,3 +29,20 @@ assert.equal(checkpoints[0].text,'Checkpoint: tests passed');assert.equal(checkp
 assert.equal(active[0].steps.length,2,'Presentation must preserve the stored trace');
 assert.equal(checkpointMessages([{...active[0],text:'Final response'}])[0].text,'Final response');
 console.log('Authored prompt restoration and checkpoint-only live presentation preserve raw history');
+const {conversationMessages}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const local={running:false,messages:[{id:'local-u',role:'user',text:'Do it',createdAt:10000},{id:'local-a',role:'assistant',text:'Complete final answer\n'}]};
+const stale=[{id:'remote-u',role:'user',text:'Do it'},{id:'remote-a',role:'assistant',text:'Partial answer'}];
+assert.equal(conversationMessages(local,stale),local.messages,'Stale equal-length history replaced the final answer');
+const confirmed=[...stale.slice(0,1),{...stale[1],text:'Complete final answer'}];
+assert.equal(conversationMessages(local,confirmed),confirmed);
+const external=[...confirmed,{id:'outside',role:'user',text:'Next task',createdAt:12000}];
+assert.equal(conversationMessages(local,external),external);
+assert.equal(conversationMessages(local,[external.at(-1)]).length,1);
+assert.equal(conversationMessages({...local,running:true},external),local.messages);
+assert.equal(conversationMessages(undefined,stale),stale);
+console.log('Stale provider pages cannot replace a completed local turn; verified external continuation stays visible');
+
+assert.equal(conversationMessages(local,[{...confirmed[0],createdAt:1},confirmed[1]]),local.messages,'An older repeated prompt was mistaken for the current turn');
+
+const longerLocal={...local,messages:[{id:'old-u',role:'user',text:'Earlier context'},{id:'old-a',role:'assistant',text:'Earlier answer'},...local.messages]};
+assert.equal(conversationMessages(longerLocal,confirmed),longerLocal.messages,'A short provider page discarded loaded context at completion');

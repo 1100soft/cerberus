@@ -345,7 +345,7 @@ script = r"""
   window.__TAURI_INTERNALS__ = {transformCallback:()=>++callbackId,unregisterCallback:()=>{},invoke: async (command,args) => {
     if(command==='agent_conversations')return [];
     if(command==='save_agent_conversation')return;
-    if(command==='run_agent'){chatCalls.push(args);args.output.onmessage({text:JSON.stringify({type:'thread.started',thread_id:args.resume?.sessionId||'ui-session-'+zoom})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'command_execution',command:'internal command',aggregated_output:'Internal command output must stay hidden',exit_code:0}})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',phase:'commentary',text:'Streaming fixture reply'}})});return new Promise(resolve=>finishTurn=()=>{args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'Finished fixture response'}})});resolve();});}
+    if(command==='run_agent'){chatCalls.push(args);args.output.onmessage({text:JSON.stringify({type:'thread.started',thread_id:args.resume?.sessionId||'ui-session-'+zoom})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'command_execution',command:'internal command',aggregated_output:'Internal command output must stay hidden',exit_code:0}})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',phase:'commentary',text:'Streaming fixture reply'}})});return new Promise(resolve=>finishTurn=(text='Finished fixture response')=>{args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',text}})});resolve();});}
     if(command==='cancel_agent'){cancelled++;finishTurn?.();return;}
     if(command==='chatgpt_capabilities')return {models:[{model:'fixture-model',displayName:'Fixture model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Medium'}]}]};
     if (command === 'provider_setup_status') return [{tool:'codex',path:'/fixture/codex',error:null}];
@@ -413,17 +413,35 @@ script = r"""
   livePane.scrollTop=livePane.scrollHeight;livePane.dispatchEvent(new Event('scroll'));progress(80);await pause();await pause();
   assert(livePane.scrollHeight>livePane.clientHeight+100,'Live scrolling fixture must overflow');
   assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Live output did not follow the bottom');
-  livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();const readingTop=livePane.scrollTop;progress(100);await pause();await pause();
+  const liveSearch=document.querySelector('[aria-label="Search this conversation"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(liveSearch,'Checkpoint');liveSearch.dispatchEvent(new Event('input',{bubbles:true}));await pause();await pause();
+  document.querySelector('[aria-label="Next search match"]').click();await pause();document.querySelector('[aria-label="Next search match"]').click();await pause();
+  const selectedMatch=document.querySelector('.message-search [role="status"]').textContent.split('/')[0];progress(90);await pause();await pause();
+  assert(document.querySelector('.message-search [role="status"]').textContent.startsWith(selectedMatch+'/'),'Incoming output reset the current search match');
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(liveSearch,'');liveSearch.dispatchEvent(new Event('input',{bubbles:true}));await pause();
+  livePane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();const readingTop=livePane.scrollTop;progress(100);await pause();await pause();
   assert(Math.abs(livePane.scrollTop-readingTop)<3,'New output pulled the reader away from earlier messages');
   livePane.scrollTop=livePane.scrollHeight;livePane.dispatchEvent(new Event('scroll'));progress(120);await pause();await pause();
   assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Returning to bottom did not resume following');
+  importedThreads[1].click();await pause();await pause();
+  const runningLink=[...document.querySelectorAll('.chat-composer button')].find(node=>node.textContent==='View running conversation');
+  assert(runningLink&&!document.querySelector('[aria-label="Stop Codex"]'),'Another conversation exposed an unrelated Stop control');
+  runningLink.click();await pause();await pause();assert(document.querySelector('[aria-label="Stop Codex"]'),'Running-conversation link did not restore the correct task');
+  livePane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();
   document.querySelector('[aria-label="Stop Codex"]').click();await pause();await pause();assert(cancelled===1,'Stop did not cancel the selected conversation');
-  livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();
+  assert(livePane.scrollTop<3,'Completion pulled a scrolled-up reader to the final response');
+  livePane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();
   composerInput=inputDraft('Follow-up after reading earlier messages');await pause();composerInput.form.requestSubmit();
   for(let i=0;chatCalls.length<2&&i<30;i++)await pause();await pause();await pause();
   assert(chatCalls.length===2&&chatCalls[1].resume,'Follow-up did not continue the current conversation');
   assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Sending while scrolled up did not reveal the latest turn');
-  finishTurn();await pause();await pause();
+  finishTurn(('Final response paragraph\n\n').repeat(100));await pause();await pause();await pause();
+  assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Final response lost the bottom position');
+  const finalArticle=livePane.querySelector('.codex-message:last-of-type .conversation-markdown');
+  finalArticle.style.paddingBottom='240px';await pause();await pause();
+  assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Late content resize lost bottom following');
+  livePane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();
+  finalArticle.style.paddingBottom='400px';await pause();await pause();
+  assert(livePane.scrollTop<3,'Late resize pulled the reader away from earlier messages');
   document.querySelector('[aria-label="New Codex conversation"]').click();await pause();
   composerInput=inputDraft('New project conversation');await pause();composerInput.form.requestSubmit();
   for(let i=0;chatCalls.length<3&&i<30;i++)await pause();
@@ -433,6 +451,19 @@ script = r"""
   assert(document.querySelector('.codex-messages .agent-steps:not([open])'),'Completed trace should remain available and collapsed');
   const composerRect=document.querySelector('.chat-composer').getBoundingClientRect(),columnRect=document.querySelector('.chat-message-column').getBoundingClientRect();
   assert(composerRect.bottom<=columnRect.bottom+2&&composerRect.right<=columnRect.right+2,'Composer exceeds the conversation pane at '+zoom);
+  // An old page completing after a conversation switch must not restore its scroll anchor.
+  const originalRead=api.codexMessages;let releaseOlder;
+  api.codexMessages=async(id,thread,cursor)=>thread==='fixture-two'?cursor?await new Promise(resolve=>releaseOlder=()=>resolve({data:[{id:'older-u',role:'user',text:'Older second-thread prompt'},{id:'older-a',role:'assistant',text:'Wrong-conversation paginated result'}]})):{data:[{id:'second-u',role:'user',text:'Second thread prompt'},{id:'second-a',role:'assistant',text:('Second thread response\n\n').repeat(60)}],nextCursor:'older'}:originalRead(id,thread,cursor);
+  const historyButton=name=>[...document.querySelectorAll('.codex-thread-list button.provider-codex')].find(node=>node.textContent.includes(name));
+  historyButton('Plan a change').click();await pause();document.querySelector('[aria-label="Refresh conversations"]').click();
+  for(let i=0;!([...document.querySelectorAll('.codex-messages button')].some(node=>node.textContent==='Load older messages'))&&i<40;i++)await pause();
+  livePane.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();
+  [...document.querySelectorAll('.codex-messages button')].find(node=>node.textContent==='Load older messages').click();
+  for(let i=0;!releaseOlder&&i<30;i++)await pause();assert(releaseOlder,'Older-page fixture did not start');
+  historyButton('Review project').click();await pause();await pause();
+  releaseOlder();await pause();await pause();assert(!document.querySelector('.codex-messages').textContent.includes('Wrong-conversation paginated result'),'Old page replaced another conversation');
+  assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Old page restored another conversation scroll anchor');api.codexMessages=originalRead;
+
   }
   window.__repositoryProgress='ChatGPT identities '+zoom;
   window.dispatchEvent(new Event('show-identities'));await pause();await pause();

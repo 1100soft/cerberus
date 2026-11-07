@@ -18,6 +18,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
   const chats = useAgentChats();
   const chat = chats.find(chat => chat.id === chatId);
   const active = chats.find(item => item.repositoryId === repositoryId && item.running && item.automationContext?.runId===chat?.automationContext?.runId);
+  const busyElsewhere=!!active&&active.id!==chat?.id;
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [profileId, setProfileId] = useState('');
   const [mode,setMode]=useState(()=>{try{const value=localStorage.getItem(`gitcerberus.chatPermission:${repositoryId}`);return value&&['analyze','edit','full'].includes(value)?value:'edit';}catch{return 'edit';}});
@@ -81,6 +82,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
     {chat?.retryable && !needsNew && !active && profile && <button type="button" disabled={sending} onClick={async () => { setSending(true); setError(''); try { await retryConversationAction(chat.id); } catch(e) { setError(String(e)); } finally { setSending(false); } }}>Retry last message</button>}
     {chat && !active && resumeStatus?.available && chat.status !== 'Completed' && <button type="button" disabled={!draft.trim() || sending} onClick={() => { void send(true); }}>Start new chat instead</button>}
     {chat?.status.includes('no credits remaining') && <button type="button" onClick={() => api.openExternalUrl('https://platform.openai.com/settings/organization/billing/').catch(e => setError(String(e)))}>Open API billing</button>}
+    {busyElsewhere&&<small role="status">Another Codex conversation is running in this checkout.</small>}
     {storageError && <p role="alert">{storageError}</p>}
     {!inTauri() && <small>Sending requires the desktop app.</small>}
     {error && <p role="alert">{error}</p>}
@@ -91,7 +93,7 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
       {profile?.subscription&&capabilities.data?.models.length? <Select label="Codex model" disabled={!!active||sending} value={model!} onChange={value=>chooseModel(profile.id,value)} options={capabilities.data.models.map(item=>({value:item.model,label:item.displayName}))}/>:null}
       {profile?.subscription&&model&&capabilities.data?.models.find(item=>item.model===model)?.supportedReasoningEfforts.length?<Select label="Codex reasoning effort" disabled={!!active||sending} value={effort!} onChange={value=>chooseEffort(profile.id,model,value)} options={capabilities.data.models.find(item=>item.model===model)!.supportedReasoningEfforts.map(item=>({value:item.reasoningEffort,label:item.reasoningEffort}))}/>:null}
       {showAccountPicker && <Select label="Chat account" disabled={!!originalProfile || sending} value={profile!.id} onChange={setProfileId} options={matchingProfiles.map(profile => ({value:profile.id,label:`${profile.label} · ${profile.subscription ? 'ChatGPT subscription' : 'Codex API'}`}))} />}
-      {active ? <button type="button" aria-label="Stop Codex" title="Stop Codex" onClick={() => stopAgentChat(repositoryId,active.id).catch(e => setError(String(e)))}><Square size={16}/></button> : <button className="chat-send" type={needsNew ? 'button' : 'submit'} onClick={needsNew ? () => { void send(true); } : undefined} disabled={!inTauri() || !profile || !draft.trim() || sending || (continuing && !resumeStatus)} aria-label={needsNew ? "Start new chat" : "Send message"} title={needsNew ? contextReady ? 'Start a separate conversation using loaded messages' : 'Start a separate conversation without unavailable history' : 'Send message · Ctrl+Enter'}>{needsNew ? <SquarePen size={18}/> : <ArrowUp size={18}/>}</button>}
+      {active ? busyElsewhere?<button type="button" onClick={()=>onSelect(active.originKey||`app:${active.id}`)}>View running conversation</button>:<button type="button" aria-label="Stop Codex" title="Stop Codex" onClick={() => stopAgentChat(repositoryId,active.id).catch(e => setError(String(e)))}><Square size={16}/></button> : <button className="chat-send" type={needsNew ? 'button' : 'submit'} onClick={needsNew ? () => { void send(true); } : undefined} disabled={!inTauri() || !profile || !draft.trim() || sending || (continuing && !resumeStatus)} aria-label={needsNew ? "Start new chat" : "Send message"} title={needsNew ? contextReady ? 'Start a separate conversation using loaded messages' : 'Start a separate conversation without unavailable history' : 'Send message · Ctrl+Enter'}>{needsNew ? <SquarePen size={18}/> : <ArrowUp size={18}/>}</button>}
     </div>
   </form>;
 }

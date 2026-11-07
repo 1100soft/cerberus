@@ -40,3 +40,23 @@ export function authoredPromptText(text:string,authored:CodexMessage[]):string {
 export function checkpointMessages(messages:CodexMessage[]):CodexMessage[]{
   return messages.map(message=>message.role==='assistant'?{...message,text:message.text||message.steps?.filter(step=>step.kind==='commentary').at(-1)?.text||'',steps:undefined,edits:undefined}:message);
 }
+
+/** A refreshed history page must confirm the app's last turn before replacing it. */
+export function conversationMessages(local:{running:boolean;messages:CodexMessage[]}|undefined,history:CodexMessage[]):CodexMessage[]{
+  if(!local)return history;
+  if(local.running||!history.length)return local.messages;
+  let lastPrompt=local.messages.length-1;while(lastPrompt>=0&&local.messages[lastPrompt].role!=='user')lastPrompt--;
+  if(lastPrompt<0)return local.messages;
+  const prompt=local.messages[lastPrompt];
+  const answer=local.messages.slice(lastPrompt+1).filter(message=>message.role==='assistant').at(-1)?.text.trim();
+  for(let index=0;index<history.length;index++){
+    if(history[index].role!=='user'||history[index].text!==prompt.text)continue;
+    if(prompt.createdAt&&history[index].createdAt&&history[index].createdAt!+2000<prompt.createdAt)continue;
+    const next=history.findIndex((message,at)=>at>index&&message.role==='user');
+    const turn=history.slice(index+1,next<0?undefined:next);
+    if(turn.some(message=>message.role==='assistant'&&message.text.trim()&&(answer?message.text.trim()===answer:true)))return history.length>=local.messages.length||next>=0?history:local.messages;
+  }
+  const latest=history.filter(message=>message.role==='user').at(-1);
+  if(prompt.createdAt&&latest?.createdAt&&latest.createdAt>prompt.createdAt)return history;
+  return local.messages;
+}

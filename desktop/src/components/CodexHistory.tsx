@@ -18,7 +18,7 @@ import { EditReview } from './EditReview';
 import { completeMessages, textMatches, type ConversationHit } from '../lib/conversationSearch';
 import { matchesShortcut, shortcuts, type ShortcutCommand } from '../lib/shortcuts';
 import { AgentActivity } from './AgentActivity';
-import { authoredPromptText, checkpointMessages, foldIntermediateMessages } from '../lib/conversationDisplay';
+import { authoredPromptText, checkpointMessages, conversationMessages, foldIntermediateMessages } from '../lib/conversationDisplay';
 import { ConversationContextMenu } from './ConversationContextMenu';
 import { matchingHistoryThread } from '../lib/conversationIdentity';
 import { api } from '../lib/api';
@@ -101,7 +101,7 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const [selected, setSelected] = useState<string>();
   const [selectionExplicit, setSelectionExplicit] = useState(false);
   const [selectedRunContext,setSelectedRunContext]=useState<string>();
-  const chooseConversation = (key:string,run?:AutomationLogSummary) => { if(key!==selected){scrollIntent.current={kind:'latest'};followLatest.current=true;}setSelectionExplicit(true); setSelected(key);setSelectedRunContext(run?activityKey(run):undefined); };
+  const chooseConversation = (key:string,run?:AutomationLogSummary) => { selectionGeneration.current++; if(key!==selected){scrollIntent.current={kind:'latest'};followLatest.current=true;userScroll.current={until:0,pointer:false};}setSelectionExplicit(true); setSelected(key);setSelectedRunContext(run?activityKey(run):undefined); };
   const copyConversationText=async()=>{
     const target=contextMenu;if(!target)throw new Error('No conversation selected.');
     const available=target.thread?(await completeMessages(repository.id,target.thread,()=>false)).messages:undefined;
@@ -125,6 +125,8 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const directAppChat = listedChats.find(chat => `app:${chat.id}` === selected);
   const selectedThread = selected === "new" || selectedScript ? undefined : directAppChat ? matchingThread(directAppChat) : visible.find((thread) => thread.key === selected) ?? visible[0];
   const selectedKey = selectedThread?.key;
+  const viewKey=`${selected||selectedKey||''}:${archived}:${enabledKey}`;
+  const currentView=useRef(viewKey);currentView.current=viewKey;
   const saveMessagePrompt=(message:CodexMessage)=>window.dispatchEvent(new CustomEvent('new-automation-from-prompt',{detail:{repositoryId:repository.id,provider:(appChat?.profile.provider||selectedThread?.provider||'codex') as Provider,prompt:message.text}}));
   const cursorConversationId = selected === "new" ? undefined : selectedThread?.provider === "cursor" ? selectedThread.id : directAppChat?.profile.provider === "cursor" ? directAppChat.session?.sessionId : undefined;
   useEffect(() => { onCursorConversation(cursorConversationId); }, [cursorConversationId, onCursorConversation]);
@@ -135,37 +137,45 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const [messageCursor, setMessageCursor] = useState<string | null | undefined>(() => cached?.nextCursor);
   const [reading, setReading] = useState(() => !!selectedKey && !cached);
   const [readError, setReadError] = useState("");
+  const threadPane=useRef<HTMLDivElement>(null);
   const messagePane = useRef<HTMLDivElement>(null);
+  const contentPane=useRef<HTMLDivElement>(null);
+  const userScroll=useRef({until:0,pointer:false});
   const followLatest=useRef(true);
+  const sentFrame=useRef<number>();
+  const selectionGeneration=useRef(0);
   const loadedThread=useRef<string>();
+  useEffect(()=>()=>cancelAnimationFrame(sentFrame.current||0),[]);
   const scrollIntent = useRef<{ kind: "latest" } | { kind: "older"; height: number; top: number } | undefined>({ kind: "latest" });
   const [messageQuery,setMessageQuery] = useState('');
   const [repoHits,setRepoHits]=useState<ConversationHit[]>([]);
   const repoSearch=useRef({query:'',index:-1});
   const pendingMatch=useRef<{key:string;id?:string;occurrence:number}>();
   const selectSentConversation=(key:string)=>{
-    followLatest.current=true;scrollIntent.current={kind:'latest'};
+    followLatest.current=true;userScroll.current={until:0,pointer:false};scrollIntent.current={kind:'latest'};
     pendingMatch.current=undefined;setMessageQuery('');chooseConversation(key);
     // Sending is an explicit request to show the new turn, even when the same
     // conversation remains selected and React otherwise reuses its scroll state.
-    requestAnimationFrame(()=>{const pane=messagePane.current;if(!pane)return;pane.scrollTop=pane.scrollHeight;followLatest.current=true;if(scrollIntent.current?.kind==='latest')scrollIntent.current=undefined;});
+    const generation=selectionGeneration.current;
+    cancelAnimationFrame(sentFrame.current||0);sentFrame.current=requestAnimationFrame(()=>{const pane=messagePane.current;if(!pane||generation!==selectionGeneration.current||!followLatest.current)return;pane.scrollTop=pane.scrollHeight;if(scrollIntent.current?.kind==='latest')scrollIntent.current=undefined;});
   };
   const [matchIndex,setMatchIndex] = useState(0);
   const [reviewEdits,setReviewEdits] = useState<FileEdit[]>();
   const [navigationBusy,setNavigationBusy] = useState(false);
+  useEffect(()=>setNavigationBusy(false),[viewKey]);
   const searchInput = useRef<HTMLInputElement>(null);
   const providerMessages=appChat?messages.map(message=>message.role==='user'?{...message,text:authoredPromptText(message.text,appChat.messages)}:message):messages;
-  const providerHasLocalPrompt=!!appChat && providerMessages.some(message=>message.role==='user' && message.text===appChat.messages.filter(item=>item.role==='user').at(-1)?.text);
-  const displayedMessages = appChat && (appChat.running || !selectedThread || !providerMessages.length || (providerMessages.length < appChat.messages.length && !providerHasLocalPrompt)) ? appChat.messages : providerMessages;
-  const conversationRunning=!!appChat?.running||!!selectedThread?.working;
+  const displayedMessages=conversationMessages(appChat,providerMessages);
+  const conversationRunning=appChat?appChat.running||displayedMessages===providerMessages&&updatedMillis(selectedThread?.updatedAt||0)>appChat.updatedAt&&!!selectedThread?.working:!!selectedThread?.working;
   const foldedMessages=foldIntermediateMessages(displayedMessages);
   const renderedMessages=conversationRunning?checkpointMessages(foldedMessages):foldedMessages;
   const continuedOutside=!!appChat && !!selectedThread && !appChat.running && updatedMillis(selectedThread.updatedAt)>appChat.updatedAt
     && providerMessages.filter(message=>message.role==='user').at(-1)?.text!==appChat.messages.filter(message=>message.role==='user').at(-1)?.text;
   const matchedMessages = textMatches(renderedMessages,messageQuery);
+  const searchView=useRef({query:'',key:selected,initialized:false});
   const jumpToMessage = (id:string, occurrence?:number) => {
     const pane=messagePane.current; if(!pane)return;
-    followLatest.current=false;
+    followLatest.current=false;setSelectionExplicit(true);searchView.current.initialized=true;
     const article=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')].find(node=>node.dataset.messageId===id);
     for(let node:HTMLElement|null|undefined=article;node;node=node.parentElement)if(node instanceof HTMLDetailsElement)node.open=true;
     const node=occurrence===undefined ? article : article?.querySelectorAll<HTMLElement>('mark')[occurrence] || article;
@@ -175,13 +185,17 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   };
   const searchJump = (delta:number) => { if(!matchedMessages.length)return; const next=(matchIndex+delta+matchedMessages.length)%matchedMessages.length;setMatchIndex(next);pendingMatch.current=undefined;jumpToMessage(matchedMessages[next].id,matchedMessages[next].occurrence); };
   useEffect(()=>{
+    if(searchView.current.query!==messageQuery||searchView.current.key!==selected)searchView.current={query:messageQuery,key:selected,initialized:false};
+    if(!messageQuery.trim())return;
     const pending=pendingMatch.current;
-    if(pending && pending.key===selected){
-      const index=matchedMessages.findIndex(match=>match.id===pending.id && match.occurrence===pending.occurrence);
-      if(index>=0){setMatchIndex(index);requestAnimationFrame(()=>jumpToMessage(pending.id!,pending.occurrence));}
-      return;
+    if(pending&&pending.key===selected){
+      const index=matchedMessages.findIndex(match=>match.id===pending.id&&match.occurrence===pending.occurrence);
+      if(index<0)return;
+      setMatchIndex(index);const frame=requestAnimationFrame(()=>{jumpToMessage(pending.id!,pending.occurrence);pendingMatch.current=undefined;});
+      return()=>cancelAnimationFrame(frame);
     }
-    setMatchIndex(0);if(matchedMessages[0])requestAnimationFrame(()=>jumpToMessage(matchedMessages[0].id,0));
+    if(searchView.current.initialized)return;
+    setMatchIndex(0);if(matchedMessages[0]){const first=matchedMessages[0],frame=requestAnimationFrame(()=>jumpToMessage(first.id,0));return()=>cancelAnimationFrame(frame);}
   },[messageQuery,selected,displayedMessages,matchedMessages.length]);
   useEffect(()=>{
     if(!messageQuery.trim() || !selectedThread || !messageCursor)return;
@@ -191,17 +205,18 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   },[messageQuery,selectedKey]);
   const navigate = async (command:ShortcutCommand) => {
     const pane=messagePane.current;if(!pane || navigationBusy)return;
+    setSelectionExplicit(true);const key=currentView.current;const valid=()=>pane.isConnected&&key===currentView.current;
     if(command==='message.first') {
       followLatest.current=false;
-      if(selectedThread && messageCursor) { setNavigationBusy(true);try { await completeMessages(repository.id,selectedThread,()=>!pane.isConnected); } catch(error){setReadError(String(error));}finally{setNavigationBusy(false);} }
-      requestAnimationFrame(()=>{pane.scrollTop=0;});return;
+      if(selectedThread && messageCursor) { setNavigationBusy(true);try { await completeMessages(repository.id,selectedThread,()=>!valid()); } catch(error){if(valid())setReadError(String(error));}finally{if(valid())setNavigationBusy(false);} }
+      requestAnimationFrame(()=>{if(valid())pane.scrollTop=0;});return;
     }
-    if(command==='message.last'){followLatest.current=true;pane.scrollTop=pane.scrollHeight;return;}
+    if(command==='message.last'){followLatest.current=true;userScroll.current={until:0,pointer:false};pane.scrollTop=pane.scrollHeight;return;}
     const nodes=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')];
     const top=pane.getBoundingClientRect().top;
     const node=command==='message.previous' ? nodes.reverse().find(node=>node.getBoundingClientRect().top<top-3) : nodes.find(node=>node.getBoundingClientRect().top>top+3);
     if(node)jumpToMessage(node.dataset.messageId!);
-    else if(command==='message.previous' && selectedThread && messageCursor) { await moreMessages(); requestAnimationFrame(()=>{const previous=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')].reverse().find(node=>node.getBoundingClientRect().top<pane.getBoundingClientRect().top-3);if(previous)jumpToMessage(previous.dataset.messageId!);}); }
+    else if(command==='message.previous' && selectedThread && messageCursor) { await moreMessages(); requestAnimationFrame(()=>{if(!valid())return;const previous=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')].reverse().find(node=>node.getBoundingClientRect().top<pane.getBoundingClientRect().top-3);if(previous)jumpToMessage(previous.dataset.messageId!);}); }
   };
   useEffect(()=>{
     const key=(event:KeyboardEvent)=>{
@@ -340,7 +355,10 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   useEffect(()=>{
     const pane=messagePane.current;if(!pane||!active)return;
     const observer=new ResizeObserver(()=>{if(followLatest.current&&!scrollIntent.current)pane.scrollTop=pane.scrollHeight;});
-    observer.observe(pane);return()=>observer.disconnect();
+    const release=()=>{userScroll.current.pointer=false;};
+    observer.observe(pane);if(contentPane.current)observer.observe(contentPane.current);
+    window.addEventListener('pointerup',release);window.addEventListener('pointercancel',release);
+    return()=>{observer.disconnect();release();window.removeEventListener('pointerup',release);window.removeEventListener('pointercancel',release);};
   },[active,selected]);
 
   useEffect(() => {
@@ -354,18 +372,25 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
     window.addEventListener('conversation-cycle', cycle);
     return () => window.removeEventListener('conversation-cycle', cycle);
   }, [selected, selectedKey, chats.map(chat => chat.id).join(','), visible.map(thread => thread.key).join(',')]);
-  useEffect(() => { document.querySelector('.codex-thread-list .active')?.scrollIntoView({block:'nearest'}); }, [selected]);
+  useEffect(()=>{
+    const list=threadPane.current,item=list?.querySelector<HTMLElement>('.active');if(!list||!item||!list.offsetHeight)return;
+    const bounds=list.getBoundingClientRect(),row=item.getBoundingClientRect(),scale=bounds.height/list.offsetHeight||1;
+    if(row.top<bounds.top)list.scrollTop+=(row.top-bounds.top)/scale;
+    else if(row.bottom>bounds.bottom)list.scrollTop+=(row.bottom-bounds.bottom)/scale;
+  },[selected]);
   async function moreMessages() {
     if (!selectedThread || reading) return;
     followLatest.current=false;
+    const key=currentView.current;const valid=()=>key===currentView.current&&!!messagePane.current?.isConnected;
     const previous = { kind: "older" as const, height: messagePane.current?.scrollHeight ?? 0, top: messagePane.current?.scrollTop ?? 0 };
     setReading(true); setReadError("");
     try {
       const next = await loadOlderMessages(repository.id, selectedThread, messageCursor);
+      if(!valid())return;
       scrollIntent.current = previous;
       setMessages(next.messages); setMessageCursor(next.nextCursor);
-    } catch (error) { setReadError(String(error)); }
-    finally { setReading(false); }
+    } catch (error) { if(valid())setReadError(String(error)); }
+    finally { if(valid())setReading(false); }
   }
 
   async function more(provider: Provider) {
@@ -394,7 +419,7 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
     {listError && <details className="config-error provider-errors"><summary>A configured provider is unavailable · retry or adjust its setup</summary><p role="alert">{listError}</p></details>}
     {menuError && <p className="config-error" role="alert">{menuError}</p>}
     <div className="codex-conversations">
-      <div className="codex-thread-list" aria-label="Conversations" aria-busy={loading}><ConversationSearch repositoryId={repository.id} enabled={enabled} chats={chats} onResults={receiveRepoHits} onNavigate={navigateRepoMatch} />
+      <div ref={threadPane} className="codex-thread-list" aria-label="Conversations" aria-busy={loading}><ConversationSearch repositoryId={repository.id} enabled={enabled} chats={chats} onResults={receiveRepoHits} onNavigate={navigateRepoMatch} />
         <div className="conversation-list-tools"><button type="button" aria-label="New Codex conversation" title="New Codex conversation" onClick={()=>{onEnableCodex();setArchived(false);chooseConversation('new');}}><SquarePen size={16}/></button>{appChat&&canRetryConversation(appChat.id)&&<button type="button" onClick={()=>{void retryConversationAction(appChat.id).catch(error=>setMenuError(String(error)));}}>Retry blocked action</button>}<label className="codex-archive"><input type="checkbox" checked={archived} onChange={event => setArchived(event.target.checked)} />Archived</label></div>
         {entries.map(entry=>entry.script ? <button type="button" key={entry.key} className={`provider-script ${selected===entry.key?'active':''}`} aria-pressed={selected===entry.key} onClick={()=>chooseConversation(entry.key)}><span className="conversation-provider-mark"><SquareTerminal size={14}/></span><b>{entry.script.title||'Script automation'}{entry.script.branch?' · '+entry.script.branch:entry.script.commitSha?' · '+entry.script.commitSha.slice(0,8):''}</b><ActivityTime timestamp={entry.time}/>{entry.script.status==='running'&&<LoaderCircle className="conversation-working" size={13} aria-label="Script running"/>}</button> : entry.chat ? <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.chat.profile.provider} ${appChat?.id === entry.chat.id ? 'active' : ''}`} aria-pressed={appChat?.id === entry.chat.id} title={`${entry.chat.profile.provider} · ${entry.chat.profile.label} · ${new Date(entry.time).toLocaleString()} · ${entry.chat.status}`} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,chat:entry.chat});}}><span className="conversation-provider-mark">{providerIcon[entry.chat.profile.provider as Provider] || <Bot/>}</span><b>{entry.chat.name}</b><ActivityTime timestamp={entry.time}/>{(entry.chat.running || matchingThread(entry.chat)?.working) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button> : entry.thread && <button type="button" key={entry.key} className={`${repoHits.some(hit=>hit.key===entry.key) ? 'search-hit' : ''} provider-${entry.thread.provider} ${selectedKey === entry.key ? 'active' : ''}`} aria-pressed={selectedKey === entry.key} onClick={() => chooseConversation(entry.key)} onContextMenu={event=>{event.preventDefault();setContextMenu({x:event.clientX,y:event.clientY,thread:entry.thread});}}><span className="conversation-provider-mark">{providerIcon[entry.thread.provider]}</span><b title={`${providerName(entry.thread.provider)} · ${new Date(updatedMillis(entry.thread.updatedAt)).toLocaleString()}${entry.thread.gitInfo?.branch ? ` · ${entry.thread.gitInfo.branch}` : ''}${entry.thread.provider === "copilot" || entry.thread.provider === "claude" ? " · Live activity unavailable" : ""}
 ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.thread.preview || "Untitled conversation"}</b><ActivityTime timestamp={entry.time}/>{(entry.thread.working || chats.some(chat=>chat.originKey===entry.key && chat.running)) && <LoaderCircle className="conversation-working" size={13} aria-label="Agent working" />}</button>)}
@@ -402,7 +427,7 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         {!loading && !listError && !entries.length && <p className="panel-copy">No {archived ? "archived conversations" : "agent or script activity"} found for this directory.</p>}
         {providers.filter((provider) => cursors[provider] && enabled.includes(provider)).map((provider) => <button key={provider} type="button" disabled={loading} onClick={() => more(provider)}>Load older {providerName(provider)} conversations</button>)}
       </div>
-      <div className="chat-message-column">{relatedRun&&<HandoffTrail run={relatedRun} runs={activity.runs} onSelect={selectRun}/>} {selectedScript?<ScriptRun key={activityKey(selectedScript)} run={selectedScript} active={active}/>:<><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} onScroll={event=>{const pane=event.currentTarget;followLatest.current=pane.scrollHeight-pane.scrollTop-pane.clientHeight<=4;}} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}>
+      <div className="chat-message-column">{relatedRun&&<HandoffTrail run={relatedRun} runs={activity.runs} onSelect={selectRun}/>} {selectedScript?<ScriptRun key={activityKey(selectedScript)} run={selectedScript} active={active}/>:<><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} onWheel={event=>{setSelectionExplicit(true);userScroll.current.until=performance.now()+800;if(event.deltaY<0){followLatest.current=false;scrollIntent.current=undefined;}}} onPointerDown={()=>{setSelectionExplicit(true);userScroll.current.pointer=true;}} onTouchMove={()=>{setSelectionExplicit(true);userScroll.current.until=performance.now()+800;followLatest.current=false;scrollIntent.current=undefined;}} onKeyDown={event=>{if(!event.defaultPrevented&&['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)){userScroll.current.until=performance.now()+800;if(['ArrowUp','PageUp','Home'].includes(event.key)){followLatest.current=false;scrollIntent.current=undefined;}}}} onScroll={event=>{const pane=event.currentTarget;if(pane.scrollHeight-pane.scrollTop-pane.clientHeight<=4){followLatest.current=true;userScroll.current.until=0;}else if(userScroll.current.pointer||performance.now()<userScroll.current.until){followLatest.current=false;scrollIntent.current=undefined;}}} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}><div ref={contentPane} className="conversation-content">
         {appChat ? <>{readError && <p className="config-error" role="alert">{readError}</p>}{renderedMessages.map((message,index) => <ConversationMessage key={message.id} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={false} finished={!appChat.running || index < renderedMessages.length-1} onSavePrompt={()=>saveMessagePrompt(message)} />)}<p className="chat-status" role="status">{continuedOutside ? 'Continued outside this app · history is available here' : appChat.status}</p></> : selected === 'new' || !selectedThread ? <p className="panel-copy">Choose a conversation, or start a new Codex conversation.</p> : <>
         {messageCursor && <button type="button" disabled={reading} onClick={moreMessages}>Load older messages</button>}
         {reading && <p className="panel-copy" role="status">Loading messages…</p>}
@@ -412,7 +437,7 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         {renderedMessages.map((message, index) => <ConversationMessage key={`${message.id}-${index}`} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={!!selected?.startsWith("cursor:")} finished={!selectedThread.working || index < renderedMessages.length - 1} onSavePrompt={()=>saveMessagePrompt(message)} />)}
         {selectedThread.working && <p className={`chat-status provider-${selectedThread.provider}`} role="status"><LoaderCircle className="conversation-working" size={13} aria-label="Agent working" /> Working</p>}
         </>}
-      </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></>}{active&&!archived&&!selectedScript&&enabled.includes('codex')&&(selected==='new'||appChat?.profile.provider==='codex'||!appChat&&selectedThread?.provider==='codex')&&<AgentComposer accountKey={repositoryAccountKey(repository)} repositoryId={repository.id} chatId={appChat?.id} conversationKey={selectedKey} context={appChat?.messages||messages} contextReady={!reading&&!readError} imported={!appChat&&!!selectedThread} onSelect={selectSentConversation} onSetup={onSetup}/>}</div>
+      </div></div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></>}{active&&!archived&&!selectedScript&&enabled.includes('codex')&&(selected==='new'||appChat?.profile.provider==='codex'||!appChat&&selectedThread?.provider==='codex')&&<AgentComposer accountKey={repositoryAccountKey(repository)} repositoryId={repository.id} chatId={appChat?.id} conversationKey={selectedKey} context={appChat?.messages||messages} contextReady={!reading&&!readError} imported={!appChat&&!!selectedThread} onSelect={selectSentConversation} onSetup={onSetup}/>}</div>
     </div>
     {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canRetry={!!contextMenu.chat&&canRetryConversation(contextMenu.chat.id)} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} getCopyText={copyConversationText} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
     {relatedLog&&<Suspense fallback={null}><RelatedAutomationLogDialog job={relatedLog.job} repositories={[repository]} initialRun={relatedLog.run} onClose={()=>setRelatedLog(undefined)}/></Suspense>}
