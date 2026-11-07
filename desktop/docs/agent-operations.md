@@ -44,6 +44,8 @@ currently visible rather than matching hidden live traces.
 Conversation output follows the bottom only while you are already there. Scroll
 up to read without being pulled back; returning to the bottom resumes following.
 Opening another conversation goes to its latest response, not its latest prompt.
+Sending a prompt explicitly returns to the bottom and resumes following, even
+when you were reading older messages; an active in-conversation search is cleared.
 
 ## Conversation storage
 

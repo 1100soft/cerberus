@@ -143,6 +143,13 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const [repoHits,setRepoHits]=useState<ConversationHit[]>([]);
   const repoSearch=useRef({query:'',index:-1});
   const pendingMatch=useRef<{key:string;id?:string;occurrence:number}>();
+  const selectSentConversation=(key:string)=>{
+    followLatest.current=true;scrollIntent.current={kind:'latest'};
+    pendingMatch.current=undefined;setMessageQuery('');chooseConversation(key);
+    // Sending is an explicit request to show the new turn, even when the same
+    // conversation remains selected and React otherwise reuses its scroll state.
+    requestAnimationFrame(()=>{const pane=messagePane.current;if(!pane)return;pane.scrollTop=pane.scrollHeight;followLatest.current=true;if(scrollIntent.current?.kind==='latest')scrollIntent.current=undefined;});
+  };
   const [matchIndex,setMatchIndex] = useState(0);
   const [reviewEdits,setReviewEdits] = useState<FileEdit[]>();
   const [navigationBusy,setNavigationBusy] = useState(false);
@@ -405,7 +412,7 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         {renderedMessages.map((message, index) => <ConversationMessage key={`${message.id}-${index}`} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={!!selected?.startsWith("cursor:")} finished={!selectedThread.working || index < renderedMessages.length - 1} onSavePrompt={()=>saveMessagePrompt(message)} />)}
         {selectedThread.working && <p className={`chat-status provider-${selectedThread.provider}`} role="status"><LoaderCircle className="conversation-working" size={13} aria-label="Agent working" /> Working</p>}
         </>}
-      </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></>}{active&&!archived&&!selectedScript&&enabled.includes('codex')&&(selected==='new'||appChat?.profile.provider==='codex'||!appChat&&selectedThread?.provider==='codex')&&<AgentComposer accountKey={repositoryAccountKey(repository)} repositoryId={repository.id} chatId={appChat?.id} conversationKey={selectedKey} context={appChat?.messages||messages} contextReady={!reading&&!readError} imported={!appChat&&!!selectedThread} onSelect={chooseConversation} onSetup={onSetup}/>}</div>
+      </div><div className="conversation-navigation" aria-label="Conversation navigation">{([['message.first',ArrowUpToLine],['message.previous',ChevronUp],['message.next',ChevronDown],['message.last',ArrowDownToLine]] as const).map(([command,Icon])=><button key={command} disabled={navigationBusy} aria-label={shortcuts[command].description} title={`${shortcuts[command].description} · ${shortcuts[command].label}`} onClick={()=>void navigate(command)}><Icon size={16}/><kbd>{shortcuts[command].label}</kbd></button>)}</div></div></>}{active&&!archived&&!selectedScript&&enabled.includes('codex')&&(selected==='new'||appChat?.profile.provider==='codex'||!appChat&&selectedThread?.provider==='codex')&&<AgentComposer accountKey={repositoryAccountKey(repository)} repositoryId={repository.id} chatId={appChat?.id} conversationKey={selectedKey} context={appChat?.messages||messages} contextReady={!reading&&!readError} imported={!appChat&&!!selectedThread} onSelect={selectSentConversation} onSetup={onSetup}/>}</div>
     </div>
     {contextMenu && <ConversationContextMenu x={contextMenu.x} y={contextMenu.y} title={contextMenu.chat?.name||contextMenu.thread?.name||contextMenu.thread?.preview||"Untitled conversation"} archived={archived} canRetry={!!contextMenu.chat&&canRetryConversation(contextMenu.chat.id)} canManage={!contextMenu.thread || contextMenu.thread.provider === "codex" || contextMenu.thread.provider === "cursor"} getCopyText={copyConversationText} onAction={action=>{void menuAction(action);}} onClose={()=>setContextMenu(undefined)}/>}
     {relatedLog&&<Suspense fallback={null}><RelatedAutomationLogDialog job={relatedLog.job} repositories={[repository]} initialRun={relatedLog.run} onClose={()=>setRelatedLog(undefined)}/></Suspense>}

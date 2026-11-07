@@ -2359,3 +2359,16 @@ passed; no provider inference was used for validation.
 WebKit assertions passed at 900×620 for 100/140/150% zoom, including the new live
 scroll checks. The pre-existing heap teardown diagnostic followed successful
 assertions; native conversation execution was not changed for this follow-up.
+
+## Sending explicitly reveals the new turn (2026-11-07)
+
+Composer send selection now explicitly requests/follows the bottom even when
+resuming the already-selected conversation. It clears pending message-search
+navigation and aligns again after the new turn renders; incoming updates retain
+the conditional/manual-scroll behavior. This closes the gap where preserving an
+older reading position also preserved it after the user's own Send action.
+Expanded the UI fixture to scroll up, submit a follow-up to the same session and
+require the newest turn to be visible before starting another conversation.
+Validation: production build, conversation-display checks and WebKit assertions
+passed at 900×620 for 100/140/150% zoom, including same-session Send from a
+scrolled-up position. No model inference was used.
