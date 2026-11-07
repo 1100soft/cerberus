@@ -101,7 +101,7 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const [selected, setSelected] = useState<string>();
   const [selectionExplicit, setSelectionExplicit] = useState(false);
   const [selectedRunContext,setSelectedRunContext]=useState<string>();
-  const chooseConversation = (key:string,run?:AutomationLogSummary) => { setSelectionExplicit(true); setSelected(key);setSelectedRunContext(run?activityKey(run):undefined); };
+  const chooseConversation = (key:string,run?:AutomationLogSummary) => { if(key!==selected){scrollIntent.current={kind:'latest'};followLatest.current=true;}setSelectionExplicit(true); setSelected(key);setSelectedRunContext(run?activityKey(run):undefined); };
   const copyConversationText=async()=>{
     const target=contextMenu;if(!target)throw new Error('No conversation selected.');
     const available=target.thread?(await completeMessages(repository.id,target.thread,()=>false)).messages:undefined;
@@ -136,6 +136,8 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const [reading, setReading] = useState(() => !!selectedKey && !cached);
   const [readError, setReadError] = useState("");
   const messagePane = useRef<HTMLDivElement>(null);
+  const followLatest=useRef(true);
+  const loadedThread=useRef<string>();
   const scrollIntent = useRef<{ kind: "latest" } | { kind: "older"; height: number; top: number } | undefined>({ kind: "latest" });
   const [messageQuery,setMessageQuery] = useState('');
   const [repoHits,setRepoHits]=useState<ConversationHit[]>([]);
@@ -156,6 +158,7 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const matchedMessages = textMatches(renderedMessages,messageQuery);
   const jumpToMessage = (id:string, occurrence?:number) => {
     const pane=messagePane.current; if(!pane)return;
+    followLatest.current=false;
     const article=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')].find(node=>node.dataset.messageId===id);
     for(let node:HTMLElement|null|undefined=article;node;node=node.parentElement)if(node instanceof HTMLDetailsElement)node.open=true;
     const node=occurrence===undefined ? article : article?.querySelectorAll<HTMLElement>('mark')[occurrence] || article;
@@ -182,10 +185,11 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   const navigate = async (command:ShortcutCommand) => {
     const pane=messagePane.current;if(!pane || navigationBusy)return;
     if(command==='message.first') {
+      followLatest.current=false;
       if(selectedThread && messageCursor) { setNavigationBusy(true);try { await completeMessages(repository.id,selectedThread,()=>!pane.isConnected); } catch(error){setReadError(String(error));}finally{setNavigationBusy(false);} }
       requestAnimationFrame(()=>{pane.scrollTop=0;});return;
     }
-    if(command==='message.last'){pane.scrollTop=pane.scrollHeight;return;}
+    if(command==='message.last'){followLatest.current=true;pane.scrollTop=pane.scrollHeight;return;}
     const nodes=[...pane.querySelectorAll<HTMLElement>('[data-message-id]')];
     const top=pane.getBoundingClientRect().top;
     const node=command==='message.previous' ? nodes.reverse().find(node=>node.getBoundingClientRect().top<top-3) : nodes.find(node=>node.getBoundingClientRect().top>top+3);
@@ -235,7 +239,7 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
     if (intent) scrollIntent.current = { kind: intent };
     else {
       const pane = messagePane.current;
-      if (pane && pane.scrollHeight - pane.scrollTop - pane.clientHeight < 96) scrollIntent.current = { kind: "latest" };
+      if (pane && followLatest.current) scrollIntent.current = { kind: "latest" };
     }
     setMessages(next.messages); setMessageCursor(next.nextCursor); setReading(false); setReadError("");
     return true;
@@ -277,8 +281,10 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   useEffect(() => {
     if (!selectedThread) return;
     let active = true;
-    if (!showCached(selectedThread.key, "latest")) {
-      scrollIntent.current = { kind: "latest" };
+    const changed=loadedThread.current!==selectedThread.key;
+    loadedThread.current=selectedThread.key;
+    if (!showCached(selectedThread.key, changed?"latest":undefined)) {
+      if(changed||followLatest.current)scrollIntent.current = { kind: "latest" };
       setMessages([]); setMessageCursor(undefined); setReading(true); setReadError("");
     }
     void refreshMessages(repository.id, selectedThread).then(() => { if (active) showCached(selectedThread.key, undefined); }).catch((error) => { if (active) { setReadError(String(error)); setReading(false); } });
@@ -307,25 +313,28 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
   }, [repository.id, archived, enabledKey, selectedKey, cursorWorking]);
 
   useLayoutEffect(() => {
-    const pane = messagePane.current;
-    const intent = scrollIntent.current;
-    if (!pane || !intent) return;
-    if (intent.kind === "older") {
+    const pane = messagePane.current,intent=scrollIntent.current;
+    if (!pane || !active || !pane.clientHeight) return;
+    if (intent?.kind === "older") {
       pane.scrollTop = intent.top + pane.scrollHeight - intent.height;
+      followLatest.current=pane.scrollHeight-pane.scrollTop-pane.clientHeight<=4;
       scrollIntent.current = undefined;
       return;
     }
-    if (reading && !messages.length) return;
-    const align = () => {
-      const prompts = pane.querySelectorAll<HTMLElement>(".codex-message.user");
-      const latest = prompts[prompts.length - 1];
-      pane.scrollTop = latest ? latest.offsetTop : pane.scrollHeight;
-    };
+    if(!intent&&!followLatest.current)return;
+    if (reading && !renderedMessages.length) return;
+    followLatest.current=true;
+    const align = () => {if(followLatest.current)pane.scrollTop=pane.scrollHeight;};
     align();
     const frame = requestAnimationFrame(align);
     scrollIntent.current = undefined;
     return () => cancelAnimationFrame(frame);
-  }, [messages, reading, selectedKey]);
+  }, [messages,appChat?.messages,reading,selectedKey,selected,active,conversationRunning]);
+  useEffect(()=>{
+    const pane=messagePane.current;if(!pane||!active)return;
+    const observer=new ResizeObserver(()=>{if(followLatest.current&&!scrollIntent.current)pane.scrollTop=pane.scrollHeight;});
+    observer.observe(pane);return()=>observer.disconnect();
+  },[active,selected]);
 
   useEffect(() => {
     const cycle = (event: Event) => {
@@ -339,9 +348,9 @@ function ConversationBrowser({ active, repository, revision, enabled, scripts, o
     return () => window.removeEventListener('conversation-cycle', cycle);
   }, [selected, selectedKey, chats.map(chat => chat.id).join(','), visible.map(thread => thread.key).join(',')]);
   useEffect(() => { document.querySelector('.codex-thread-list .active')?.scrollIntoView({block:'nearest'}); }, [selected]);
-  useEffect(() => { if (appChat && messagePane.current) messagePane.current.scrollTop = messagePane.current.scrollHeight; }, [appChat?.messages]);
   async function moreMessages() {
     if (!selectedThread || reading) return;
+    followLatest.current=false;
     const previous = { kind: "older" as const, height: messagePane.current?.scrollHeight ?? 0, top: messagePane.current?.scrollTop ?? 0 };
     setReading(true); setReadError("");
     try {
@@ -386,7 +395,7 @@ ${entry.thread.name || entry.thread.preview}`}>{entry.thread.name || entry.threa
         {!loading && !listError && !entries.length && <p className="panel-copy">No {archived ? "archived conversations" : "agent or script activity"} found for this directory.</p>}
         {providers.filter((provider) => cursors[provider] && enabled.includes(provider)).map((provider) => <button key={provider} type="button" disabled={loading} onClick={() => more(provider)}>Load older {providerName(provider)} conversations</button>)}
       </div>
-      <div className="chat-message-column">{relatedRun&&<HandoffTrail run={relatedRun} runs={activity.runs} onSelect={selectRun}/>} {selectedScript?<ScriptRun key={activityKey(selectedScript)} run={selectedScript} active={active}/>:<><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}>
+      <div className="chat-message-column">{relatedRun&&<HandoffTrail run={relatedRun} runs={activity.runs} onSelect={selectRun}/>} {selectedScript?<ScriptRun key={activityKey(selectedScript)} run={selectedScript} active={active}/>:<><div className="message-search"><input ref={searchInput} type="search" aria-label="Search this conversation" placeholder="Find in chat · Ctrl+Shift+F" value={messageQuery} onChange={event=>{pendingMatch.current=undefined;setMessageQuery(event.target.value);}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();searchJump(event.shiftKey ? -1 : 1);}}}/>{messageQuery && <><span role="status">{navigationBusy ? 'Searching…' : `${matchedMessages.length ? matchIndex+1 : 0}/${matchedMessages.length} matches`}</span><button title="Previous match · Shift+Enter" aria-label="Previous search match" onClick={()=>searchJump(-1)}>↑</button><button title="Next match · Enter" aria-label="Next search match" onClick={()=>searchJump(1)}>↓</button></>}</div><div className="message-display"><div ref={messagePane} onScroll={event=>{const pane=event.currentTarget;followLatest.current=pane.scrollHeight-pane.scrollTop-pane.clientHeight<=4;}} className="codex-messages" aria-label="Conversation messages" aria-busy={reading}>
         {appChat ? <>{readError && <p className="config-error" role="alert">{readError}</p>}{renderedMessages.map((message,index) => <ConversationMessage key={message.id} message={message} query={messageQuery} onReview={setReviewEdits} formatCursor={false} finished={!appChat.running || index < renderedMessages.length-1} onSavePrompt={()=>saveMessagePrompt(message)} />)}<p className="chat-status" role="status">{continuedOutside ? 'Continued outside this app · history is available here' : appChat.status}</p></> : selected === 'new' || !selectedThread ? <p className="panel-copy">Choose a conversation, or start a new Codex conversation.</p> : <>
         {messageCursor && <button type="button" disabled={reading} onClick={moreMessages}>Load older messages</button>}
         {reading && <p className="panel-copy" role="status">Loading messages…</p>}

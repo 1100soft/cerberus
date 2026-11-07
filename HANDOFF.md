@@ -2340,3 +2340,22 @@ WebKit assertions also passed at 900×620 for 100/140/150% zoom, explicitly chec
 that a running checkpoint is visible while command traces/edit controls are not,
 and completed activity becomes available collapsed. The existing heap teardown
 diagnostic appeared after successful assertions; no clean teardown is claimed.
+
+## Conditional conversation follow-to-bottom (2026-11-07)
+
+Replaced the latest-prompt alignment and unconditional live-app-chat scrolling
+with one bottom-follow state. Actual scroll position pauses following when the
+reader moves away from the bottom and resumes it on return. Metadata refresh of
+the same provider thread no longer resets an explicit latest intent. Selecting a
+conversation still opens its latest output. Earlier-message pagination preserves
+its height/top anchor; search and navigation can move away without being undone.
+A pane ResizeObserver handles composer/layout height changes while pinned. Draft
+editing no longer independently forces the message pane to the end.
+
+Expanded the real WebKit mock-stream fixture to require overflow, check following
+for a growing checkpoint, verify manual scroll-up survives more output, and check
+that returning to the bottom resumes following. Build and display unit checks
+passed; no provider inference was used for validation.
+WebKit assertions passed at 900×620 for 100/140/150% zoom, including the new live
+scroll checks. The pre-existing heap teardown diagnostic followed successful
+assertions; native conversation execution was not changed for this follow-up.

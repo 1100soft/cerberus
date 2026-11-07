@@ -41,6 +41,10 @@ without tool commands, raw activity or file-edit details. Completed activity
 remains available in collapsed details. Conversation search follows what is
 currently visible rather than matching hidden live traces.
 
+Conversation output follows the bottom only while you are already there. Scroll
+up to read without being pulled back; returning to the bottom resumes following.
+Opening another conversation goes to its latest response, not its latest prompt.
+
 ## Conversation storage
 
 Desktop conversations are saved in Cerberus's native SQLite database. WebKit's

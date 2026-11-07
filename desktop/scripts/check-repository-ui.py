@@ -408,6 +408,15 @@ script = r"""
   for(let i=0;!document.querySelector('.codex-messages').textContent.includes('Streaming fixture reply')&&i<30;i++)await pause();
   assert(document.querySelector('.codex-messages').textContent.includes('Streaming fixture reply'),'Streaming reply was not rendered');
   assert(!document.querySelector('.codex-messages .agent-steps, .codex-messages .turn-edits-button')&&!document.querySelector('.codex-messages').textContent.includes('Internal command output'),'Running conversation exposed command details');
+  const livePane=document.querySelector('.codex-messages');
+  const progress=lines=>chatCalls[0].output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',phase:'commentary',text:('Checkpoint update\n\n').repeat(lines)}})});
+  livePane.scrollTop=livePane.scrollHeight;livePane.dispatchEvent(new Event('scroll'));progress(80);await pause();await pause();
+  assert(livePane.scrollHeight>livePane.clientHeight+100,'Live scrolling fixture must overflow');
+  assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Live output did not follow the bottom');
+  livePane.scrollTop=0;livePane.dispatchEvent(new Event('scroll'));await pause();const readingTop=livePane.scrollTop;progress(100);await pause();await pause();
+  assert(Math.abs(livePane.scrollTop-readingTop)<3,'New output pulled the reader away from earlier messages');
+  livePane.scrollTop=livePane.scrollHeight;livePane.dispatchEvent(new Event('scroll'));progress(120);await pause();await pause();
+  assert(livePane.scrollHeight-livePane.clientHeight-livePane.scrollTop<4,'Returning to bottom did not resume following');
   document.querySelector('[aria-label="Stop Codex"]').click();await pause();await pause();assert(cancelled===1,'Stop did not cancel the selected conversation');
   document.querySelector('[aria-label="New Codex conversation"]').click();await pause();
   composerInput=inputDraft('New project conversation');await pause();composerInput.form.requestSubmit();
