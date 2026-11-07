@@ -4,7 +4,28 @@
 
 From `desktop/`, run `npm run dev` for the browser demo or `npm run tauri dev` for native Git, SQLite, credentials, and provider commands. `npm run build` checks TypeScript, the dropdown convention, and the production bundle.
 
-The Project view lists local and GitHub repositories. Select a local checkout to read its enabled provider conversations in the Agent pane. Use the VS Code or Cursor button to continue interactive work. The Agents view is for provider setup and accounts; the Agent conversation pane currently has no composer or model selector.
+The Project view lists local and GitHub repositories. Select a local checkout to
+read its enabled provider conversations in the Agent/Script pane. Codex
+conversations can be started and continued directly here: use the new-conversation
+icon, or select an existing Codex thread and type a follow-up. Ctrl+Enter sends;
+the square button stops the current task. Other providers remain history viewers
+with links to their editors. The Agents view is for provider setup and accounts.
+
+Codex uses the project's assigned ChatGPT identity, or a selected connected Codex
+API account when no ChatGPT identity is assigned. Existing app conversations keep
+their account binding; changing the assigned account requires a separate chat.
+Available subscription models and reasoning choices come from that account's
+runtime catalog. Permissions default to Project access and can be set to Read
+only or Full access. New conversations work in the primary project checkout;
+continuing an automation conversation preserves its original isolated context.
+
+Imported Codex/IDE conversations resume the same local session when supported.
+A missing or busy session never silently becomes a different conversation: the
+composer reports the resume problem and offers an explicit separate chat using
+the loaded history when available. Prompt drafts survive navigation between
+conversations/projects while the app stays open. Account or authentication errors
+remain visible without disabling automations. The VS Code link is optional for
+Codex work; its extension does not need to be running.
 
 The Identity page manages ChatGPT, GitHub, Cursor, and Claude identities. Each identity icon carries editable initials beside the account name. ChatGPT rate limits display on its account card when available. GitHub cards try Copilot CLI quota and always offer a web usage link. Cursor and Claude cards link to their web usage pages. A web link uses the browser's current login, which may differ from the card's account.
 

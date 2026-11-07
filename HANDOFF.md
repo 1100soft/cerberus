@@ -2247,3 +2247,38 @@ index entries; none had any. Existing scratch worktree dirt was left unchanged:
 origin/wip. No unrelated cleanup, force reset, commit or push was performed.
 Production build and both incoming WebKit fixtures (repository creation and mail
 organization at 100/140/150% zoom) passed against the combined tree.
+
+## Direct Codex conversations restored (2026-11-07)
+
+Restored AgentComposer in the Agent/Script pane for non-archived Codex histories
+and new Codex chats. A compact new-conversation icon opts Codex into the provider
+filter when needed, without restoring a redundant project-tray shortcut. Other
+provider histories and script logs do not mount the composer. It is suspended
+when Projects is hidden; session drafts remain keyed by project/conversation.
+
+Reused the native run_agent/session-resume/stream/cancel paths, including original
+IDE session IDs, account isolation, persisted conversations and automation
+checkout context. Default permission is Project access, with Read only/Full access
+choices remembered per project. Model/reasoning choices come from the assigned
+ChatGPT account's existing capability catalog; no model names or permissions were
+hard-coded as available. Codex API profiles are selectable when no ChatGPT account
+is assigned. Missing profiles offer setup; unavailable resume requires an explicit
+separate-chat action and explains whether loaded context can be copied. Corrected
+first-profile selection so the displayed option is the one actually used.
+
+Consulted official OpenAI app-server docs for thread/turn/resume/interrupt behavior;
+no API keys were requested or inference started for validation. Updated operations
+and architecture docs. Browser regression now uses an ephemeral WebKit context
+(no retained mocked chats between invocations) and allows 120 seconds for its
+expanded interactive checks. It covers original IDE resume target, streamed reply,
+stop, fresh thread, explicit unavailable-resume fallback, and layout/menus at
+100/140/150% zoom; mock output never reaches the user's running agents.
+
+Validation: production build (dropdown/style checks and TypeScript) passed;
+agent/chat/capability checks and 9 native subscription/session tests passed.
+WebKit UI assertions passed at 900×620 and 1720×700 for 100/140/150% zoom, with
+draft separation/retention checked in the wide run. Full viewport checks passed
+all configured sizes and zoom levels. The wide fixture emitted the existing
+`free(): corrupted unsorted chunks` teardown diagnostic after successful assertions;
+it is not claimed as a clean WebKit process teardown. Existing bundle-size/EGL
+warnings remain. No live inference, pushes or commits were performed for this task.

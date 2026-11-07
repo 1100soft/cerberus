@@ -1,6 +1,6 @@
 # Desktop architecture
 
-The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-tauri/src/`). `App.tsx` owns project selection and the Projects, Identities, Agents, Automation and Email views. The Agent pane is `components/CodexHistory.tsx`; it currently reads history and delegates interactive work to VS Code or Cursor. The old composer and local runner code still exists but is not presented in that pane.
+The desktop app has a React frontend (`src/`) and Tauri commands in Rust (`src-tauri/src/`). `App.tsx` owns project selection and the Projects, Identities, Agents, Automation and Email views. The Agent pane is `components/CodexHistory.tsx`; it reads provider history and mounts `AgentComposer` for Codex conversations. Interactive Codex turns use the existing native runner and session-resume validation, independently of VS Code. Other providers remain history viewers with editor links.
 
 ## Data flow
 

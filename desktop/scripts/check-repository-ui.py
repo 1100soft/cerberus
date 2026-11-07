@@ -217,7 +217,7 @@ script = r"""
   rows()[0].click(); await pause();
   assert(!selected().querySelector('[aria-label="Chat with agent"]'), 'Removed Agent shortcut remains in the tray');
   let input = document.querySelector('.codex-thread-list button.active');
-  assert(!document.querySelector('.chat-composer, [aria-label="Agent permissions"], [aria-label="Model"]'), 'Read-only Agent pane exposed input controls');
+  assert(document.querySelector('[aria-label="New Codex conversation"]'), 'New Codex conversation action missing');
   const providerCheckbox = document.querySelector('.provider-controls input');
   if (!providerCheckbox.checked) { providerCheckbox.click(); await pause(); }
   for (let wait=0; !document.querySelector('.codex-thread-list button.provider-codex') && wait<30; wait++) await pause();
@@ -293,7 +293,7 @@ script = r"""
   key(repoSearch,'Escape');await pause();key(document.activeElement,'f');await pause();
   assert(document.activeElement===document.querySelector('.search input'),'F did not focus project search');
   key(document.activeElement,'Escape');await pause();input.focus();
-  assert(!document.querySelector('.chat-composer'), 'Composer must be absent from read-only history');
+  assert(!document.querySelector('.chat-composer')||document.querySelector('.chat-composer.provider-codex'), 'Non-Codex history exposed a composer');
   const browseOwner = input;
   browseOwner.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown',shiftKey:true,bubbles:true,cancelable:true})); await pause();
   assert(document.activeElement === browseOwner, 'Commit shortcut stole conversation focus');
@@ -341,7 +341,13 @@ script = r"""
   let savedKeys = 0, testProfiles = [], allowResume = true, chatgptSettings={defaultAccount:null,initialized:false,repositories:{}};
   const externalAccounts=[{id:'cursor:fixture',provider:'cursor',label:'Cursor fixture',connected:true,detail:''},{id:'claude:fixture',provider:'claude',label:'Claude fixture',connected:true,detail:''}];
   const externalSettings={defaultAccounts:{},repositories:{}};
-  window.__TAURI_INTERNALS__ = {invoke: async (command,args) => {
+  const chatCalls=[];let finishTurn,cancelled=0,callbackId=0;
+  window.__TAURI_INTERNALS__ = {transformCallback:()=>++callbackId,unregisterCallback:()=>{},invoke: async (command,args) => {
+    if(command==='agent_conversations')return [];
+    if(command==='save_agent_conversation')return;
+    if(command==='run_agent'){chatCalls.push(args);args.output.onmessage({text:JSON.stringify({type:'thread.started',thread_id:args.resume?.sessionId||'ui-session-'+zoom})});args.output.onmessage({text:JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'Streaming fixture reply'}})});return new Promise(resolve=>finishTurn=resolve);}
+    if(command==='cancel_agent'){cancelled++;finishTurn?.();return;}
+    if(command==='chatgpt_capabilities')return {models:[{model:'fixture-model',displayName:'Fixture model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Medium'}]}]};
     if (command === 'provider_setup_status') return [{tool:'codex',path:'/fixture/codex',error:null}];
     if (command === 'agent_profiles') return testProfiles;
     if (command === 'chatgpt_settings') return chatgptSettings;
@@ -384,10 +390,29 @@ script = r"""
   assert(document.querySelector('.codex-messages .agent-steps:not([open])') && document.querySelector('.codex-messages .agent-step pre')?.textContent.includes('Checking the source files'), 'Intermediate activity did not fold');
   const activity=document.querySelector('.codex-messages .agent-steps');activity.querySelector('summary').click();await pause();
   assert(activity.open && activity.querySelectorAll('.agent-step').length===2 && [...activity.querySelectorAll('.agent-step pre')].every(node=>node.getBoundingClientRect().height>0),'One click did not expand every intermediate update');
-  assert(!document.querySelector('.chat-composer'), 'Imported history exposed a composer');
+  assert(document.querySelector('.chat-composer.provider-codex'), 'Codex history cannot be continued');
   allowResume = false; importedThreads[1].click(); await pause(); await pause();
-  assert(!document.querySelector('.chat-composer'), 'Unavailable resume exposed an input');
-  document.querySelector('.codex-thread-list button').click(); await pause();
+  assert(document.querySelector('.chat-composer [aria-label="Start new chat"]'), 'Unavailable resume does not offer an explicit separate chat');
+  if(zoom===1.5){
+  allowResume=true;importedThreads[0].click();await pause();await pause();
+  const inputDraft=text=>{const node=document.querySelector('[aria-label="Message agent"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(node,text);node.dispatchEvent(new Event('input',{bubbles:true}));return node;};
+  let composerInput=inputDraft('Continue the existing main agent');await pause();
+  importedThreads[1].click();await pause();await pause();assert(document.querySelector('[aria-label="Message agent"]').value==='','Draft leaked between Codex conversations');
+  importedThreads[0].click();await pause();await pause();composerInput=document.querySelector('[aria-label="Message agent"]');assert(composerInput.value==='Continue the existing main agent','Conversation draft was lost on navigation');composerInput.form.requestSubmit();
+  for(let i=0;chatCalls.length<1&&i<30;i++)await pause();
+  assert(chatCalls.length===1&&chatCalls[0].resume.source==='codex-history','Imported Codex conversation did not resume its session');
+  for(let i=0;!document.querySelector('.codex-messages').textContent.includes('Streaming fixture reply')&&i<30;i++)await pause();
+  assert(document.querySelector('.codex-messages').textContent.includes('Streaming fixture reply'),'Streaming reply was not rendered');
+  document.querySelector('[aria-label="Stop Codex"]').click();await pause();await pause();assert(cancelled===1,'Stop did not cancel the selected conversation');
+  document.querySelector('[aria-label="New Codex conversation"]').click();await pause();
+  composerInput=inputDraft('New project conversation');await pause();composerInput.form.requestSubmit();
+  for(let i=0;chatCalls.length<2&&i<30;i++)await pause();
+  assert(chatCalls.length===2&&!chatCalls[1].resume,'New conversation unexpectedly resumed existing history');
+  assert(chatCalls[1].mode==='edit','New conversation permissions should default to project access');
+  finishTurn();await pause();await pause();
+  const composerRect=document.querySelector('.chat-composer').getBoundingClientRect(),columnRect=document.querySelector('.chat-message-column').getBoundingClientRect();
+  assert(composerRect.bottom<=columnRect.bottom+2&&composerRect.right<=columnRect.right+2,'Composer exceeds the conversation pane at '+zoom);
+  }
   window.__repositoryProgress='ChatGPT identities '+zoom;
   window.dispatchEvent(new Event('show-identities'));await pause();await pause();
   assert(document.querySelector('.identities-page'), 'Identity page did not open');
@@ -455,7 +480,7 @@ script = r"""
 })().catch(error => window.__repositoryCheck = { passed:false, error:String(error) });
 """
 window = Gtk.OffscreenWindow()
-view = WebKit2.WebView()
+view = WebKit2.WebView.new_with_context(WebKit2.WebContext.new_ephemeral())
 view.set_size_request(int(sys.argv[1]), int(sys.argv[2]))
 window.add(view)
 window.show_all()
@@ -500,7 +525,7 @@ def loaded(webview, event):
 
 view.connect('load-changed', loaded)
 view.load_uri('http://127.0.0.1:3000')
-GLib.timeout_add_seconds(60, lambda: (Gtk.main_quit(), False)[1])
+GLib.timeout_add_seconds(120, lambda: (Gtk.main_quit(), False)[1])
 Gtk.main()
 if exit_code: print("Stopped at: " + str(last_progress), file=sys.stderr)
 sys.exit(exit_code)

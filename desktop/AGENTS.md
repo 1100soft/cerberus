@@ -151,3 +151,9 @@ If port 3000 is occupied, identify its owner before taking action.
 - Stack field labels and text inputs with an explicit gap (use stacked-input-field)
   so focus outlines cannot overlap labels. Verify focused fields, not only idle
   fields, at 100/140/150% zoom. Do not rely on inline label flow for text inputs.
+
+- The project Agent/Script pane supports interactive Codex conversations, including
+  resumable IDE history. Other providers remain view-only. Keep new/resume/stop,
+  account binding and unavailable-session fallback explicit; never silently turn
+  a follow-up into another session or bill a different account. Hide/suspend the
+  composer on inactive pages and preserve drafts across navigation.
