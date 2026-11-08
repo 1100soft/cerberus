@@ -2415,3 +2415,19 @@ pane, multiple projects/filter variants, subscriber notification, failed reads,
 colon-containing IDs and no idle polling. Production build passed including
 TypeScript, dropdown and style checks (existing bundle-size warning). No live
 agent inference or native execution changes were needed.
+
+
+## Checkpoint validation (2026-11-08)
+
+Reviewed all pending source, tests, documentation and the new activity regression
+script; no generated output or credential material is included. The activity
+regression now runs in the shared CI check command. Production build passed
+(TypeScript, dropdown/style checks and Vite; existing chunk-size advisory).
+Frontend agent/chat/display/activity/search/storage/recovery/email-cache checks,
+provider/folder/capability/repository checks and release-tooling checks passed.
+Native suite passed with one test thread: 218 unit and 3 integration tests, 5
+ignored. The parallel run first failed the existing login-persistence fixture;
+that fixture passed isolated and the complete serial suite passed. Email WebKit
+assertions passed; its existing allocator teardown diagnostic recurred afterward.
+No live model inference or push was performed for validation.
+Chat WebKit assertions also passed at 900×620 and 100/140/150% zoom.

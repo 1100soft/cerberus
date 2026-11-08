@@ -55,6 +55,7 @@ jobs:
         node scripts/check-release-version.mjs
         node scripts/check-chatgpt-capabilities.mjs
         node scripts/check-conversation-display.mjs
+        node scripts/check-conversation-activity.mjs
         node scripts/check-mail-providers.mjs
         node scripts/check-feedback-folders.mjs
         node scripts/check-inbox-triage.mjs
