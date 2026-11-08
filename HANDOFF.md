@@ -2584,3 +2584,18 @@ Verified the actual window PID and screenshot show populated Projects, commit
 history and current conversation; frontend returns HTTP 200, /proc maps show the
 system libdbus, and the initial descriptor count was 88. Leave this running
 session/server intact for the user. Capture remains enabled to detect recurrence.
+
+
+## Checkpoint review and validation (2026-11-08)
+
+All pending files since 3030081 were accounted for: shared Codex continuation and
+activity hints, artifact-count filtering, native crash diagnostics/startup, the
+captured D-Bus crash fix, bounded/coalesced reads, their tests and build/docs/CI
+updates. No diagnostic logs, cores, screenshots, credentials, generated output or
+other-project edits are included. Fresh locked serial native suite passed: 223
+unit + 4 integration, 5 ignored. Production build passed (TypeScript, dropdown and
+style checks; existing bundle-size advisory). Chat/activity/display/search/storage,
+model capabilities, commit-event/coalescing, diagnostic-launcher privacy/readiness
+and release-tooling checks passed. Prior saved-prompts WebKit UI assertions passed
+on this implementation; new standalone Rust files pass rustfmt --check. The live
+diagnostic app and its owned Vite server remain untouched. No push is performed.
