@@ -150,7 +150,7 @@ impl Client {
             if let Some(error) = value.get("error") {
                 let message = error["message"].as_str().unwrap_or("Codex request failed");
                 return Err(if message.contains("list_turns is not supported yet") {
-                    "This conversation uses paginated Codex history that the installed app-server cannot read or continue. Start a separate chat to proceed; the original conversation is preserved.".into()
+                    "The installed Codex runtime cannot list this conversation’s turns. Its local history remains available; this does not by itself prevent resuming it.".into()
                 } else { credential_error(message) });
             }
             return value
@@ -214,11 +214,24 @@ impl CodexService {
         result
     }
 
+    pub fn history_home(&self)->Result<PathBuf,String>{
+        // Read the editor runtime's resolved setting, including config.toml overrides.
+        if let Ok(value)=self.request("config/read",json!({"includeLayers":false})){
+            if let Some(path)=value["config"]["sqlite_home"].as_str().filter(|path|!path.is_empty()){
+                return Ok(PathBuf::from(path));
+            }
+        }
+        crate::agent_sessions::shared_history_home()
+    }
+    pub fn resume_path(&self,repository:&Path,id:&str)->Result<PathBuf,String>{
+        let value=self.request("thread/read",json!({"threadId":id,"includeTurns":false}))?;
+        if !value["thread"]["cwd"].as_str().is_some_and(|cwd|same_directory(repository,Path::new(cwd))){return Err("This conversation belongs to another repository".into());}
+        let file=PathBuf::from(value["thread"]["path"].as_str().ok_or("This conversation has no local resumable session file")?);
+        crate::agent_sessions::validate_rollout(&file,id,repository)?;
+        Ok(file)
+    }
     pub fn resume_home(&self, repository: &Path, id: &str) -> Result<PathBuf, String> {
-        let value = self.request("thread/read", json!({"threadId":id,"includeTurns":false}))?;
-        if !value["thread"]["cwd"].as_str().is_some_and(|cwd| same_directory(repository, Path::new(cwd))) { return Err("This conversation belongs to another repository".into()); }
-        let file = PathBuf::from(value["thread"]["path"].as_str().ok_or("This conversation has no local resumable session file")?);
-        crate::agent_sessions::validate_rollout(&file, id, repository)?;
+        let file=self.resume_path(repository,id)?;
         file.ancestors().find(|path| path.file_name().is_some_and(|name| name == "sessions" || name == "archived_sessions"))
             .and_then(|path| path.parent()).map(Path::to_path_buf).ok_or_else(|| "The Codex session storage location is unsupported".into())
     }
@@ -325,20 +338,16 @@ impl CodexService {
             return Err("This conversation belongs to a different repository.".into());
         }
         let local_file = value["thread"]["path"].as_str().map(Path::new);
-        if value["thread"]["historyMode"] == "paginated" {
-            return local_file.ok_or("The stored Codex conversation file is unavailable".into())
-                .and_then(|file| rollout_messages(file, &thread_id, path));
-        }
         match self.request("thread/turns/list", json!({"threadId":thread_id,"cursor":cursor,"limit":30,"sortDirection":"desc","itemsView":"full"})) {
             Ok(page) => Ok(MessagePage {
                 data: page_messages(&page),
                 next_cursor: page["nextCursor"].as_str().map(str::to_owned),
             }),
-            Err(error) if error.contains("paginated Codex history") => local_file.ok_or(error.clone()).and_then(|file| rollout_messages(file, &thread_id, path)),
+            Err(error) if error.contains("cannot list this conversation") => local_file.ok_or(error.clone()).and_then(|file| rollout_messages(file, &thread_id, path)),
             Err(error) if cursor.is_none() && (error.to_lowercase().contains("unsupported") || error.to_lowercase().contains("not support") || error.to_lowercase().contains("unknown") || error.to_lowercase().contains("not found")) => {
                 match self.request("thread/read", json!({"threadId":thread_id,"includeTurns":true})) {
                     Ok(value) => Ok(MessagePage { data: messages(&value["thread"]), next_cursor: None }),
-                    Err(read_error) if read_error.contains("paginated Codex history") => Err(read_error),
+                    Err(read_error) if read_error.contains("cannot list this conversation") => Err(read_error),
                     Err(read_error) => Err(read_error),
                 }
             }
@@ -416,7 +425,7 @@ fn conversation_updated_at(file: &Path) -> Option<i64> {
         window = window.saturating_mul(2);
     }
 }
-fn rollout_working(file: &Path) -> bool {
+pub(crate) fn rollout_working(file: &Path) -> bool {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut input) = std::fs::File::open(file) else { return false };
     let Ok(meta) = input.metadata() else { return false };

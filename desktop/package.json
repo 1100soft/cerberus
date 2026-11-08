@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "check:dropdowns": "node scripts/check-dropdowns.mjs",
     "check:styles": "node scripts/check-styles.mjs",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "diagnose:native": "python3 scripts/diagnose-native-crash.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

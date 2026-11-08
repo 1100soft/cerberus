@@ -23,6 +23,7 @@ mod cursor;
 mod cursor_editor;
 mod cursor_launch;
 mod cursor_notifications;
+mod agent_activity_watcher;
 mod copilot;
 mod draft_runs;
 mod copilot_history;
@@ -441,17 +442,17 @@ async fn watch_automation_repositories(repository_ids:Vec<String>,state:State<'_
 #[tauri::command]
 async fn repository_changed_lines(repository_id:String,state:State<'_,AppState>)->Result<u64,String>{
     let path=state.db.repository_path(&repository_id)?;
-    tauri::async_runtime::spawn_blocking(move||repository_changes::changed_lines(&path)).await.map_err(|error|error.to_string())?
+    repository_changes::read_summary(path).await.map(|summary|summary.changed_lines)
 }
 #[tauri::command]
 async fn repository_changed_lines_batch(repository_ids:Vec<String>,state:State<'_,AppState>)->Result<std::collections::HashMap<String,u64>,String>{
     let paths=repository_ids.into_iter().filter_map(|id|state.db.repository_path(&id).ok().map(|path|(id,path))).collect::<Vec<_>>();
-    tauri::async_runtime::spawn_blocking(move||paths.into_iter().filter_map(|(id,path)|repository_changes::changed_lines(&path).ok().map(|count|(id,count))).collect()).await.map_err(|error|error.to_string())
+    {let mut counts=std::collections::HashMap::new();for (id,path) in paths {if let Ok(summary)=repository_changes::read_summary(path).await {counts.insert(id,summary.changed_lines);}}Ok(counts)}
 }
 #[tauri::command]
 async fn repository_change_summary(repository_id:String,state:State<'_,AppState>)->Result<repository_changes::ChangeSummary,String>{
     let path=state.db.repository_path(&repository_id)?;
-    tauri::async_runtime::spawn_blocking(move||repository_changes::summary(&path)).await.map_err(|error|error.to_string())?
+    repository_changes::read_summary(path).await
 }
 #[tauri::command]
 async fn repository_commit_state(repository_id:String,state:State<'_,AppState>)->Result<repository_changes::CommitState,String>{
@@ -1242,6 +1243,7 @@ pub fn run() {
             let data = app.path().app_data_dir()?;
             let db = Database::open(data.join("gitcerberus.db")).map_err(std::io::Error::other)?;
             cursor_notifications::start(app.handle().clone());
+            agent_activity_watcher::start(app.handle().clone(),data.clone());
             app.manage(AppState {
                 conversations:Arc::new(conversation_store::ConversationStore::open(&data).map_err(std::io::Error::other)?),
                 db: Arc::new(db),

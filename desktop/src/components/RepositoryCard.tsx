@@ -78,7 +78,7 @@ export function RepositoryCard({ repository: repo, identities, catalog, chatgpt,
       {local && <><span className="branch" title={`Working branch: ${repo.branch ?? "Detached HEAD"}`}><GitBranch /><span className="branch-name">{repo.branch ?? "Detached HEAD"}</span></span>
       <span className={`ahead-count ${repo.ahead ? "ahead" : "muted"}`} title={`${repo.ahead} commits ahead`}><ArrowUp />{repo.ahead}</span>
       <span className={repo.behind ? "behind" : "muted"} title={`${repo.behind} commits behind`}><ArrowDown />{repo.behind}</span>
-      <span className={`change-indicator ${(changedLines??changes)>0 ? "changes" : "clean"}`} title={changedLines===undefined?"Counting changed lines…":`${changedLines} changed lines since the last commit (added plus deleted; untracked included)`} aria-label={changedLines===undefined?'Counting changed lines':`${changedLines} changed lines since the last commit`}>{changedLines===undefined?'…':changedLines}</span></>}
+      <span className={`change-indicator ${(changedLines??changes)>0 ? "changes" : "clean"}`} title={changedLines===undefined?"Counting changed lines…":`${changedLines} added/deleted lines in the working tree; binary files count as one. Untracked .agent-artifacts/ files are excluded; staged and tracked files are included.`} aria-label={changedLines===undefined?'Counting changed lines':`${changedLines} changed lines since the last commit`}>{changedLines===undefined?'…':changedLines}</span></>}
       {repo.identityMismatch && <AlertTriangle className="row-warning" aria-label="Identity mismatch" />}
     </div>
     {selected && <div className={`row-panel ${trayActive?'keyboard-active':''}`} aria-label={`Controls for ${repo.displayName}`}>

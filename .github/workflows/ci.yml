@@ -51,11 +51,13 @@ jobs:
     with:
       app-directory: desktop
       check-command: |
+        if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install --yes libdbus-1-dev; fi
         node scripts/check-repositories.mjs
         node scripts/check-release-version.mjs
         node scripts/check-chatgpt-capabilities.mjs
         node scripts/check-conversation-display.mjs
         node scripts/check-conversation-activity.mjs
+        node scripts/check-coalesced-refresh.mjs
         node scripts/check-mail-providers.mjs
         node scripts/check-feedback-folders.mjs
         node scripts/check-inbox-triage.mjs

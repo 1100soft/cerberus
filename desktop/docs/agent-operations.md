@@ -195,9 +195,80 @@ conversation indexes. Keep Cursor checked in the Agent/Script pane to include
 these conversations; updating Cerberus's native reader requires an app restart.
 
 
-Project activity indicators are reconciled in the background every five seconds
-for cached projects with agents marked working, even when another project or page
-is open. Returning to the app also checks activity. Idle projects are not polled;
-failed reads retain the last known status until a successful check. Completion
-updates all cached provider-filter views so an older view cannot keep the project
-spinner active.
+Project activity indicators receive filesystem hints for Codex turn starts and
+completion, even when another project or page is open. Hints update known threads
+immediately and revalidate the affected project/provider after a short debounce.
+They can discover a new conversation without first opening its project's pane.
+Only enabled providers are queried. Cursor database changes also request activity
+refreshes. Five-second reconciliation of known-working projects remains a fallback;
+returning to the app checks known provider views. Failed reads do not imply that
+work finished. Notifications contain session identifiers/status and project paths,
+not prompts, tool output or credentials.
+
+### Alternating between VS Code and Cerberus
+
+Both clients use the native Codex conversation ID and shared history index.
+Cerberus keeps authentication in its assigned account's private home while pointing
+its Codex runtime at the editor runtime's resolved SQLite history directory
+(`sqlite_home`, including `CODEX_SQLITE_HOME`/configuration overrides). New Cerberus
+subscription conversations are discoverable through that index too. Resume uses
+the indexed rollout path and `excludeTurns`, rather than treating paginated history
+as unsupported or copying the active history into a separate conversation.
+
+Migrated paginated sessions may depend on older immutable rollout files. Cerberus
+validates that lineage and makes those bases available in its account home without
+copying authentication or the active rollout. Original session and repository checks
+remain enforced; a different session ID returned by the runtime stops execution.
+Known-active turns in the other client must finish before continuing here. Work
+alternately in the same session, rather than running overlapping turns from both
+clients. Account selection remains explicit and independent of shared history.
+
+
+Project change counts and change-count automation triggers exclude untracked
+`.agent-artifacts/` scratch files. Ordinary untracked source files still count.
+Explicitly staged or tracked artifact files count because they are part of the
+commit's changes. This filter does not delete files or modify Git ignore rules.
+
+
+### Diagnosing Linux native crashes
+
+An AppIndicator deprecation warning is not itself fatal. A later `stack smashing`
+message means a native stack-canary check failed; do not disable that check or
+assume the tray caused it. Renderer-process reports must also be distinguished
+from an abort of the main `gitcerberus` process.
+
+For a reproducible native backtrace, quit other Cerberus instances, then run
+`npm run diagnose:native` from `desktop/`. This builds the debug app, verifies its
+frontend is reachable and runs it under GDB, stopping at a stack
+canary failure or fatal native signal. Use the app normally until the failure.
+Logs stay local under `$XDG_STATE_HOME/gitcerberus/native-crashes/` (normally
+`~/.local/state/gitcerberus/native-crashes/`), with owner-only permissions. The
+capture includes thread backtraces and loaded library paths, excludes frame
+arguments/locals, and does not dump process memory or environment variables.
+Native stderr is also recorded, so review a log before sharing it. Nothing is
+uploaded. GDB is required. The launcher reuses a running Cerberus Vite server or
+starts its own on port 3000 and stops only that process group on exit/failure. It
+refuses an occupied port serving another application, and never silently changes
+ports. Using an already-built binary still requires a working frontend. No system
+crash settings or in-app signal handlers are changed.
+
+`python3 scripts/check-native-crash-diagnostics.py` validates capture with small
+sacrificial programs, without opening Cerberus or running any automations.
+
+
+### Native D-Bus crash under file-descriptor pressure
+
+Linux builds link the distribution D-Bus library (`libdbus-1-dev` is a build
+prerequisite). The previously enabled `libdbus-sys` vendored build omitted
+`HAVE_POLL`, falling back to `select()` with fixed-size descriptor sets. A D-Bus
+socket numbered above 1023 could overwrite the native stack and terminate the
+whole app. A private-bus regression holds 2048 descriptors open and verifies
+normal communication; it reproduced the stack-smashing failure before the fix.
+
+Change-count automation checks coalesce file-event bursts per project, including
+across multiple matching automations. Events arriving during a read schedule one
+follow-up. Native change-count/summary requests share concurrent reads for the
+same checkout and acquire one of four permits before allocating blocking workers
+or Git subprocess pipes. Pending async callers therefore cannot exhaust native
+threads/descriptors during continuous log, build or agent edits. Scheduler cleanup
+cancels queued checks and ignores late responses; failed reads remain retryable.

@@ -49,6 +49,7 @@ pub fn run(
     if let Some(instructions)=developer_instructions{params["developerInstructions"]=json!(instructions);}
     let method = if let Some(id) = resume {
         params["threadId"] = json!(id);
+        params["excludeTurns"] = json!(true);
         if let Some(path)=rollout {params["path"]=json!(path);}
         "thread/resume"
     } else {
@@ -235,7 +236,7 @@ for line in sys.stdin:
  elif m=='account/read':
   verified=True;result={'account':{'type':'chatgpt','email':'fixture@example.test'}}
  elif m=='thread/resume':
-  assert verified and p['threadId']=='session-test'
+  assert verified and p['threadId']=='session-test' and p['excludeTurns'] is True
   assert p['developerInstructions']=='Project tools stay separate from user text'
   assert p['approvalPolicy']=='never' and p['sandbox']==('danger-full-access' if mode=='full' else 'workspace-write') and p['model']=='recorded-model'
   result={'thread':{'id':'session-test'}}

@@ -2431,3 +2431,171 @@ that fixture passed isolated and the complete serial suite passed. Email WebKit
 assertions passed; its existing allocator teardown diagnostic recurred afterward.
 No live model inference or push was performed for validation.
 Chat WebKit assertions also passed at 900×620 and 100/140/150% zoom.
+
+
+## VS Code continuation, activity hints and Floating Desktop count (2026-11-08)
+
+Removed the unconditional paginated-history rejection. Resume now obtains the
+indexed native rollout path (instead of choosing an older filename-matching
+legacy base), passes excludeTurns and uses the editor runtime's resolved shared
+sqlite_home with private assigned-account authentication. The active history is
+not copied. Native paginated lineage lookup separately requires immutable legacy
+bases beneath CODEX_HOME; validate/copy only those bases to the account home.
+Repository/session identity checks remain, and a known active external turn is
+refused. Prefer native paginated turn listing, retaining the local reader fallback
+for runtimes whose listing method is unsupported. Old capability wording no longer
+claims that a failed turn-list request proves resume is unsupported.
+
+Validated actual native resume with both installed runtimes (PATH 0.154.0 and VS
+Code's 0.164.0-alpha.11.1) on temporary copies of an existing paginated session,
+its immutable base and SQLite backups. Each resumed the original ID/path in an
+isolated account home with shared history index, then resumed the same ID back
+through an editor-style home. No turn/start, inference, original-session changes,
+credential extraction or account mutation occurred during those probes.
+
+New native filesystem watcher emits Codex start/completion hints from session
+files; Cursor state database changes also invalidate activity. Work is off the UI
+thread, bounded/coalesced, and excludes credential/config changes and Codex DB WAL
+writes (avoiding read-induced refresh loops). The app-level listener updates known
+threads immediately and revalidates only the affected project/provider, including
+previously unopened project histories. Enabled-provider checks and five-second
+known-working reconciliation remain. Listeners/timers unsubscribe on disposal.
+
+Floating Desktop tracked status is clean, but six untracked .agent-artifacts files
+remain. About 19,000 counted changes come mostly from host-troubleshooting.log
+(about 18,800 lines), plus FloatdeskRtpCheck.kt, troubleshooting.md and three images
+(binary files count as one). The log was still growing during inspection. Nothing
+was removed or ignored. Project count help now explicitly breaks down staged,
+modified and untracked files and explains that committed tracked work can coexist
+with untracked agent artifacts.
+
+Validation: production build, chat/display/recovery/search/activity checks and
+serial native suite passed (220 unit + 3 integration, 5 ignored). New checks cover
+immutable lineage isolation, paginated acceptance/repository scope, excludeTurns,
+activity hint filtering, previously idle/unopened project starts, immediate cached
+start/completion, provider opt-in, scoped refreshes and listener cleanup. No push
+or commit was requested for this follow-up.
+WebKit chat/project UI assertions passed at 900×620 and 100/140/150% zoom.
+
+
+## Exclude untracked agent scratch output from change counts (2026-11-08)
+
+Per user clarification, changed_lines omits untracked .agent-artifacts/ files.
+This applies to project-card counts and change-threshold automation triggers.
+Ordinary untracked source still counts; intentionally staged/tracked artifacts
+remain included. No files were removed and no project Git ignore rules changed.
+The card tooltip describes the filter without showing unfiltered file totals.
+Regression covers artifacts alone yielding zero, ordinary source still counting
+and explicitly staging an artifact restoring its contribution.
+
+
+## Native crash investigation in progress (2026-11-08)
+
+User reports the entire app disappears during agent/email work with stack-smashing
+stderr. The startup AppIndicator warning is reproducible in a clean isolated app
+that stays running, so it alone is not evidence of the failure. Journal confirms
+the reported PID started at 09:13 and remained running through later suspend/wake.
+No main-process core/report was available. The existing 07:50 WebKitWebProcess
+report was from the WebKit test runner, not that main PID: SIGABRT at normal exit,
+free(): corrupted unsorted chunks in g_static_resource_fini / libgio during dynamic
+library teardown. This separate issue must not be presented as the main crash's
+proven cause. Installed GTK3 3.24.52, GLib 2.88.0, WebKitGTK 2.52.6 are at the current
+configured Ubuntu repository versions; no system libraries were changed.
+
+Added diagnose:native and a Linux GDB launcher that reuses Vite and captures native
+fatal signals/__stack_chk_fail, thread stacks and loaded libraries without frame
+arguments/locals, environment or full-memory dumps. Local reports are private and
+never uploaded. Sacrificial fixtures test stack-canary/abort capture, normal exit
+and private argument/log handling. This is diagnostic instrumentation, not a claim
+that the native crash has been fixed.
+
+Started the normal app under the diagnostic launcher, PID 3600762 (GDB 3600706,
+launcher 3600705), log ~/.local/state/gitcerberus/native-crashes/native-20261108T140920Z-3600705.log.
+The user can use that window to reproduce. Do not launch a second app, stop their
+Vite server, trigger inference deliberately, change global core settings or disable
+stack protection. Check the native log for CERBERUS_NATIVE_CRASH_CAPTURED before
+claiming a root cause. The separate temporary WebKit core was extracted sparsely
+for analysis and then deleted; original /var/crash report is untouched.
+
+
+## Correct diagnostic app startup (2026-11-08)
+
+The prior diagnostic launch was NOT a working UI: --binary inadvertently bypassed
+frontend readiness checks and no Vite server remained. The user correctly reported
+localhost connection refused. A live native PID was insufficient verification.
+Fixed the launcher to establish frontend readiness even with an existing binary:
+reuse a verified Cerberus server, refuse an occupied unrelated port, or start a
+session-owned Vite group and wait for HTTP readiness before launching the app.
+Only that owned group is stopped on exit/startup failure. Sacrificial tests now
+explicitly opt out of the frontend; tests cover readiness, port collisions, reuse,
+owned cleanup and --binary preserving readiness requirements.
+
+Stopped only the broken app/GDB/launcher PIDs from the prior turn. The current
+launcher is PID 3610584, GDB 3610743, app 3610805; its owned Vite is node PID 3610697.
+Current private crash log:
+~/.local/state/gitcerberus/native-crashes/native-20261108T141623Z-3610584.log.
+HTTP /, /@vite/client and /src/main.tsx returned 200; inspected a screenshot of the
+actual native window and confirmed populated Projects, commit history and the
+current conversation pane rather than a connection-error page. The original native
+abort is still unresolved; capture remains active. Do not start another app/server
+or claim the crash itself was fixed. Preserve this running diagnostic session for
+the user; the server is its runtime dependency, not an abandoned test server.
+
+
+## Captured native crash: D-Bus select overflow and file-event storm (2026-11-08)
+
+The diagnostic session captured the real abort in native-20261108T141623Z-3610584.log:
+thread 60 hit __stack_chk_fail, caller _dbus_poll at vendored dbus-sysdeps-unix.c:3210;
+its return stack was overwritten. libdbus-sys 0.2.7's vendored build did not define
+HAVE_POLL, selecting C select()/FD_SET emulation with fixed FD_SETSIZE buffers.
+Opening a D-Bus socket after 2048 descriptors reproduced the exact stack-smashing
+abort in a private dbus-run-session subprocess, without Tauri/GTK/account access.
+
+Removed the dbus/vendored feature; Linux uses system libdbus (poll-enabled), also
+avoiding mixing exported static D-Bus symbols with GTK's dynamic library. The same
+private-bus regression now passes. Cargo.lock drops libdbus-sys's C build dependency.
+Linux CI check/package preparation explicitly installs libdbus-1-dev; shared pinned
+workflows support the existing check-command/prepare-command inputs. No changes
+were made to the shared CI repository or the user's system libraries.
+
+The dump had 535 tokio-rt-worker threads; 490 were blocked in repository_changes
+Git reads for repository_change_summary. Every filesystem event launched a new
+summary for every matching composite automation. Added per-project fixed-window
+coalesced checks with a single follow-up during busy reads. Native summary/count
+IPC additionally shares same-path concurrent snapshots and limits active blocking
+reads/Git process pipelines to four across all projects. Queued callers wait
+asynchronously before spawning workers; permits remain with the real blocking
+read if the frontend disappears. Error results are not permanently cached.
+
+Validation: before/after high-FD D-Bus regression (before exit134/stack-smashing,
+after passes), serial native suite (223 unit + 4 integration, 5 ignored), frontend
+build, 20,000-event coalescing/cleanup/retry regression and complete saved-prompts
+WebKit UI assertions passed. Native tests verify 100 overlapping same-project
+requests share one read and 50 projects never exceed four active readers. One
+initial test synchronization race was fixed by waiting for all callers to acquire
+the shared snapshot before releasing the fake read. Earlier pending edits remain.
+The previous diagnostic app and its owned Vite have exited; reopen only the newly
+rebuilt binary, never the old statically linked executable.
+
+Reopened the fixed debug binary under the diagnostic launcher after validation.
+Current app PID 3694493, GDB 3694463, launcher 3694404, owned Vite node 3694418.
+Current log ~/.local/state/gitcerberus/native-crashes/native-20261108T144046Z-3694404.log.
+Verified the actual window PID and screenshot show populated Projects, commit
+history and current conversation; frontend returns HTTP 200, /proc maps show the
+system libdbus, and the initial descriptor count was 88. Leave this running
+session/server intact for the user. Capture remains enabled to detect recurrence.
+
+
+## Checkpoint review and validation (2026-11-08)
+
+All pending files since 3030081 were accounted for: shared Codex continuation and
+activity hints, artifact-count filtering, native crash diagnostics/startup, the
+captured D-Bus crash fix, bounded/coalesced reads, their tests and build/docs/CI
+updates. No diagnostic logs, cores, screenshots, credentials, generated output or
+other-project edits are included. Fresh locked serial native suite passed: 223
+unit + 4 integration, 5 ignored. Production build passed (TypeScript, dropdown and
+style checks; existing bundle-size advisory). Chat/activity/display/search/storage,
+model capabilities, commit-event/coalescing, diagnostic-launcher privacy/readiness
+and release-tooling checks passed. Prior saved-prompts WebKit UI assertions passed
+on this implementation; new standalone Rust files pass rustfmt --check. The live
+diagnostic app and its owned Vite server remain untouched. No push is performed.

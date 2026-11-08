@@ -15,6 +15,8 @@ jobs:
       app-directory: desktop
       artifact-prefix: gitcerberus
       version-check-command: node scripts/check-release-version.mjs
+      prepare-command: |
+        if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install --yes libdbus-1-dev; fi
       build-matrix: >-
         {"include":[
           {"os":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","bundles":"deb,appimage"},

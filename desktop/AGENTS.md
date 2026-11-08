@@ -165,3 +165,11 @@ If port 3000 is occupied, identify its owner before taking action.
   scroll events. Observe content resizing as well as pane resizing; completion
   must preserve bottom-follow or an older reading position. Scope selected-card
   scrolling to its owning list rather than scrolling ancestor page containers.
+
+- VS Code/Cerberus Codex continuation must share the native conversation ID and
+  history index while keeping account credentials separate. Do not reject a
+  history format without checking runtime support or fork/copy active history
+  silently. Preserve paginated lineage, exact rollout paths and repository checks.
+- Agent start/completion hints must work independently of mounted conversation
+  panes. Coalesce events, query only enabled providers, and avoid filesystem/DB
+  feedback loops from history reads. Keep periodic reconciliation as a fallback.

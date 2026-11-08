@@ -116,19 +116,24 @@ function parseListKey(key: string) {
   return { repositoryId: key.slice(0, archivedAt), archived: key.slice(archivedAt + 1, providersAt) === "1", enabled };
 }
 /** Reconcile active cached projects independently of the visible conversation pane. */
-export async function refreshWorkingRepositories() {
+export async function refreshWorkingRepositories(provider?:Provider,repositoryId?:string,workingOnly=!provider) {
   const targets = new Map<string, {repositoryId:string; archived:boolean; providers:Set<Provider>}>();
   for (const [key, list] of lists) {
     const parsed = parseListKey(key);
-    if (!parsed) continue;
+    if (!parsed || repositoryId&&parsed.repositoryId!==repositoryId) continue;
     const targetKey = `${parsed.repositoryId}:${parsed.archived}`;
+    if(provider&&!workingOnly){
+      if(parsed.enabled.includes(provider))targets.set(targetKey,{...parsed,providers:new Set([provider])});
+      continue;
+    }
     for (const thread of list.threads) {
-      if (!thread.working) continue;
+      if (!thread.working||provider&&thread.provider!==provider) continue;
       let target = targets.get(targetKey);
       if (!target) { target = {...parsed, providers:new Set()}; targets.set(targetKey,target); }
       target.providers.add(thread.provider);
     }
   }
+  if(provider&&!workingOnly&&repositoryId&&!targets.size)targets.set(repositoryId,{repositoryId,archived:false,providers:new Set([provider])});
   await Promise.all([...targets.values()].map(async target => {
     const enabled = [...target.providers];
     const refreshed = await refreshThreadList(target.repositoryId,target.archived,enabled);
@@ -149,20 +154,40 @@ export async function refreshWorkingRepositories() {
   }));
 }
 
-export function watchWorkingRepositories() {
+export function watchWorkingRepositories(projects:()=>{id:string;localPath:string}[]=()=>[]) {
   let stopped = false, pending = false;
+  const queued = new Map<string,{provider:Provider;repositoryId?:string}>();
+  const configured=()=>{let settings:Partial<Record<Provider,boolean>>={};try{settings=JSON.parse(localStorage.getItem('gitcerberus.providers')||'{}');}catch{}return (['codex','cursor','copilot','claude'] as Provider[]).filter(provider=>settings[provider]===true);};
   const refresh = async () => {
     if (stopped || pending) return;
     pending = true;
-    try { await refreshWorkingRepositories(); } catch (error) { console.warn('Agent activity refresh:',error); }
-    finally { pending = false; }
+    const providers=[...queued.values()];queued.clear();
+    try { if(providers.length)await Promise.all(providers.map(({provider,repositoryId})=>refreshWorkingRepositories(provider,repositoryId)));else await Promise.all(configured().map(provider=>refreshWorkingRepositories(provider,undefined,true))); }
+    catch (error) { console.warn('Agent activity refresh:',error); }
+    finally { pending = false; if(!stopped&&queued.size)schedule(); }
   };
+  let eventTimer:ReturnType<typeof setTimeout>|undefined;
+  const schedule=()=>{if(eventTimer!==undefined)return;eventTimer=setTimeout(()=>{eventTimer=undefined;void refresh();},300);};
+  let unlisten:(()=>void)|undefined;
+  if('__TAURI_INTERNALS__' in window)void import('@tauri-apps/api/event').then(({listen})=>listen<{provider:Provider;repositoryPath?:string;threadId?:string;working?:boolean}>('agent-history-changed',event=>{
+    let configured:Partial<Record<Provider,boolean>>={};try{configured=JSON.parse(localStorage.getItem('gitcerberus.providers')||'{}');}catch{}
+    const hint=event.payload;if(configured[hint.provider]!==true)return;
+    if(hint.threadId&&hint.working!==undefined){
+      let changed=false;
+      for(const [key,list] of lists){const threads=list.threads.map(thread=>{if(thread.key!==`${hint.provider}:${hint.threadId}`||thread.working===hint.working)return thread;changed=true;return {...thread,working:hint.working};});lists.set(key,{...list,threads});}
+      if(changed)notify();
+    }
+    const normalize=(path:string)=>path.replaceAll('\\','/').replace(/\/$/,'');
+    const project=hint.repositoryPath?projects().find(project=>normalize(project.localPath)===normalize(hint.repositoryPath!)):undefined;
+    if(hint.repositoryPath&&!project)return;
+    queued.set(`${hint.provider}:${project?.id||''}`,{provider:hint.provider,repositoryId:project?.id});schedule();
+  })).then(stop=>{if(stopped)stop();else unlisten=stop;}).catch(error=>console.warn('Agent activity events:',error));
   const timer = setInterval(() => void refresh(),5000);
-  const wake = () => { if (!document.hidden) void refresh(); };
+  const wake = () => { if (!document.hidden) {for(const provider of configured())queued.set(provider,{provider});void refresh();} };
   window.addEventListener('focus',wake);
   document.addEventListener('visibilitychange',wake);
   void refresh();
-  return () => { stopped = true; clearInterval(timer); window.removeEventListener('focus',wake); document.removeEventListener('visibilitychange',wake); };
+  return () => { stopped = true; clearInterval(timer);clearTimeout(eventTimer);unlisten?.(); window.removeEventListener('focus',wake); document.removeEventListener('visibilitychange',wake); };
 }
 
 export function watchCursorCompletion() {

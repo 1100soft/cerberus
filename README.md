@@ -20,7 +20,7 @@ Icon sources and regeneration are documented in [Application icon](desktop/docs/
 
 ## Development
 
-Prerequisites: Node.js 20+, Rust stable, Git, and the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/). On Debian/Ubuntu, WebKitGTK and appindicator development packages are needed for the desktop build.
+Prerequisites: Node.js 20+, Rust stable, Git, and the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/). On Debian/Ubuntu, WebKitGTK, appindicator and `libdbus-1-dev` development packages are needed for the desktop build. Cerberus uses the system D-Bus library; do not enable the `dbus/vendored` feature, whose build falls back to unsafe fixed-size descriptor sets under high load.
 
 ```bash
 cd desktop
