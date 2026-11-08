@@ -2540,3 +2540,47 @@ current conversation pane rather than a connection-error page. The original nati
 abort is still unresolved; capture remains active. Do not start another app/server
 or claim the crash itself was fixed. Preserve this running diagnostic session for
 the user; the server is its runtime dependency, not an abandoned test server.
+
+
+## Captured native crash: D-Bus select overflow and file-event storm (2026-11-08)
+
+The diagnostic session captured the real abort in native-20261108T141623Z-3610584.log:
+thread 60 hit __stack_chk_fail, caller _dbus_poll at vendored dbus-sysdeps-unix.c:3210;
+its return stack was overwritten. libdbus-sys 0.2.7's vendored build did not define
+HAVE_POLL, selecting C select()/FD_SET emulation with fixed FD_SETSIZE buffers.
+Opening a D-Bus socket after 2048 descriptors reproduced the exact stack-smashing
+abort in a private dbus-run-session subprocess, without Tauri/GTK/account access.
+
+Removed the dbus/vendored feature; Linux uses system libdbus (poll-enabled), also
+avoiding mixing exported static D-Bus symbols with GTK's dynamic library. The same
+private-bus regression now passes. Cargo.lock drops libdbus-sys's C build dependency.
+Linux CI check/package preparation explicitly installs libdbus-1-dev; shared pinned
+workflows support the existing check-command/prepare-command inputs. No changes
+were made to the shared CI repository or the user's system libraries.
+
+The dump had 535 tokio-rt-worker threads; 490 were blocked in repository_changes
+Git reads for repository_change_summary. Every filesystem event launched a new
+summary for every matching composite automation. Added per-project fixed-window
+coalesced checks with a single follow-up during busy reads. Native summary/count
+IPC additionally shares same-path concurrent snapshots and limits active blocking
+reads/Git process pipelines to four across all projects. Queued callers wait
+asynchronously before spawning workers; permits remain with the real blocking
+read if the frontend disappears. Error results are not permanently cached.
+
+Validation: before/after high-FD D-Bus regression (before exit134/stack-smashing,
+after passes), serial native suite (223 unit + 4 integration, 5 ignored), frontend
+build, 20,000-event coalescing/cleanup/retry regression and complete saved-prompts
+WebKit UI assertions passed. Native tests verify 100 overlapping same-project
+requests share one read and 50 projects never exceed four active readers. One
+initial test synchronization race was fixed by waiting for all callers to acquire
+the shared snapshot before releasing the fake read. Earlier pending edits remain.
+The previous diagnostic app and its owned Vite have exited; reopen only the newly
+rebuilt binary, never the old statically linked executable.
+
+Reopened the fixed debug binary under the diagnostic launcher after validation.
+Current app PID 3694493, GDB 3694463, launcher 3694404, owned Vite node 3694418.
+Current log ~/.local/state/gitcerberus/native-crashes/native-20261108T144046Z-3694404.log.
+Verified the actual window PID and screenshot show populated Projects, commit
+history and current conversation; frontend returns HTTP 200, /proc maps show the
+system libdbus, and the initial descriptor count was 88. Leave this running
+session/server intact for the user. Capture remains enabled to detect recurrence.

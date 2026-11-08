@@ -1,3 +1,4 @@
+import {coalescedRefresh} from './coalescedRefresh';
 import {resolveFeedbackFolder,mailboxScopeKey} from './feedbackFolders';
 import {feedback,mailKey,mailReference,type MailRef} from './feedback';
 import { resolveScriptRuntime } from './scriptRuntime';
@@ -612,16 +613,18 @@ export async function pollAutomationCi(now?:number){
   }catch(error){console.warn('Could not list projects for CI monitoring:',error);}
   finally{checkingCi=false;}
 }
+function changeCountJobs(repositoryId:string){return jobs.filter(item=>item.enabled&&composite(item)&&automationConditions(item).includes('changeCount')&&scopedTo(item,repositoryId));}
+const changeCountReads=coalescedRefresh(repositoryId=>api.repositoryChangeSummary(repositoryId),(repositoryId,summary,at)=>{
+  for(const job of changeCountJobs(repositoryId)){
+    const key=`${job.id}:${repositoryId}`,previous=lastTriggeredCounts.get(key);
+    const baseline=previous?.head===summary.head&&summary.changedLines>=previous.count?previous.count:0;
+    if(summary.changedLines>=baseline+Math.max(1,job.changeThreshold||10))recordConditionEvent(repositoryId,'changeCount',at);
+  }
+},error=>console.warn('Could not count changes for automation:',error));
 export function recordAutomationFileChange(repositoryId:string,occurredAt=Date.now()){
   recordConditionEvent(repositoryId,'fileChange',occurredAt);
   recordConditionEvent(repositoryId,'idleTime',occurredAt);
-  for(const job of jobs.filter(item=>item.enabled&&composite(item)&&automationConditions(item).includes('changeCount')&&scopedTo(item,repositoryId))){
-    void api.repositoryChangeSummary(repositoryId).then(summary=>{
-      const key=`${job.id}:${repositoryId}`,previous=lastTriggeredCounts.get(key);
-      const baseline=previous?.head===summary.head&&summary.changedLines>=previous.count?previous.count:0;
-      if(summary.changedLines>=baseline+Math.max(1,job.changeThreshold||10))recordConditionEvent(repositoryId,'changeCount',occurredAt);
-    }).catch(error=>console.warn('Could not count changes for automation:',error));
-  }
+  if(changeCountJobs(repositoryId).length)changeCountReads.enqueue(repositoryId,occurredAt);
   for(const job of jobs){
     if(!job.enabled||composite(job)||(job.trigger!=='fileChange'&&job.trigger!=='changeCount'))continue;
     const targets=job.repositoryIds?.length?job.repositoryIds:[job.repositoryId];
@@ -801,5 +804,5 @@ export function startSavedPromptScheduler(){
   const ciTimer=window.setInterval(()=>void pollAutomationCi(),60_000);
   const githubEventTimer=window.setInterval(()=>void pollGithubEvents(),60_000);
   const handoffTimer=window.setInterval(()=>{if(jobs.some(job=>job.enabled&&automationConditions(job).includes('handoff')))void tick();},2000);
-  return()=>{stopped=true;window.clearInterval(feedbackTimer);window.removeEventListener('feedback-config-changed',feedbackChanged);unlisten?.();unlistenGit?.();unsubscribe();window.clearInterval(timer);window.clearInterval(ciTimer);window.clearInterval(githubEventTimer);window.clearInterval(handoffTimer);for(const timeout of debounceTimers.values())window.clearTimeout(timeout);debounceTimers.clear();};
+  return()=>{stopped=true;window.clearInterval(feedbackTimer);window.removeEventListener('feedback-config-changed',feedbackChanged);unlisten?.();unlistenGit?.();unsubscribe();window.clearInterval(timer);window.clearInterval(ciTimer);window.clearInterval(githubEventTimer);window.clearInterval(handoffTimer);for(const timeout of debounceTimers.values())window.clearTimeout(timeout);debounceTimers.clear();changeCountReads.clear();};
 }

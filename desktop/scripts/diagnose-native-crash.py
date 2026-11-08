@@ -118,6 +118,7 @@ python
 if native_stop in ("stack-canary", "SIGABRT", "SIGSEGV", "SIGBUS", "SIGILL", "SIGFPE"):
     gdb.write("Native stop: " + native_stop + "\\n")
     gdb.write("CERBERUS_NATIVE_CRASH_CAPTURED\\n")
+    gdb.execute("bt 64")
     gdb.execute("thread apply all bt 32")
     gdb.execute("info sharedlibrary")
 elif gdb.selected_thread() is not None:

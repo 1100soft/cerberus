@@ -34,15 +34,14 @@ thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 github-copilot-sdk = "1.0.14"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync"] }
 notify = "8.2.0"
 imap = "2.4.1"
 native-tls = "0.2"
 mailparse = "0.16"
 lettre = "0.11"
 
-# Build DBus from source on Linux. This keeps `npm run tauri dev` working on
-# development machines that have the normal Tauri GUI libraries but not the
-# distro-specific libdbus development package.
+# Use the distribution's poll()-enabled D-Bus build. libdbus-sys vendoring falls
+# back to select() and corrupts its stack for descriptors >= FD_SETSIZE.
 [target.'cfg(target_os = "linux")'.dependencies]
-dbus = { version = "0.9", features = ["vendored"] }
+dbus = "0.9"

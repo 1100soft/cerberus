@@ -254,3 +254,21 @@ crash settings or in-app signal handlers are changed.
 
 `python3 scripts/check-native-crash-diagnostics.py` validates capture with small
 sacrificial programs, without opening Cerberus or running any automations.
+
+
+### Native D-Bus crash under file-descriptor pressure
+
+Linux builds link the distribution D-Bus library (`libdbus-1-dev` is a build
+prerequisite). The previously enabled `libdbus-sys` vendored build omitted
+`HAVE_POLL`, falling back to `select()` with fixed-size descriptor sets. A D-Bus
+socket numbered above 1023 could overwrite the native stack and terminate the
+whole app. A private-bus regression holds 2048 descriptors open and verifies
+normal communication; it reproduced the stack-smashing failure before the fix.
+
+Change-count automation checks coalesce file-event bursts per project, including
+across multiple matching automations. Events arriving during a read schedule one
+follow-up. Native change-count/summary requests share concurrent reads for the
+same checkout and acquire one of four permits before allocating blocking workers
+or Git subprocess pipes. Pending async callers therefore cannot exhaust native
+threads/descriptors during continuous log, build or agent edits. Scheduler cleanup
+cancels queued checks and ignores late responses; failed reads remain retryable.

@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read, path::Path, process::Command};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct ChangeSummary { pub head:String, pub branch:String, pub reflog:String, pub changed_lines:u64 }
 #[derive(Serialize)]
@@ -89,6 +89,37 @@ pub fn summary(repository:&Path)->Result<ChangeSummary,String>{
     Ok(ChangeSummary{head:state.head,branch:state.branch,reflog:state.reflog,changed_lines:changed_lines(repository)?})
 }
 
+
+type SummaryResult=Result<ChangeSummary,String>;
+struct SummaryReads {
+    pending:std::sync::Mutex<std::collections::HashMap<std::path::PathBuf,std::sync::Arc<tokio::sync::OnceCell<SummaryResult>>>>,
+    capacity:std::sync::Arc<tokio::sync::Semaphore>,
+}
+impl Default for SummaryReads {
+    fn default()->Self{Self{pending:Default::default(),capacity:std::sync::Arc::new(tokio::sync::Semaphore::new(4))}}
+}
+impl SummaryReads {
+    async fn read<F>(&self,path:std::path::PathBuf,reader:F)->SummaryResult
+    where F:FnOnce(&Path)->SummaryResult+Send+'static {
+        let cell={let mut pending=self.pending.lock().map_err(|_|"Change reads are unavailable")?;pending.entry(path.clone()).or_default().clone()};
+        let key=path.clone();
+        let result=cell.get_or_init(||async{
+            // Acquire before spawn_blocking: queued callers do not allocate worker
+            // threads, pipes or Git processes. The real read owns the permit even
+            // if the requesting frontend disappears while it is still running.
+            let permit=self.capacity.clone().acquire_owned().await.map_err(|_|"Change reads are unavailable")?;
+            tauri::async_runtime::spawn_blocking(move||{let _permit=permit;reader(&path)}).await.map_err(|error|error.to_string())?
+        }).await.clone();
+        if let Ok(mut pending)=self.pending.lock(){if pending.get(&key).is_some_and(|current|std::sync::Arc::ptr_eq(current,&cell)){pending.remove(&key);}}
+        result
+    }
+}
+/// Share concurrent reads and bound Git process creation across all projects.
+pub async fn read_summary(path:std::path::PathBuf)->SummaryResult {
+    static READS:std::sync::OnceLock<SummaryReads>=std::sync::OnceLock::new();
+    READS.get_or_init(Default::default).read(path,summary).await
+}
+
 #[cfg(test)]mod tests{
     use super::*;
     #[test]fn commits_in_other_worktrees_are_repository_wide(){
@@ -112,6 +143,50 @@ pub fn summary(repository:&Path)->Result<ChangeSummary,String>{
         run(&linked,&["checkout","--detach","-q"]);run(&linked,&["commit","--allow-empty","-qm","detached commit"]);
         let detached=commit_state(&primary).unwrap();
         assert!(detached.refs.iter().any(|item|item.key.starts_with("worktree:")&&item.branch.is_empty()&&item.reflog.starts_with("commit")));
+    }
+    fn fixture_summary()->ChangeSummary{ChangeSummary{head:"head".into(),branch:"main".into(),reflog:"commit: fixture".into(),changed_lines:3}}
+    #[test]fn concurrent_summary_requests_share_one_read(){
+        use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+        tauri::async_runtime::block_on(async{
+            let reads=Arc::new(SummaryReads::default());let calls=Arc::new(AtomicUsize::new(0));let entered=Arc::new(AtomicUsize::new(0));let ready=Arc::new(tokio::sync::Notify::new());
+            let gate=Arc::new((std::sync::Mutex::new(false),std::sync::Condvar::new()));let mut tasks=Vec::new();
+            for _ in 0..100{
+                let (reads,calls,entered,ready,gate)=(reads.clone(),calls.clone(),entered.clone(),ready.clone(),gate.clone());
+                tasks.push(tauri::async_runtime::spawn(async move{
+                    if entered.fetch_add(1,Ordering::SeqCst)==99{ready.notify_one();}
+                    reads.read("same-repository".into(),move |_|{calls.fetch_add(1,Ordering::SeqCst);let (lock,condition)=&*gate;let mut open=lock.lock().unwrap();while !*open{open=condition.wait(open).unwrap();}Ok(fixture_summary())}).await
+                }));
+            }
+            ready.notified().await;
+            tokio::time::timeout(std::time::Duration::from_secs(5),async{
+                while reads.pending.lock().unwrap().get(Path::new("same-repository")).map(std::sync::Arc::strong_count).unwrap_or(0)<101{tokio::task::yield_now().await;}
+            }).await.unwrap();
+            {let (lock,condition)=&*gate;*lock.lock().unwrap()=true;condition.notify_all();}
+            for task in tasks{assert_eq!(task.await.unwrap().unwrap().changed_lines,3);}
+            assert_eq!(calls.load(Ordering::SeqCst),1);assert!(reads.pending.lock().unwrap().is_empty());
+            assert!(reads.read("retry".into(),|_|Err("temporary".into())).await.is_err());
+            assert!(reads.read("retry".into(),|_|Ok(fixture_summary())).await.is_ok());
+        });
+    }
+    #[test]fn summaries_limit_blocking_workers_across_repositories(){
+        use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+        tauri::async_runtime::block_on(async{
+            let reads=Arc::new(SummaryReads::default());let active=Arc::new(AtomicUsize::new(0));let peak=Arc::new(AtomicUsize::new(0));
+            let gate=Arc::new((std::sync::Mutex::new(false),std::sync::Condvar::new()));let (started,receive)=std::sync::mpsc::channel();let mut tasks=Vec::new();
+            for index in 0..50{
+                let (reads,active,peak,gate,started)=(reads.clone(),active.clone(),peak.clone(),gate.clone(),started.clone());
+                tasks.push(tauri::async_runtime::spawn(async move{reads.read(format!("repo-{index}").into(),move |_|{
+                    let count=active.fetch_add(1,Ordering::SeqCst)+1;peak.fetch_max(count,Ordering::SeqCst);started.send(()).unwrap();
+                    let (lock,condition)=&*gate;let mut open=lock.lock().unwrap();while !*open{open=condition.wait(open).unwrap();}
+                    active.fetch_sub(1,Ordering::SeqCst);Ok(fixture_summary())
+                }).await}));
+            }
+            for _ in 0..4{receive.recv_timeout(std::time::Duration::from_secs(5)).unwrap();}
+            assert_eq!(active.load(Ordering::SeqCst),4);
+            {let (lock,condition)=&*gate;*lock.lock().unwrap()=true;condition.notify_all();}
+            for task in tasks{task.await.unwrap().unwrap();}
+            assert!(peak.load(Ordering::SeqCst)<=4);assert!(reads.pending.lock().unwrap().is_empty());
+        });
     }
     #[test]fn ignores_untracked_agent_artifacts_but_counts_explicitly_staged_files(){
         let root=tempfile::tempdir().unwrap();
