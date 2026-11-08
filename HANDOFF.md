@@ -2487,3 +2487,56 @@ remain included. No files were removed and no project Git ignore rules changed.
 The card tooltip describes the filter without showing unfiltered file totals.
 Regression covers artifacts alone yielding zero, ordinary source still counting
 and explicitly staging an artifact restoring its contribution.
+
+
+## Native crash investigation in progress (2026-11-08)
+
+User reports the entire app disappears during agent/email work with stack-smashing
+stderr. The startup AppIndicator warning is reproducible in a clean isolated app
+that stays running, so it alone is not evidence of the failure. Journal confirms
+the reported PID started at 09:13 and remained running through later suspend/wake.
+No main-process core/report was available. The existing 07:50 WebKitWebProcess
+report was from the WebKit test runner, not that main PID: SIGABRT at normal exit,
+free(): corrupted unsorted chunks in g_static_resource_fini / libgio during dynamic
+library teardown. This separate issue must not be presented as the main crash's
+proven cause. Installed GTK3 3.24.52, GLib 2.88.0, WebKitGTK 2.52.6 are at the current
+configured Ubuntu repository versions; no system libraries were changed.
+
+Added diagnose:native and a Linux GDB launcher that reuses Vite and captures native
+fatal signals/__stack_chk_fail, thread stacks and loaded libraries without frame
+arguments/locals, environment or full-memory dumps. Local reports are private and
+never uploaded. Sacrificial fixtures test stack-canary/abort capture, normal exit
+and private argument/log handling. This is diagnostic instrumentation, not a claim
+that the native crash has been fixed.
+
+Started the normal app under the diagnostic launcher, PID 3600762 (GDB 3600706,
+launcher 3600705), log ~/.local/state/gitcerberus/native-crashes/native-20261108T140920Z-3600705.log.
+The user can use that window to reproduce. Do not launch a second app, stop their
+Vite server, trigger inference deliberately, change global core settings or disable
+stack protection. Check the native log for CERBERUS_NATIVE_CRASH_CAPTURED before
+claiming a root cause. The separate temporary WebKit core was extracted sparsely
+for analysis and then deleted; original /var/crash report is untouched.
+
+
+## Correct diagnostic app startup (2026-11-08)
+
+The prior diagnostic launch was NOT a working UI: --binary inadvertently bypassed
+frontend readiness checks and no Vite server remained. The user correctly reported
+localhost connection refused. A live native PID was insufficient verification.
+Fixed the launcher to establish frontend readiness even with an existing binary:
+reuse a verified Cerberus server, refuse an occupied unrelated port, or start a
+session-owned Vite group and wait for HTTP readiness before launching the app.
+Only that owned group is stopped on exit/startup failure. Sacrificial tests now
+explicitly opt out of the frontend; tests cover readiness, port collisions, reuse,
+owned cleanup and --binary preserving readiness requirements.
+
+Stopped only the broken app/GDB/launcher PIDs from the prior turn. The current
+launcher is PID 3610584, GDB 3610743, app 3610805; its owned Vite is node PID 3610697.
+Current private crash log:
+~/.local/state/gitcerberus/native-crashes/native-20261108T141623Z-3610584.log.
+HTTP /, /@vite/client and /src/main.tsx returned 200; inspected a screenshot of the
+actual native window and confirmed populated Projects, commit history and the
+current conversation pane rather than a connection-error page. The original native
+abort is still unresolved; capture remains active. Do not start another app/server
+or claim the crash itself was fixed. Preserve this running diagnostic session for
+the user; the server is its runtime dependency, not an abandoned test server.

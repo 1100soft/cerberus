@@ -228,3 +228,29 @@ Project change counts and change-count automation triggers exclude untracked
 `.agent-artifacts/` scratch files. Ordinary untracked source files still count.
 Explicitly staged or tracked artifact files count because they are part of the
 commit's changes. This filter does not delete files or modify Git ignore rules.
+
+
+### Diagnosing Linux native crashes
+
+An AppIndicator deprecation warning is not itself fatal. A later `stack smashing`
+message means a native stack-canary check failed; do not disable that check or
+assume the tray caused it. Renderer-process reports must also be distinguished
+from an abort of the main `gitcerberus` process.
+
+For a reproducible native backtrace, quit other Cerberus instances, then run
+`npm run diagnose:native` from `desktop/`. This builds the debug app, verifies its
+frontend is reachable and runs it under GDB, stopping at a stack
+canary failure or fatal native signal. Use the app normally until the failure.
+Logs stay local under `$XDG_STATE_HOME/gitcerberus/native-crashes/` (normally
+`~/.local/state/gitcerberus/native-crashes/`), with owner-only permissions. The
+capture includes thread backtraces and loaded library paths, excludes frame
+arguments/locals, and does not dump process memory or environment variables.
+Native stderr is also recorded, so review a log before sharing it. Nothing is
+uploaded. GDB is required. The launcher reuses a running Cerberus Vite server or
+starts its own on port 3000 and stops only that process group on exit/failure. It
+refuses an occupied port serving another application, and never silently changes
+ports. Using an already-built binary still requires a working frontend. No system
+crash settings or in-app signal handlers are changed.
+
+`python3 scripts/check-native-crash-diagnostics.py` validates capture with small
+sacrificial programs, without opening Cerberus or running any automations.
