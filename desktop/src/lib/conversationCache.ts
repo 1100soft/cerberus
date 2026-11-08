@@ -109,12 +109,62 @@ export function settleCursorActivity() {
   if (changed) notify();
 }
 function parseListKey(key: string) {
-  const archivedAt = key.indexOf(":");
-  const providersAt = key.indexOf(":", archivedAt + 1);
+  const providersAt = key.lastIndexOf(":");
+  const archivedAt = key.lastIndexOf(":", providersAt - 1);
   if (archivedAt < 1 || providersAt < 0) return undefined;
   const enabled = key.slice(providersAt + 1).split(",").filter((provider): provider is Provider => provider === "codex" || provider === "cursor" || provider === "copilot" || provider === "claude");
   return { repositoryId: key.slice(0, archivedAt), archived: key.slice(archivedAt + 1, providersAt) === "1", enabled };
 }
+/** Reconcile active cached projects independently of the visible conversation pane. */
+export async function refreshWorkingRepositories() {
+  const targets = new Map<string, {repositoryId:string; archived:boolean; providers:Set<Provider>}>();
+  for (const [key, list] of lists) {
+    const parsed = parseListKey(key);
+    if (!parsed) continue;
+    const targetKey = `${parsed.repositoryId}:${parsed.archived}`;
+    for (const thread of list.threads) {
+      if (!thread.working) continue;
+      let target = targets.get(targetKey);
+      if (!target) { target = {...parsed, providers:new Set()}; targets.set(targetKey,target); }
+      target.providers.add(thread.provider);
+    }
+  }
+  await Promise.all([...targets.values()].map(async target => {
+    const enabled = [...target.providers];
+    const refreshed = await refreshThreadList(target.repositoryId,target.archived,enabled);
+    let changed = false;
+    for (const [key,list] of lists) {
+      const parsed = parseListKey(key);
+      if (!parsed || parsed.repositoryId !== target.repositoryId || parsed.archived !== target.archived) continue;
+      const threads = list.threads.map(thread => {
+        const current = refreshed.threads.find(item => item.key === thread.key);
+        // Failed/partial reads are not evidence that a conversation finished.
+        if (!current || current.working === thread.working) return thread;
+        changed = true;
+        return {...thread,working:current.working};
+      });
+      lists.set(key,{...list,threads});
+    }
+    if (changed) notify();
+  }));
+}
+
+export function watchWorkingRepositories() {
+  let stopped = false, pending = false;
+  const refresh = async () => {
+    if (stopped || pending) return;
+    pending = true;
+    try { await refreshWorkingRepositories(); } catch (error) { console.warn('Agent activity refresh:',error); }
+    finally { pending = false; }
+  };
+  const timer = setInterval(() => void refresh(),5000);
+  const wake = () => { if (!document.hidden) void refresh(); };
+  window.addEventListener('focus',wake);
+  document.addEventListener('visibilitychange',wake);
+  void refresh();
+  return () => { stopped = true; clearInterval(timer); window.removeEventListener('focus',wake); document.removeEventListener('visibilitychange',wake); };
+}
+
 export function watchCursorCompletion() {
   if (!("__TAURI_INTERNALS__" in window)) return () => {};
   let stop = false;

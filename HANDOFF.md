@@ -2397,3 +2397,21 @@ wrong-conversation controls and delayed older-page completion after switching.
 The final two WebKit runs passed without the previously observed heap teardown
 diagnostic; EGL acceleration warnings remain in the headless environment. No
 model inference was used. Existing unrelated pending work remains preserved.
+
+
+## Background project activity completion (2026-11-08)
+
+The project spinner relied on conversation-cache working flags, but regular list
+revalidation was owned by the visible conversation pane. Switching projects could
+therefore leave completion undetected. Added an app-lifetime background monitor
+that checks only known-working projects/providers every five seconds and on app
+focus/visibility return, coalesces filter variants and propagates confirmed status
+across their cached views. Reads are asynchronous; overlapping monitor passes are
+skipped. Idle projects generate no requests and failed/partial reads do not infer
+completion. Fixed list-key parsing for project IDs containing colons as well.
+
+Validation: new check-conversation-activity.mjs covers completion without a visible
+pane, multiple projects/filter variants, subscriber notification, failed reads,
+colon-containing IDs and no idle polling. Production build passed including
+TypeScript, dropdown and style checks (existing bundle-size warning). No live
+agent inference or native execution changes were needed.

@@ -193,3 +193,11 @@ Cursor editor history is read locally without changing Cursor's databases.
 The reader supports both older inline message indexes and the newer chunked
 conversation indexes. Keep Cursor checked in the Agent/Script pane to include
 these conversations; updating Cerberus's native reader requires an app restart.
+
+
+Project activity indicators are reconciled in the background every five seconds
+for cached projects with agents marked working, even when another project or page
+is open. Returning to the app also checks activity. Idle projects are not polled;
+failed reads retain the last known status until a successful check. Completion
+updates all cached provider-filter views so an older view cannot keep the project
+spinner active.
