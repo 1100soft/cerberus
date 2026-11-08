@@ -1,26 +1,28 @@
 import { retryConversationAction } from '../lib/savedPrompts';
-import { ArrowUp, SquarePen } from 'lucide-react';
+import { ArrowUp, SquarePen, Square } from 'lucide-react';
 import { assignedChatgpt,useChatgptAccounts } from '../lib/chatgptAccounts';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Select } from './Select';
 import { api, inTauri } from '../lib/api';
-import { useChatgptCapabilities, useSelectedEffort, useSelectedModel } from '../lib/chatgptCapabilities';
+import { chooseModel, chooseEffort, useChatgptCapabilities, useSelectedEffort, useSelectedModel } from '../lib/chatgptCapabilities';
 import { sendAgentMessage, stopAgentChat, useAgentChats, type AgentProfile, historyResumeTarget, type ResumeStatus } from '../lib/agentChats';
 import { matchesShortcut } from '../lib/shortcuts';
 import type { CodexMessage } from '../types';
 import type { Provider } from './ProviderSetup';
 const drafts = new Map<string,string>();
-export function AgentComposer({accountKey,repositoryId, chatId, conversationKey, context, contextReady, imported, permission, onSelect, onSetup}: {accountKey:string;repositoryId:string; chatId?:string; conversationKey?:string; context:CodexMessage[]; contextReady:boolean; imported:boolean; permission:string; onSelect:(id:string)=>void; onSetup:(provider:Provider)=>void}) {
+export function AgentComposer({accountKey,repositoryId, chatId, conversationKey, context, contextReady, imported, onSelect, onSetup}: {accountKey:string;repositoryId:string; chatId?:string; conversationKey?:string; context:CodexMessage[]; contextReady:boolean; imported:boolean; onSelect:(id:string)=>void; onSetup:(provider:Provider)=>void}) {
   const accountState=useChatgptAccounts();
   const assignedId=assignedChatgpt(accountState.settings,accountKey);
   const assignedProfile=accountState.profiles.find(profile=>profile.id===assignedId);
   const chats = useAgentChats();
   const chat = chats.find(chat => chat.id === chatId);
   const active = chats.find(item => item.repositoryId === repositoryId && item.running && item.automationContext?.runId===chat?.automationContext?.runId);
+  const busyElsewhere=!!active&&active.id!==chat?.id;
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [profileId, setProfileId] = useState('');
-  const mode=permission;
+  const [mode,setMode]=useState(()=>{try{const value=localStorage.getItem(`gitcerberus.chatPermission:${repositoryId}`);return value&&['analyze','edit','full'].includes(value)?value:'edit';}catch{return 'edit';}});
+  const changeMode=(value:string)=>{setMode(value);try{localStorage.setItem(`gitcerberus.chatPermission:${repositoryId}`,value);}catch{}};
   const draftKey = `${repositoryId}:${chatId || conversationKey || 'new'}`;
   const [draft, setDraft] = useState(drafts.get(draftKey) || '');
   const [error, setError] = useState('');
@@ -31,22 +33,23 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
   useEffect(() => { setDraft(drafts.get(draftKey) || ''); setError(''); }, [draftKey]);
   useEffect(() => {
     let live = true;
-    const refresh = () => { if (inTauri()) invoke<AgentProfile[]>('agent_profiles').then(items => { if (live) { setProfiles(items); setProfileId(current => items.some(item => item.id === current) ? current : items.length === 1 ? items[0].id : ''); } }).catch(e => { if (live) setError(String(e)); }); };
+    const refresh = () => { if (inTauri()) invoke<AgentProfile[]>('agent_profiles').then(items => { if (live) { setProfiles(items); setProfileId(current => items.some(item => item.id === current) ? current : items.find(item=>item.provider==='codex'&&!item.disconnected)?.id||''); } }).catch(e => { if (live) setError(String(e)); }); };
     refresh(); window.addEventListener('agent-configuration-changed', refresh);
     return () => { live = false; window.removeEventListener('agent-configuration-changed', refresh); };
   }, []);
   const provider = chat?.profile.provider || historyResumeTarget(conversationKey)?.provider;
-  const matchingProfiles = profiles.filter(item => !item.disconnected && (!item.subscription || item.id===assignedId) && (!assignedId || item.provider!=='codex' || item.id===assignedId) && (!provider || item.provider === provider));
+  const matchingProfiles = profiles.filter(item => item.provider==='codex' && !item.disconnected && (!item.subscription || item.id===assignedId) && (!assignedId || item.provider!=='codex' || item.id===assignedId) && (!provider || item.provider === provider));
   const originalProfile = !assignedId || (provider && provider!=='codex') ? matchingProfiles.find(profile => profile.id === chat?.profile.id) : undefined;
-  const chosenProfile=matchingProfiles.find(profile=>profile.id===profileId);
-  const profile = !provider && chosenProfile?.provider==='cursor' ? chosenProfile : (!provider || provider==='codex') && assignedId ? assignedProfile?.disconnected ? undefined : assignedProfile : originalProfile || matchingProfiles.find(profile=>profile.id===profileId) || (matchingProfiles.length===1 ? matchingProfiles[0] : undefined);
+  const chosenProfile=matchingProfiles.find(profile=>profile.id===profileId)||matchingProfiles[0];
+  const profile = assignedId ? assignedProfile?.disconnected ? undefined : assignedProfile : originalProfile || chosenProfile;
   const capabilities = useChatgptCapabilities(profile?.subscription && !profile.disconnected ? profile.id : undefined);
-  const defaultModel=capabilities.data?.models.find(item=>item.isDefault)?.model;
+  const defaultModel=(capabilities.data?.models.find(item=>item.isDefault)||capabilities.data?.models[0])?.model;
   const preferredModel = useSelectedModel(profile?.subscription ? profile.id : undefined, defaultModel);
   const model=capabilities.data?.models.some(item=>item.model===preferredModel)?preferredModel:defaultModel;
   const effort=useSelectedEffort(profile?.subscription ? profile.id : undefined,capabilities.data?.models.find(item=>item.model===model));
   const showAccountPicker = matchingProfiles.length > 0 && !(assignedId && (!provider || provider === 'codex'));
   const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(()=>{if(!chatId&&!imported)input.current?.focus({preventScroll:true});},[draftKey]);
   useLayoutEffect(() => { if (input.current) { input.current.style.height = 'auto'; const available=input.current.closest('.chat-message-column')?.clientHeight ?? 180; input.current.style.height = `${Math.min(input.current.scrollHeight,Math.max(50,available-65))}px`; } }, [draft, draftKey]);
   const target = chat?.session || historyResumeTarget(conversationKey);
   const targetKey = target ? `${target.source}:${target.provider}:${target.sessionId}` : '';
@@ -72,19 +75,25 @@ export function AgentComposer({accountKey,repositoryId, chatId, conversationKey,
   }
   const activeProvider = profile?.provider || provider;
   return <form className={`chat-composer${activeProvider ? ` provider-${activeProvider}` : ''}`} onSubmit={event => { event.preventDefault(); void send(); }}>
-    <textarea ref={input} aria-label="Message agent" placeholder={needsNew ? 'Start a new chat with this conversation as context…' : continuing ? 'Continue this conversation…' : 'Ask the agent about this project…'} value={draft} onChange={event => { setDraft(event.target.value); drafts.set(draftKey,event.target.value); requestAnimationFrame(() => { const pane = input.current?.closest('.chat-message-column')?.querySelector('.codex-messages'); if (pane) pane.scrollTop = pane.scrollHeight; }); }} onKeyDown={event => { if (matchesShortcut(event.nativeEvent, 'chat.send')) { event.preventDefault(); void send(); } }} />
+    <textarea ref={input} aria-label="Message agent" placeholder={needsNew ? 'Start a new chat with this conversation as context…' : continuing ? 'Continue this conversation…' : 'Ask the agent about this project…'} value={draft} onChange={event => { setDraft(event.target.value); drafts.set(draftKey,event.target.value); }} onKeyDown={event => { if (matchesShortcut(event.nativeEvent, 'chat.send')) { event.preventDefault(); void send(); } }} />
     {assignedId && (!assignedProfile || assignedProfile.disconnected) && (!provider || provider==='codex') && <small role="alert">The assigned ChatGPT identity is disconnected. Reconnect it in Identities or assign another account.</small>}
     {continuing && profile && <small role="status">{!resumeStatus ? 'Checking whether this conversation can continue…' : resumeStatus.available ? 'Continuing the existing conversation.' : `New chat required: ${resumeStatus.reason}`}</small>}
     {needsNew && <small>{contextReady ? '“Start new chat” copies the loaded messages. The original conversation is kept.' : 'Stored messages could not be loaded. “Start new chat” sends only the new prompt and keeps the original conversation.'}</small>}
     {chat?.retryable && !needsNew && !active && profile && <button type="button" disabled={sending} onClick={async () => { setSending(true); setError(''); try { await retryConversationAction(chat.id); } catch(e) { setError(String(e)); } finally { setSending(false); } }}>Retry last message</button>}
     {chat && !active && resumeStatus?.available && chat.status !== 'Completed' && <button type="button" disabled={!draft.trim() || sending} onClick={() => { void send(true); }}>Start new chat instead</button>}
     {chat?.status.includes('no credits remaining') && <button type="button" onClick={() => api.openExternalUrl('https://platform.openai.com/settings/organization/billing/').catch(e => setError(String(e)))}>Open API billing</button>}
+    {busyElsewhere&&<small role="status">Another Codex conversation is running in this checkout.</small>}
     {storageError && <p role="alert">{storageError}</p>}
     {!inTauri() && <small>Sending requires the desktop app.</small>}
     {error && <p role="alert">{error}</p>}
+    {!profile&&<small>No connected Codex account for this project. <button type="button" onClick={()=>onSetup('codex')}>Set up Codex</button></small>}
+    {(capabilities.error||capabilities.data?.modelsError)&&<small role="status">Models unavailable: {capabilities.error||capabilities.data?.modelsError}. The provider default will be used.</small>}
     <div className="chat-composer-actions">
-      {showAccountPicker && <Select label="Chat account" disabled={!!originalProfile || sending} value={profile?.id || ''} triggerContent={profile ? undefined : 'Select account'} onChange={setProfileId} options={matchingProfiles.map(profile => ({value:profile.id,label:`${profile.label} · ${profile.subscription ? 'ChatGPT subscription' : profile.provider+' API'}`}))} />}
-      {active ? <button type="button" onClick={() => stopAgentChat(repositoryId,active.id).catch(e => setError(String(e)))}>Stop</button> : <button className="chat-send" type={needsNew ? 'button' : 'submit'} onClick={needsNew ? () => { void send(true); } : undefined} disabled={!inTauri() || !profile || !draft.trim() || sending || (continuing && !resumeStatus)} aria-label={needsNew ? "Start new chat" : "Send message"} title={needsNew ? contextReady ? 'Start a separate conversation using loaded messages' : 'Start a separate conversation without unavailable history' : 'Send message · Ctrl+Enter'}>{needsNew ? <SquarePen size={18}/> : <ArrowUp size={18}/>}</button>}
+      <Select label="Codex permissions" value={mode} onChange={changeMode} disabled={!!active||sending} options={[{value:'analyze',label:'Read only'},{value:'edit',label:'Project access'},{value:'full',label:'Full access'}]}/>
+      {profile?.subscription&&capabilities.data?.models.length? <Select label="Codex model" disabled={!!active||sending} value={model!} onChange={value=>chooseModel(profile.id,value)} options={capabilities.data.models.map(item=>({value:item.model,label:item.displayName}))}/>:null}
+      {profile?.subscription&&model&&capabilities.data?.models.find(item=>item.model===model)?.supportedReasoningEfforts.length?<Select label="Codex reasoning effort" disabled={!!active||sending} value={effort!} onChange={value=>chooseEffort(profile.id,model,value)} options={capabilities.data.models.find(item=>item.model===model)!.supportedReasoningEfforts.map(item=>({value:item.reasoningEffort,label:item.reasoningEffort}))}/>:null}
+      {showAccountPicker && <Select label="Chat account" disabled={!!originalProfile || sending} value={profile!.id} onChange={setProfileId} options={matchingProfiles.map(profile => ({value:profile.id,label:`${profile.label} · ${profile.subscription ? 'ChatGPT subscription' : 'Codex API'}`}))} />}
+      {active ? busyElsewhere?<button type="button" onClick={()=>onSelect(active.originKey||`app:${active.id}`)}>View running conversation</button>:<button type="button" aria-label="Stop Codex" title="Stop Codex" onClick={() => stopAgentChat(repositoryId,active.id).catch(e => setError(String(e)))}><Square size={16}/></button> : <button className="chat-send" type={needsNew ? 'button' : 'submit'} onClick={needsNew ? () => { void send(true); } : undefined} disabled={!inTauri() || !profile || !draft.trim() || sending || (continuing && !resumeStatus)} aria-label={needsNew ? "Start new chat" : "Send message"} title={needsNew ? contextReady ? 'Start a separate conversation using loaded messages' : 'Start a separate conversation without unavailable history' : 'Send message · Ctrl+Enter'}>{needsNew ? <SquarePen size={18}/> : <ArrowUp size={18}/>}</button>}
     </div>
   </form>;
 }

@@ -2163,3 +2163,271 @@ minimum-window 100/140/150% project UI results are recorded above. Build emits
 the existing bundle-size warning; WebKit emits the existing EGL diagnostic.
 No push is included in this checkpoint. Floating Desktop repair is in that
 separate repository and is described above, not part of Cerberus's commit.
+
+## Receipt explanation and interactive email loading (2026-11-06)
+
+Investigated receipt generation: baseline/dispatch receipts use IMAP APPEND, not
+SMTP. Send-attempt markers are appended before SMTP to prevent uncertain-delivery
+retries. They consume server storage but are safety state, not incoming delivery
+notifications. No receipts were deleted and no safeguards removed; documented
+their purpose and cost distinction.
+
+Loading improvements: list requests fetch only display/thread/MIME header fields,
+apply older-page UID bounds server-side, and skip SEARCH on empty mailboxes or
+exhausted UID ranges. Read-only actions now bypass in-process and cross-process
+mutation queues, using a separate short config/credential snapshot lock shared
+with settings saves; poll/ack and writes stay serialized. Independent sessions
+retain UIDVALIDITY/message identity checks. Folder discovery no longer forces a
+fresh read on every project switch; explicit refresh still does. List reads share
+pending snapshots; reopening cached immutable message bodies skips the network.
+
+Wire tests cover HEADER.FIELDS parsing, server UID filtering, empty/exhausted
+pages, and lock/action classification. UI fixture now resolves live Vite module
+URLs for its activity mocks and explicitly invalidates its synthetic same-UID MIME
+changes (real IMAP message contents are immutable). It checks that reopening a
+cached body does not issue another read. No persistent mail archive, credential
+cache or automatic retry of mutating requests was introduced.
+
+Verification: production build passed; full native suite passed (217 unit + 3
+integration tests, 5 ignored), as did email cache/inbox checks and the full email
+WebKit fixture, including cached-body reuse. Full-suite validation caught and
+fixed an ordering issue where an unconfigured mailbox tried opening its operation
+lock before reporting missing configuration. Existing bundle-size and EGL
+warnings remain. No real mailbox content/state was modified during investigation.
+
+## Cursor v18 conversation discovery compatibility (2026-11-06)
+
+Read-only local inspection confirmed Floating Desktop's current Cursor composer
+uses _v=18: fullConversationHeadersOnly and conversationMap are empty, with the
+index stored as composerConvHeaders:<composer>:000000... chunks. The old listing
+reader required a user preview from the inline index, then filtered this real
+conversation out. Added bounded chunk-index preview discovery and ordered chunk
+loading for message reads, respecting headerLog.count and preserving legacy
+inline/indexed formats. Preview discovery does not scan bubble payloads wholesale.
+Queries remain scoped to exact composer key prefixes and workspace authorization.
+
+Synthetic regression covers a large composer, chunk order, slash-containing
+bubble IDs and project isolation. Cursor reader tests passed; explicit read-only
+live fixture found 1 Floating Desktop editor conversation and 10 messages. No
+provider requests/inference or Cursor database writes were performed. Restart the
+native app to load the updated reader, then refresh with Cursor checked.
+
+## Floating Desktop review publication-context repair (2026-11-06)
+
+The completed BLOCKED Review run 2838ce9c-a3f9-4a91-9eb5-73bdca2ec822 targeted
+3c24c5ea286791ff12b46e3f1831b2db49d28a9f on wip. It stopped on missing ordinary
+publication configuration, not a code/test finding. Verified origin URL is
+https://github.com/1100soft/floatdesk.git; authenticated remote listing showed
+only the autosave ref and no wip. Explicitly set branch.wip.remote=origin and
+branch.wip.merge=refs/heads/wip. No commits, branches or files were changed and
+no push was performed by this repair. A missing first-publication remote ref is
+not authority to use main or an autosave ref.
+
+Clarified source Review/Publish prompt documents: a successfully verified absent
+remote target can be represented as firstPublication:true/upstreamSha:null;
+auth failures remain unknown, and review approval plus exact-ref race checks
+still precede publication. Live saved prompts were not edited under the running
+app. Queued one explicit independent review request via an atomic pending review
+handoff, documenting the user-requested config repair and exact original SHA,
+without fabricating an approval or setting release/integration flags. The app
+claimed it and started Review run 79668188-3c60-4946-8e21-f05ac5237929.
+Floating Desktop's cargo test passed (14 tests); no display/network runtime
+benchmark or unrequested publication was executed by this agent.
+
+## Remote reconciliation (2026-11-06)
+
+Fetched origin and fast-forwarded wip from 2663497 to 1970c76, incorporating
+c23ada3 (mail navigation fixture readiness) and 1970c76 (owner-selector fixture).
+Neither incoming file overlapped the nine pending implementation/doc files, so
+no stash, merge conflict or local edit loss occurred. HEAD and origin/wip have
+zero ahead/behind difference. All registered worktrees were checked for unmerged
+index entries; none had any. Existing scratch worktree dirt was left unchanged:
+/tmp/cerberus-correction-3b6dce1d has tracked deletions, and retained automation
+98d86d2a has an untracked root package-lock.json; neither has commits ahead of
+origin/wip. No unrelated cleanup, force reset, commit or push was performed.
+Production build and both incoming WebKit fixtures (repository creation and mail
+organization at 100/140/150% zoom) passed against the combined tree.
+
+## Direct Codex conversations restored (2026-11-07)
+
+Restored AgentComposer in the Agent/Script pane for non-archived Codex histories
+and new Codex chats. A compact new-conversation icon opts Codex into the provider
+filter when needed, without restoring a redundant project-tray shortcut. Other
+provider histories and script logs do not mount the composer. It is suspended
+when Projects is hidden; session drafts remain keyed by project/conversation.
+
+Reused the native run_agent/session-resume/stream/cancel paths, including original
+IDE session IDs, account isolation, persisted conversations and automation
+checkout context. Default permission is Project access, with Read only/Full access
+choices remembered per project. Model/reasoning choices come from the assigned
+ChatGPT account's existing capability catalog; no model names or permissions were
+hard-coded as available. Codex API profiles are selectable when no ChatGPT account
+is assigned. Missing profiles offer setup; unavailable resume requires an explicit
+separate-chat action and explains whether loaded context can be copied. Corrected
+first-profile selection so the displayed option is the one actually used.
+
+Consulted official OpenAI app-server docs for thread/turn/resume/interrupt behavior;
+no API keys were requested or inference started for validation. Updated operations
+and architecture docs. Browser regression now uses an ephemeral WebKit context
+(no retained mocked chats between invocations) and allows 120 seconds for its
+expanded interactive checks. It covers original IDE resume target, streamed reply,
+stop, fresh thread, explicit unavailable-resume fallback, and layout/menus at
+100/140/150% zoom; mock output never reaches the user's running agents.
+
+Validation: production build (dropdown/style checks and TypeScript) passed;
+agent/chat/capability checks and 9 native subscription/session tests passed.
+WebKit UI assertions passed at 900×620 and 1720×700 for 100/140/150% zoom, with
+draft separation/retention checked in the wide run. Full viewport checks passed
+all configured sizes and zoom levels. The wide fixture emitted the existing
+`free(): corrupted unsorted chunks` teardown diagnostic after successful assertions;
+it is not claimed as a clean WebKit process teardown. Existing bundle-size/EGL
+warnings remain. No live inference, pushes or commits were performed for this task.
+
+## Conversation browser quota fix (2026-11-07)
+
+The repeated QuotaExceededError was WebKit localStorage, not account credit. A
+read-only size inspection found gitcerberus.agentChats occupying 4,886,166 bytes
+plus settings in the same small quota; the native conversation database already
+held 345 records (~146 MB). The old fallback rebuilt every historical chat on
+each completion, duplicating durable data until WebKit rejected writes.
+
+Desktop recovery snapshots now include only dirty records after native restore,
+with <=8 recent/active chats, <=4 messages each, <=2k chars/message and <=48k total
+JSON chars. Durable histories remain full in SQLite. Legacy recovery records are
+not truncated/replaced until migrated to native storage (including browser copies
+newer than the same native record). Fully durable duplicates are removed. Optional
+browser-backup quota failures no longer masquerade as failed native saves;
+genuine native save/restore errors remain visible. Error status is deduplicated,
+scoped by source, and successful recovery publishes an empty status to clear both
+sidebar and composer. Rename/archive now save the affected record instead of
+rewriting every conversation.
+
+Verified on this machine: the oversized browser key is now absent and all 345
+native conversation records remain. No identity, credential, mail data or native
+history was deleted; no private storage DB was edited directly. Tests simulate
+exhausted browser quota, failed/recovered native writes, gated legacy migration,
+bounded browser-only backup and credit-independent wording. Chat/recovery checks
+and production build passed. WebKit assertions passed at 900×620 with
+100/140/150% zoom, including error appearance/clearing in sidebar and composer;
+the existing heap diagnostic appeared after successful assertions during teardown.
+
+## Tool context separation and live checkpoints (2026-11-07)
+
+The quoted Project feedback tools text was intentionally injected by agents.rs
+whenever scoped issue tools were bound, but incorrectly appended to the user
+prompt. Codex now receives original user text unchanged. ChatGPT app-server turns
+set developerInstructions on thread start/resume; Codex API exec uses the runtime
+developer_instructions config instead. Other provider execution retains its
+existing behavior. Scope enforcement and tool environment remain native. The
+installed Codex protocol's generated schema confirms developerInstructions is
+supported; the CLI config argument was checked via help without inference.
+
+For old app-created histories, UI matches the saved authored prompt before
+removing a recognized appended email/issue helper suffix from the displayed copy.
+It never edits raw provider/native history or strips arbitrary quoted user text.
+Normalized text also prevents falsely reporting those turns as continued outside
+the app. During a running conversation, render only checkpoint/status text (use
+the latest commentary checkpoint when no final reply exists) and omit detailed
+steps/command output/edit buttons. Completed traces remain available collapsed.
+Visible message search ignores hidden live traces.
+
+Tests cover developer context separate from turn input in native resume, exact
+legacy prompt restoration with quoted-text protection, raw trace preservation,
+and checkpoint-only rendering. Full native tests passed (218 unit + 3 integration,
+5 ignored); production build and display checks passed. No inference was run for
+validation. Frontend changes retain the previously restored chat/stop/draft paths.
+WebKit assertions also passed at 900×620 for 100/140/150% zoom, explicitly checking
+that a running checkpoint is visible while command traces/edit controls are not,
+and completed activity becomes available collapsed. The existing heap teardown
+diagnostic appeared after successful assertions; no clean teardown is claimed.
+
+## Conditional conversation follow-to-bottom (2026-11-07)
+
+Replaced the latest-prompt alignment and unconditional live-app-chat scrolling
+with one bottom-follow state. Actual scroll position pauses following when the
+reader moves away from the bottom and resumes it on return. Metadata refresh of
+the same provider thread no longer resets an explicit latest intent. Selecting a
+conversation still opens its latest output. Earlier-message pagination preserves
+its height/top anchor; search and navigation can move away without being undone.
+A pane ResizeObserver handles composer/layout height changes while pinned. Draft
+editing no longer independently forces the message pane to the end.
+
+Expanded the real WebKit mock-stream fixture to require overflow, check following
+for a growing checkpoint, verify manual scroll-up survives more output, and check
+that returning to the bottom resumes following. Build and display unit checks
+passed; no provider inference was used for validation.
+WebKit assertions passed at 900×620 for 100/140/150% zoom, including the new live
+scroll checks. The pre-existing heap teardown diagnostic followed successful
+assertions; native conversation execution was not changed for this follow-up.
+
+## Sending explicitly reveals the new turn (2026-11-07)
+
+Composer send selection now explicitly requests/follows the bottom even when
+resuming the already-selected conversation. It clears pending message-search
+navigation and aligns again after the new turn renders; incoming updates retain
+the conditional/manual-scroll behavior. This closes the gap where preserving an
+older reading position also preserved it after the user's own Send action.
+Expanded the UI fixture to scroll up, submit a follow-up to the same session and
+require the newest turn to be visible before starting another conversation.
+Validation: production build, conversation-display checks and WebKit assertions
+passed at 900×620 for 100/140/150% zoom, including same-session Send from a
+scrolled-up position. No model inference was used.
+
+
+## Final-response scrolling and chat UI audit (2026-11-08)
+
+Layout-generated scroll events could clear bottom-follow when a final response
+replaced a checkpoint. Track user scroll gestures separately and observe content
+as well as pane resizing. Explicit Send returns to the bottom; readers who scroll
+up retain their position through completion and later content resizing.
+
+Provider refreshes now confirm the saved final turn before replacing it, retaining
+loaded context when the provider returns a short page. Search no longer resets its
+current match on incoming output. Delayed pagination/navigation and Send alignment
+are guarded against conversation switches. Conversation-card scrolling changes
+only its own list, avoiding ancestor-page jumps. When a different conversation is
+running in the same checkout, the composer offers View running conversation rather
+than a Stop button that would control that other conversation.
+
+Validation: production build (including TypeScript, dropdown and style checks),
+conversation display/chat/search/recovery checks, and real WebKit UI assertions at
+900×620 and 1720×700, each at 100/140/150% zoom. Fixtures cover final-response and
+late-content resizing, paused completion, Send from older history, stable search,
+wrong-conversation controls and delayed older-page completion after switching.
+The final two WebKit runs passed without the previously observed heap teardown
+diagnostic; EGL acceleration warnings remain in the headless environment. No
+model inference was used. Existing unrelated pending work remains preserved.
+
+
+## Background project activity completion (2026-11-08)
+
+The project spinner relied on conversation-cache working flags, but regular list
+revalidation was owned by the visible conversation pane. Switching projects could
+therefore leave completion undetected. Added an app-lifetime background monitor
+that checks only known-working projects/providers every five seconds and on app
+focus/visibility return, coalesces filter variants and propagates confirmed status
+across their cached views. Reads are asynchronous; overlapping monitor passes are
+skipped. Idle projects generate no requests and failed/partial reads do not infer
+completion. Fixed list-key parsing for project IDs containing colons as well.
+
+Validation: new check-conversation-activity.mjs covers completion without a visible
+pane, multiple projects/filter variants, subscriber notification, failed reads,
+colon-containing IDs and no idle polling. Production build passed including
+TypeScript, dropdown and style checks (existing bundle-size warning). No live
+agent inference or native execution changes were needed.
+
+
+## Checkpoint validation (2026-11-08)
+
+Reviewed all pending source, tests, documentation and the new activity regression
+script; no generated output or credential material is included. The activity
+regression now runs in the shared CI check command. Production build passed
+(TypeScript, dropdown/style checks and Vite; existing chunk-size advisory).
+Frontend agent/chat/display/activity/search/storage/recovery/email-cache checks,
+provider/folder/capability/repository checks and release-tooling checks passed.
+Native suite passed with one test thread: 218 unit and 3 integration tests, 5
+ignored. The parallel run first failed the existing login-persistence fixture;
+that fixture passed isolated and the complete serial suite passed. Email WebKit
+assertions passed; its existing allocator teardown diagnostic recurred afterward.
+No live model inference or push was performed for validation.
+Chat WebKit assertions also passed at 900×620 and 100/140/150% zoom.

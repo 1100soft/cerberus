@@ -170,6 +170,19 @@ fn composer_activity(db: &Connection, id: &str) -> (bool, i64) {
     let working = unfinished > 0 && clock > 0 && now.saturating_sub(clock) < 180_000;
     (working, clock)
 }
+// Cursor v18 stores its lightweight index separately from the composer payload.
+// Read only index chunks here; never scan all bubble bodies to list conversations.
+fn chunk_headers(db:&Connection,id:&str,limit:usize)->Result<Vec<Value>,String>{
+    let prefix=format!("composerConvHeaders:{id}:");
+    let upper=format!("{prefix}\u{7f}");
+    let count:Option<i64>=db.query_row(
+        "SELECT json_extract(value,'$.headerLog.count') FROM cursorDiskKV WHERE key=?1",
+        [format!("composerData:{id}")],|row|row.get(0)).optional().map_err(|e|e.to_string())?.flatten();
+    let limit=limit.min(count.unwrap_or(limit as i64).max(0) as usize);
+    let mut query=db.prepare("SELECT item.value FROM cursorDiskKV AS chunk, json_each(chunk.value) AS item WHERE chunk.key>=?1 AND chunk.key<?2 ORDER BY chunk.key,CAST(item.key AS INTEGER) LIMIT ?3").map_err(|e|e.to_string())?;
+    let rows=query.query_map(rusqlite::params![prefix,upper,limit as i64],|row|row.get::<_,String>(0)).map_err(|e|e.to_string())?;
+    rows.map(|raw|serde_json::from_str(&raw.map_err(|e|e.to_string())?).map_err(|e|e.to_string())).collect()
+}
 fn first_user_text(db: &Connection, id: &str) -> Option<String> {
     for index in 0..8 {
         let bubble_id: Option<String> = db
@@ -228,6 +241,12 @@ fn first_user_text(db: &Connection, id: &str) -> Option<String> {
             return mapped;
         }
     }
+    for header in chunk_headers(db,id,32).ok()? {
+        if header["type"].as_i64()!=Some(1){continue;}
+        let Some(bubble)=header["bubbleId"].as_str() else{continue;};
+        let text:Option<String>=db.query_row("SELECT json_extract(value,'$.text') FROM cursorDiskKV WHERE key=?1",[format!("bubbleId:{id}:{bubble}")],|row|row.get(0)).optional().ok().flatten().flatten();
+        if let Some(text)=text.filter(|text|!text.is_empty()&&!crate::cursor::is_system_notification(text)){return Some(text);}
+    }
     let length: i64 = db
         .query_row("SELECT length(value) FROM cursorDiskKV WHERE key=?1", [format!("composerData:{id}")], |row| row.get(0))
         .optional()
@@ -261,6 +280,7 @@ fn stored_messages(db: &Connection, id: &str) -> Result<Vec<Message>, String> {
         .cloned()
         .or_else(|| composer["conversation"].as_array().cloned())
         .unwrap_or_default();
+    if conversation.is_empty(){conversation=chunk_headers(db,id,100_000)?;}
     if conversation.is_empty() {
         // Older editor versions can store bubbles inline without a separate index.
         if let Some(map) = composer["conversationMap"].as_object() {
@@ -350,6 +370,23 @@ mod tests {
         let mut failed = value; failed["toolFormerData"]["status"] = "error".into(); assert!(bubble_edit(&failed).is_none());
         let mut data = vec![Message {created_at:None,id:"final".into(),role:"assistant".into(),text:"Done".into(),edits:vec![]}];
         flush_edits(&mut data,0,&mut vec![edit]); assert_eq!(data[0].edits.len(),1);
+    }
+    #[test]
+    fn chunked_editor_history_is_discoverable_and_ordered() {
+        let root=tempfile::tempdir().unwrap();let repo=tempfile::tempdir().unwrap();let other=tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("globalStorage")).unwrap();
+        std::fs::create_dir_all(root.path().join("workspaceStorage/ws")).unwrap();
+        std::fs::write(root.path().join("workspaceStorage/ws/workspace.json"),serde_json::json!({"folder":url::Url::from_directory_path(repo.path()).unwrap()}).to_string()).unwrap();
+        let db=Connection::open(root.path().join("globalStorage/state.vscdb")).unwrap();
+        db.execute_batch("CREATE TABLE composerHeaders(composerId TEXT,value TEXT,lastUpdatedAt INTEGER,createdAt INTEGER,workspaceId TEXT,isArchived INTEGER,isSubagent INTEGER);CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value TEXT);INSERT INTO composerHeaders VALUES('chunked','{}',1000,1000,'ws',0,0);").unwrap();
+        let composer=serde_json::json!({"_v":18,"fullConversationHeadersOnly":[],"conversationMap":{},"headerLog":{"count":2,"chunkCount":2},"unrelatedLargeData":"x".repeat(400000)});
+        let values=[("composerData:chunked",composer),("composerConvHeaders:chunked:000001",serde_json::json!([{"bubbleId":"answer/s:1","type":2}])),("composerConvHeaders:chunked:000000",serde_json::json!([{"bubbleId":"prompt","type":1}])),("bubbleId:chunked:prompt",serde_json::json!({"type":1,"text":"Chunked prompt"})),("bubbleId:chunked:answer/s:1",serde_json::json!({"type":2,"text":"Chunked answer"})),("composerConvHeaders:other:000000",serde_json::json!([{"bubbleId":"foreign","type":1}]))];
+        for (key,value) in values{db.execute("INSERT INTO cursorDiskKV VALUES(?1,?2)",rusqlite::params![key,value.to_string()]).unwrap();}
+        let threads=threads_at(root.path(),repo.path(),false).unwrap();
+        assert_eq!(threads.data.len(),1);assert_eq!(threads.data[0].preview,"Chunked prompt");
+        let messages=messages_at(root.path(),repo.path(),"chunked").unwrap();
+        assert_eq!(messages.data.iter().map(|m|m.text.as_str()).collect::<Vec<_>>(),vec!["Chunked prompt","Chunked answer"]);
+        assert!(messages_at(root.path(),other.path(),"chunked").is_err());
     }
     #[test]
     fn editor_messages_are_repository_scoped() {

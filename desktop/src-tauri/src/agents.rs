@@ -136,16 +136,10 @@ impl Agents {
         if prompt.trim().is_empty() || prompt.len() > 100_000 {
             return Err("Enter a task of at most 100,000 bytes".into());
         }
-        let enriched;
-        let prompt=if crate::feedback::config(root,&repo.id)?.is_some_and(|c|c.enabled){enriched=format!("{prompt}{}",crate::feedback::instructions());enriched.as_str()}else{prompt};
+        let mut tool_instructions=String::new();
+        if crate::feedback::config(root,&repo.id)?.is_some_and(|c|c.enabled){tool_instructions.push_str(crate::feedback::instructions());}
         let issue_env = crate::issue_feedback::environment(root, &repo.id, mode == "analyze")?;
-        let issue_enriched;
-        let prompt = if !issue_env.is_empty() {
-            issue_enriched = format!("{prompt}{}", crate::issue_feedback::instructions());
-            issue_enriched.as_str()
-        } else {
-            prompt
-        };
+        if !issue_env.is_empty(){tool_instructions.push_str(crate::issue_feedback::instructions());}
         let mut profile = self
             .profiles(root)?
             .into_iter()
@@ -170,6 +164,8 @@ impl Agents {
             }
         }
         let key = if profile.subscription { String::new() } else { entry(profile_id)?.get_password().map_err(|e| format!("Agent key is unavailable: {e}"))? };
+        let enriched;
+        let prompt=if profile.provider!="codex"&&!tool_instructions.is_empty(){enriched=format!("{prompt}{tool_instructions}");enriched.as_str()}else{prompt};
         let path = Path::new(&repo.local_path)
             .canonicalize()
             .map_err(|e| e.to_string())?;
@@ -200,6 +196,7 @@ impl Agents {
             std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
             let mut command = command(&profile, &path, &home, mode, prompt, &key, resume.map(|target| target.session_id.as_str()))?;
             if profile.provider == "codex" && !profile.subscription {
+                if !tool_instructions.is_empty(){command.args(["-c",&format!("developer_instructions={}",serde_json::to_string(&tool_instructions).map_err(|e|e.to_string())?)]);}
                 if let Some(model) = resume.and_then(|target| crate::agent_sessions::recorded_model(&home, &target.session_id)) { command.args(["--model", &model]); }
             }
             if let Some(run_id)=tracking_run {let env=crate::commit_provenance::environment(&root,&path,&repo.id,run_id)?;crate::commit_provenance::configure(&mut command,&env,profile.provider=="codex");}
@@ -241,7 +238,7 @@ impl Agents {
             let result = if profile.subscription {
                 let model=selected_model.map(String::from).or_else(||resume.and_then(|target|crate::agent_sessions::recorded_model(&source_home,&target.session_id)));
                 let rollout=resume.map(|target|crate::agent_sessions::rollout_path(&source_home,&target.session_id,&path)).transpose()?;
-                crate::subscription_run::run(command,&profile,&path,mode,prompt,resume.map(|target|target.session_id.as_str()),model.as_deref(),reasoning_effort,rollout.as_deref(),cancel,output)
+                crate::subscription_run::run(command,&profile,&path,mode,prompt,(!tool_instructions.is_empty()).then_some(tool_instructions.as_str()),resume.map(|target|target.session_id.as_str()),model.as_deref(),reasoning_effort,rollout.as_deref(),cancel,output)
             } else { execute(
                 command,
                 if profile.provider == "codex" {

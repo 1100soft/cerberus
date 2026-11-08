@@ -4,9 +4,68 @@
 
 From `desktop/`, run `npm run dev` for the browser demo or `npm run tauri dev` for native Git, SQLite, credentials, and provider commands. `npm run build` checks TypeScript, the dropdown convention, and the production bundle.
 
-The Project view lists local and GitHub repositories. Select a local checkout to read its enabled provider conversations in the Agent pane. Use the VS Code or Cursor button to continue interactive work. The Agents view is for provider setup and accounts; the Agent conversation pane currently has no composer or model selector.
+The Project view lists local and GitHub repositories. Select a local checkout to
+read its enabled provider conversations in the Agent/Script pane. Codex
+conversations can be started and continued directly here: use the new-conversation
+icon, or select an existing Codex thread and type a follow-up. Ctrl+Enter sends;
+the square button stops the current task. Other providers remain history viewers
+with links to their editors. The Agents view is for provider setup and accounts.
+
+Codex uses the project's assigned ChatGPT identity, or a selected connected Codex
+API account when no ChatGPT identity is assigned. Existing app conversations keep
+their account binding; changing the assigned account requires a separate chat.
+Available subscription models and reasoning choices come from that account's
+runtime catalog. Permissions default to Project access and can be set to Read
+only or Full access. New conversations work in the primary project checkout;
+continuing an automation conversation preserves its original isolated context.
+
+Imported Codex/IDE conversations resume the same local session when supported.
+A missing or busy session never silently becomes a different conversation: the
+composer reports the resume problem and offers an explicit separate chat using
+the loaded history when available. Prompt drafts survive navigation between
+conversations/projects while the app stays open. Account or authentication errors
+remain visible without disabling automations. The VS Code link is optional for
+Codex work; its extension does not need to be running.
 
 The Identity page manages ChatGPT, GitHub, Cursor, and Claude identities. Each identity icon carries editable initials beside the account name. ChatGPT rate limits display on its account card when available. GitHub cards try Copilot CLI quota and always offer a web usage link. Cursor and Claude cards link to their web usage pages. A web link uses the browser's current login, which may differ from the card's account.
+
+Codex's project email/feedback tool guidance is supplied as runtime developer
+context, separately from the message you type. Native project/repository/label
+checks still enforce scope. Older app-created histories restore the original
+visible prompt when a recognized helper suffix can be matched to the saved
+message; raw history is preserved. Ordinary authored or quoted instructions are
+not removed by guessing.
+
+While a conversation runs, the pane shows assistant checkpoint/status responses
+without tool commands, raw activity or file-edit details. Completed activity
+remains available in collapsed details. Conversation search follows what is
+currently visible rather than matching hidden live traces.
+
+Conversation output follows the bottom only while you are already there. Scroll
+up to read without being pulled back; returning to the bottom resumes following.
+Opening another conversation goes to its latest response, not its latest prompt.
+Sending a prompt explicitly returns to the bottom and resumes following, even
+when you were reading older messages; an active in-conversation search is cleared.
+Completion and delayed content resizing preserve this behavior. Search keeps its
+current match during incoming updates, and older-message requests cannot move a
+different conversation after switching. A delayed provider-history refresh must
+confirm the completed turn before replacing its saved response. If another Codex
+conversation is running in the same checkout, **View running conversation** opens
+it; Stop is available only in the conversation it controls.
+
+## Conversation storage
+
+Desktop conversations are saved in Cerberus's native SQLite database. WebKit's
+localStorage quota is separate from agent credits and disk capacity. The desktop
+keeps only a small pending recovery snapshot in browser storage, removing it once
+the corresponding full conversation records are durable. Legacy browser backups
+are preserved until their records have migrated successfully. Browser-only demo
+backups are bounded recent-message previews, not a complete history archive.
+
+A browser backup quota failure does not mean a successful native database save
+failed. Genuine database/restore failures remain visible, and successful recovery
+clears the sidebar and composer warning. Do not clear all application data to fix
+a quota warning: that would also remove unrelated settings.
 
 ## Copilot startup and quota
 
@@ -129,3 +188,16 @@ show Disconnected with Reconnect. Network, runtime and credential-store errors
 show Unavailable with Retry check and the specific error. Verification snapshots
 do not persist a user logout or clear account assignments. A restart may expose
 a credential persistence problem, but warnings do not claim it caused sign-out.
+
+Cursor editor history is read locally without changing Cursor's databases.
+The reader supports both older inline message indexes and the newer chunked
+conversation indexes. Keep Cursor checked in the Agent/Script pane to include
+these conversations; updating Cerberus's native reader requires an app restart.
+
+
+Project activity indicators are reconciled in the background every five seconds
+for cached projects with agents marked working, even when another project or page
+is open. Returning to the app also checks activity. Idle projects are not polled;
+failed reads retain the last known status until a successful check. Completion
+updates all cached provider-filter views so an older view cannot keep the project
+spinner active.

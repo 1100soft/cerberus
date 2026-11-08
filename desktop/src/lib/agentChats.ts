@@ -13,9 +13,17 @@ function readChats(): AgentChat[] {
   try { const saved = JSON.parse(localStorage.getItem('gitcerberus.agentChats') || '[]'); return Array.isArray(saved) ? saved.filter(chat => chat && typeof chat.id === 'string' && typeof chat.repositoryId === 'string' && chat.profile && Array.isArray(chat.messages)).map(chat => ({...chat, running:false, retryable:chat.retryable || (!chat.running && String(chat.activity).includes('already has an active writer')), status:chat.running ? 'Interrupted when the app closed. Resume to continue.' : agentFailure(chat.status,chat.activity)})) : []; } catch { return []; }
 }
 let chats: AgentChat[] = readChats();
+const legacyBackupPending=new Set(chats.map(chat=>chat.id));
 const dirtyChats=new Map<string,AgentChat>();
 let saving=false,flushTimer:number|undefined;
-const storageError=(error:unknown)=>window.dispatchEvent(new CustomEvent('chat-storage-error',{detail:`Conversation could not be saved: ${String(error)}`}));
+let nativeStoreReady=false;
+const storageErrors=new Map<string,string>();
+let publishedStorageError:string|undefined;
+function storageStatus(){const detail=[...storageErrors.values()].join(' ');if(detail!==publishedStorageError){publishedStorageError=detail;window.dispatchEvent(new CustomEvent('chat-storage-error',{detail}));}}
+function storageError(error:unknown,source='database'){
+  storageErrors.set(source,source==='backup'?'Local conversation backup storage is full or unavailable. This is storage on this computer, not agent credits.':`Conversation could not be ${source==='restore'?'loaded':'saved'} on this computer: ${String(error)}`);storageStatus();
+}
+function clearStorageError(source:string){storageErrors.delete(source);storageStatus();}
 let restorePromise:Promise<void>|undefined;
 export function initializeAgentChats():Promise<void>{
   if(!restorePromise)restorePromise=(async()=>{
@@ -25,16 +33,16 @@ export function initializeAgentChats():Promise<void>{
       const merged=new Map(chats.map(chat=>[chat.id,chat]));
       for(const chat of saved){const current=merged.get(chat.id);if(!dirtyChats.has(chat.id)&&(!current||chat.updatedAt>=current.updatedAt))merged.set(chat.id,{...chat,running:false,status:chat.running?'Interrupted when the app closed. Resume to continue.':chat.status});}
       chats=[...merged.values()].sort((a,b)=>b.updatedAt-a.updatedAt);emit();
-      for(const chat of chats)if(!saved.some(item=>item.id===chat.id))dirtyChats.set(chat.id,chat);
-      scheduleFlush();
-    }catch(error){storageError(error);}
+      for(const chat of chats){const prior=saved.find(item=>item.id===chat.id);if(!prior||chat.updatedAt>prior.updatedAt)dirtyChats.set(chat.id,chat);else legacyBackupPending.delete(chat.id);}
+      nativeStoreReady=true;clearStorageError('restore');scheduleFlush();
+    }catch(error){storageError(error,'restore');restorePromise=undefined;}
   })();
   return restorePromise;
 }
 async function flushChats(){
   if(saving||!api.saveAgentConversation||!('__TAURI_INTERNALS__' in window))return;
   saving=true;
-  try{await initializeAgentChats();while(dirtyChats.size){const [id,chat]=dirtyChats.entries().next().value!;await api.saveAgentConversation(chat);if(dirtyChats.get(id)===chat)dirtyChats.delete(id);}}
+  try{await initializeAgentChats();while(dirtyChats.size){const [id,chat]=dirtyChats.entries().next().value!;await api.saveAgentConversation(chat);legacyBackupPending.delete(id);if(dirtyChats.get(id)===chat)dirtyChats.delete(id);}clearStorageError('database');if(nativeStoreReady){writeChatFallback();clearStorageError('backup');}}
   catch(error){storageError(error);}finally{saving=false;}
 }
 function scheduleFlush(){
@@ -44,9 +52,30 @@ let backupTimer:number|undefined,backupIdle:number|undefined;
 function writeChatFallback(){
   window.clearTimeout(backupTimer);backupTimer=undefined;
   if(backupIdle!==undefined){window.cancelIdleCallback?.(backupIdle);backupIdle=undefined;}
-  // Keep the existing recovery payload, but never rebuild it for every token.
-  try{localStorage.setItem('gitcerberus.agentChats',JSON.stringify(chats.map(chat=>({...chat,activity:'',messages:chat.messages.map(({steps,edits,...message})=>({...message,text:message.text.slice(-12000)}))}))));}
-  catch(error){storageError(error);}
+  // SQLite is authoritative on desktop. Keep only pending recovery context here,
+  // not another copy of every historical conversation in WebKit's tiny quota.
+  const native='__TAURI_INTERNALS__' in window;
+  // Never truncate the old recovery source before its records have migrated.
+  if(native&&legacyBackupPending.size)return;
+  const pending=native&&nativeStoreReady?[...dirtyChats.values()]:chats;
+  if(native&&nativeStoreReady&&!pending.length){
+    try{localStorage.removeItem('gitcerberus.agentChats');clearStorageError('backup');}catch{/* Native history is already saved. */}
+    return;
+  }
+  const records:AgentChat[]=[];let size=2;
+  const candidates=[...pending].sort((a,b)=>Number(b.running)-Number(a.running)||b.updatedAt-a.updatedAt);
+  for(const chat of candidates){
+    const compact={...chat,name:String(chat.name||'Conversation').slice(0,100),status:String(chat.status||'').slice(0,1000),activity:'',messages:chat.messages.slice(-4).map(({steps,edits,...message})=>({...message,text:String(message.text||'').slice(-2000)}))};
+    const length=JSON.stringify(compact).length+1;
+    if(size+length>48000)continue;
+    records.push(compact);size+=length;if(records.length>=8)break;
+  }
+  try{localStorage.setItem('gitcerberus.agentChats',JSON.stringify(records));clearStorageError('backup');}
+  catch(error){
+    // Replace an old oversized backup only after those records are durable.
+    // Native write failures are reported independently, never masked by this cache.
+    if(native&&nativeStoreReady)clearStorageError('backup');else storageError(error,'backup');
+  }
 }
 function scheduleChatFallback(){
   if(backupTimer!==undefined||backupIdle!==undefined)return;
@@ -80,8 +109,8 @@ export function latestAgentChat(repositoryId:string) { return chats.find(chat=>c
 export function useAgentChats(active=true) { return useSyncExternalStore(listener => { if(!active)return()=>{};listeners.add(listener); return () => { listeners.delete(listener); }; }, () => chats); }
 export function useAgentsRunning(){return useSyncExternalStore(subscribeAgentChats,()=>chats.some(chat=>chat.running));}
 export function useRepositoryAgentWorking(repositoryId:string){return useSyncExternalStore(listener=>{listeners.add(listener);return()=>{listeners.delete(listener);};},()=>chats.some(chat=>chat.repositoryId===repositoryId&&chat.running));}
-export function renameAgentChat(id:string, name:string) { const next=name.trim(); if(!next)return; chats=chats.map(chat=>chat.id===id?{...chat,name:next}:chat);persist();emit(); }
-export function archiveAgentChat(id:string, archived:boolean) { chats=chats.map(chat=>chat.id===id?{...chat,archived}:chat);persist();emit(); }
+export function renameAgentChat(id:string, name:string) { const next=name.trim(); if(!next)return; chats=chats.map(chat=>chat.id===id?{...chat,name:next}:chat);persist(id);emit(); }
+export function archiveAgentChat(id:string, archived:boolean) { chats=chats.map(chat=>chat.id===id?{...chat,archived}:chat);persist(id);emit(); }
 export function updateAgentChat(id: string, patch: Partial<AgentChat>) { chats = chats.map(chat => chat.id === id ? {...chat, ...patch, updatedAt:Date.now()} : chat); persist(id); emit(); }
 export function chatPrompt(messages: CodexMessage[], prompt: string) {
   if (new TextEncoder().encode(prompt).length > 99_000) throw new Error('Message is too long. Shorten it before sending.');

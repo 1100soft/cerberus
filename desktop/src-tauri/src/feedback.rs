@@ -19,9 +19,14 @@ use std::{
     time::Duration,
 };
 fn mailbox_lock(root: &Path, id: &str) -> Result<Arc<Mutex<()>>, String> {
+    lock_for_path(path(root,id)?)
+}
+fn configuration_lock(root:&Path,id:&str)->Result<Arc<Mutex<()>>,String>{
+    lock_for_path(path(root,id)?.with_extension("configuration.lock"))
+}
+fn lock_for_path(key:std::path::PathBuf)->Result<Arc<Mutex<()>>,String>{
     static LOCKS: OnceLock<Mutex<std::collections::HashMap<std::path::PathBuf, Weak<Mutex<()>>>>> =
         OnceLock::new();
-    let key = path(root, id)?;
     let mut locks = LOCKS
         .get_or_init(Default::default)
         .lock()
@@ -483,6 +488,8 @@ fn import_certificate(root: &Path, id: &str, source: &str) -> Result<String, Str
 pub fn save(root: &Path, id: &str, mut c: Config, secret: Option<String>) -> Result<(), String> {
     let lock = mailbox_lock(root, id)?;
     let _guard = lock.lock().map_err(|_| "Mailbox is busy")?;
+    let snapshot=configuration_lock(root,id)?;
+    let _snapshot=snapshot.lock().map_err(|_|"Mailbox settings are busy")?;
     c.sender_identity_name = c.sender_identity_name.trim().into();
     for sender in &mut c.sender_identities {
         sender.identity_name = sender.identity_name.trim().into();
@@ -751,9 +758,12 @@ fn parse(
     })
 }
 fn list(s: &mut Session, name: &str, before: Option<u32>) -> Result<Vec<Mail>, String> {
-    let validity = select(s, name, None)?;
+    let mailbox=select_mailbox(s,name,None)?;
+    let validity=mailbox.uid_validity.ok_or("Server omitted UIDVALIDITY")?;
+    if mailbox.exists==0||before.is_some_and(|uid|uid<=1){return Ok(vec![]);}
+    let query=before.map(|uid|format!("UID 1:{} UNDELETED",uid-1)).unwrap_or_else(||"UNDELETED".into());
     let mut ids: Vec<_> = s
-        .uid_search("UNDELETED")
+        .uid_search(query)
         .map_err(|_| "Cannot list mailbox messages")?
         .into_iter()
         .filter(|id| before.is_none_or(|before| *id < before))
@@ -766,7 +776,7 @@ fn list(s: &mut Session, name: &str, before: Option<u32>) -> Result<Vec<Mail>, S
     }
     let set = ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
     let fetched = s
-        .uid_fetch(set, "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER])")
+        .uid_fetch(set, "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT FROM REPLY-TO DATE IN-REPLY-TO REFERENCES CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])")
         .map_err(|_| "Cannot read message headers")?;
     let mut rows = vec![];
     for item in fetched.iter() {
@@ -1828,13 +1838,26 @@ fn move_folder_emails(
     }
     Ok(serde_json::json!({"moved":mailbox.exists}))
 }
+fn read_only_request(action:&str)->bool {
+    matches!(action,"folderTree"|"folderNames"|"folders"|"folderStatus"|"list"|"read"|"status"|"test")
+}
 pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json::Value, String> {
+    let read_only=read_only_request(&request.action);
     let lock = mailbox_lock(root, id)?;
-    let _guard = lock.lock().map_err(|_| "Mailbox is busy")?;
+    let _guard = if read_only {None}else{Some(lock.lock().map_err(|_| "Mailbox is busy")?)};
     request.scope = id.into();
+    let snapshot=configuration_lock(root,id)?;
+    let snapshot_guard=snapshot.lock().map_err(|_|"Mailbox settings are busy")?;
     let mut c = config(root, id)?
         .filter(|c| c.enabled || matches!(request.action.as_str(), "test" | "folders"))
         .ok_or("No configured email mailbox. Configure Email for this project.")?;
+    // Testing is allowed before enabling the mailbox, but validates all settings.
+    c.enabled = true;
+    validate(&c)?;
+    let secret = password(id)?;
+    // Release the short credential/config snapshot lock before network I/O.
+    // Read-only operations never enter the long scheduler/mutation queue.
+    drop(snapshot_guard);
     let lock_path = path(root, id)?.with_extension("lock");
     let process_lock = fs::OpenOptions::new()
         .create(true)
@@ -1843,19 +1866,7 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
         .write(true)
         .open(lock_path)
         .map_err(|_| "Cannot open mailbox operation lock")?;
-    process_lock
-        .lock()
-        .map_err(|_| "Cannot lock mailbox operations")?;
-    // Testing is allowed before enabling the mailbox, but validates all settings.
-    c.enabled = true;
-    validate(&c)?;
-    let secret = password(id)?;
-    // Counts are a read-only snapshot. Keep credentials/config coherent above,
-    // then let interactive mail actions proceed while STATUS scans other folders.
-    if request.action == "folderTree" {
-        drop(_guard);
-        drop(process_lock);
-    }
+    if !read_only {process_lock.lock().map_err(|_| "Cannot lock mailbox operations")?;}
     let mut s = connect(&c, &secret)?;
     if c.auto_special_folders == Some(true) && matches!(request.action.as_str(), "draft" | "send") {
         let nodes = folder_tree(&mut s)?;
@@ -3010,11 +3021,40 @@ mod wire_tests {
         assert!(server.join().unwrap().is_empty());
     }
     #[test]
+    fn interactive_reads_do_not_share_the_mutation_queue() {
+        for action in ["list","read","folderNames","folderTree","folderStatus","status"] {assert!(read_only_request(action));}
+        for action in ["poll","ack","send","move","flag","note","draft"] {assert!(!read_only_request(action));}
+        let root=tempfile::tempdir().unwrap();
+        let writes=mailbox_lock(root.path(),"project").unwrap();
+        let _busy=writes.lock().unwrap();
+        let snapshots=configuration_lock(root.path(),"project").unwrap();
+        assert!(snapshots.try_lock().is_ok());
+    }
+    #[test]
+    fn list_pages_filter_uids_on_server_and_fetch_only_display_headers() {
+        let fields="MESSAGE-ID SUBJECT FROM REPLY-TO DATE IN-REPLY-TO REFERENCES CONTENT-TYPE CONTENT-TRANSFER-ENCODING";
+        let response=fetched(true,HEADER).replace("BODY[HEADER]",&format!("BODY[HEADER.FIELDS ({fields})]"));
+        let (root,port,server)=fixture(vec![
+            ("SELECT",SELECT.into()),
+            ("UID SEARCH UID 1:9 UNDELETED","* SEARCH 2 20\r\n".into()),
+            ("BODY.PEEK[HEADER.FIELDS",response),
+            ("SELECT",SELECT.into()),
+            ("SELECT",SELECT.replace("1 EXISTS","0 EXISTS")),
+        ]);
+        let mut session=connect(&config_for(root.path(),port),"fixture-secret").unwrap();
+        let page=list(&mut session,"INBOX",Some(10)).unwrap();
+        assert_eq!(page.len(),1);assert_eq!(page[0].reference.uid,2);
+        assert_eq!(page[0].subject,"Feedback");
+        assert!(list(&mut session,"INBOX",Some(1)).unwrap().is_empty());
+        assert!(list(&mut session,"INBOX",None).unwrap().is_empty());
+        session.logout().unwrap();server.join().unwrap();
+    }
+    #[test]
     fn tls_imap_reader_and_drafts_preserve_reply_to_and_do_not_mark_read() {
         let mut steps = vec![
             ("SELECT", SELECT.into()),
             ("UID SEARCH", "* SEARCH 2\r\n".into()),
-            ("BODY.PEEK[HEADER]", fetched(true, HEADER)),
+            ("BODY.PEEK[HEADER.FIELDS", fetched(true, HEADER)),
         ];
         steps.extend(read_steps());
         steps.extend([

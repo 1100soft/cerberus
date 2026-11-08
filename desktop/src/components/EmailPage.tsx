@@ -51,7 +51,7 @@ export const EmailPage=memo(function EmailPage({repositories,initialRepositoryId
   if(!older&&!preserve){setSelected(undefined);setMessage(undefined);setRows(cached||[]);setText('');}
   const background=preserve||!!cached;if(background){setRefreshing(true);if(!mutating.current)setBusy(false);}else setBusy(true);setError('');
   if(refreshTree)void refreshFolders(repository,forceTree).catch(reason=>{if(token===generation.current)setError(String(reason));});
-  try{const items=await feedback.request<FeedbackMail[]>(repository,{action:'list',folder,...(older?{message:rows.at(-1)}:{})});
+  try{const readPage=()=>feedback.request<FeedbackMail[]>(repository,{action:'list',folder,...(older?{message:rows.at(-1)}:{})});const items=older?await readPage():await emailLists.load(key,readPage,forceTree);
    if(token===generation.current){if(!older)emailLists.set(key,items.slice(0,100).map(item=>({...item,body:'',html:undefined,inlineImages:undefined})));setRows(previous=>older?[...previous,...items.filter(item=>!previous.some(row=>mailKey(row)===mailKey(item)))]:items);if(preserve)setMessage(current=>{const latest=current&&items.find(item=>mailKey(item)===mailKey(current));return current&&latest?{...current,read:latest.read,starred:latest.starred}:current;});}
   }catch(reason){if(token===generation.current)setError(String(reason));}
   finally{if(token===generation.current){setRefreshing(false);if(!mutating.current)setBusy(false);}}
@@ -59,10 +59,10 @@ export const EmailPage=memo(function EmailPage({repositories,initialRepositoryId
  useEffect(()=>{if(configRepository===repository&&config?.enabled&&folder)void load(false);return()=>{generation.current++;};},[repository,folder,configRepository,config?.enabled,config?.imapHost,config?.imapPort,config?.imapSecurity,config?.username,config?.certificatePath]);
  // Tree discovery belongs to the project/account, not the selected message folder.
  useEffect(()=>{if(configRepository!==repository||!config?.enabled)return;
-  void refreshFolders(repository,true).catch(reason=>{if(activeProject.current===repository)setError(String(reason));});
+  void refreshFolders(repository,false).catch(reason=>{if(activeProject.current===repository)setError(String(reason));});
   return()=>{treeGeneration.current++;};
  },[repository,configRepository,revision,config?.enabled,config?.imapHost,config?.imapPort,config?.imapSecurity,config?.username,config?.certificatePath]);
- useEffect(()=>{let active=true;const key=selected?emailMessageKey(repository,selected):'',cached=selected?emailMessages.peek(key):undefined;setMessage(cached);setReading(false);setText('');setComposing(false);setConfirmSend(false);sendId.current=crypto.randomUUID();if(!selected||selectionRepository.current!==repository)return;setReading(!cached);setError('');
+ useEffect(()=>{let active=true;const key=selected?emailMessageKey(repository,selected):'',cached=selected?emailMessages.peek(key):undefined;setMessage(cached);setReading(false);setText('');setComposing(false);setConfirmSend(false);sendId.current=crypto.randomUUID();setError('');if(!selected||selectionRepository.current!==repository||cached)return;setReading(true);
   void feedback.request<FeedbackMail>(repository,{action:'read',message:selected}).then(value=>{if(active){const size=value.body.length+(value.html?.length||0)+Object.values(value.inlineImages||{}).reduce((n,image)=>n+image.length,0);if(size<2_000_000)emailMessages.set(key,value);setMessage(value);}}).catch(reason=>{if(active)setError(String(reason));}).finally(()=>{if(active)setReading(false);});return()=>{active=false;};
  },[selected,repository]);
  useEffect(()=>{if(!active){setComposing(false);setSettings(false);setMailMenu(null);setMoveMail(null);setMoveFolder(null);setConfirmSend(false);}},[active]);

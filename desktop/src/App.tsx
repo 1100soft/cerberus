@@ -26,7 +26,7 @@ import { AddRepositoryChooser } from "./components/AddRepositoryChooser";
 import { api, inTauri } from "./lib/api";
 import { listen } from '@tauri-apps/api/event';
 import { useCardReorder } from './lib/cardReorder';
-import { watchCursorCompletion } from "./lib/conversationCache";
+import { watchCursorCompletion, watchWorkingRepositories } from "./lib/conversationCache";
 import { startSavedPromptScheduler, type AutomationDraft } from "./lib/savedPrompts";
 import { useChatgptAccounts } from "./lib/chatgptAccounts";
 import { useExternalIdentities } from "./lib/externalIdentities";
@@ -47,6 +47,7 @@ export function App() {
   useEffect(() => { document.body.classList.add("custom-tooltips"); return () => document.body.classList.remove("custom-tooltips"); }, []);
   useZoomTooltips();
   useEffect(() => watchCursorCompletion(), []);
+  useEffect(() => watchWorkingRepositories(), []);
   useEffect(() => startSavedPromptScheduler(), []);
   const [autoFastForward,setAutoFastForward]=useState(()=>localStorage.getItem('gitcerberus.autoFastForward')!=='false');
   useEffect(()=>{localStorage.setItem('gitcerberus.autoFastForward',String(autoFastForward));},[autoFastForward]);
