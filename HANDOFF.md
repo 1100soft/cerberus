@@ -2476,3 +2476,14 @@ activity hint filtering, previously idle/unopened project starts, immediate cach
 start/completion, provider opt-in, scoped refreshes and listener cleanup. No push
 or commit was requested for this follow-up.
 WebKit chat/project UI assertions passed at 900×620 and 100/140/150% zoom.
+
+
+## Exclude untracked agent scratch output from change counts (2026-11-08)
+
+Per user clarification, changed_lines omits untracked .agent-artifacts/ files.
+This applies to project-card counts and change-threshold automation triggers.
+Ordinary untracked source still counts; intentionally staged/tracked artifacts
+remain included. No files were removed and no project Git ignore rules changed.
+The card tooltip describes the filter without showing unfiltered file totals.
+Regression covers artifacts alone yielding zero, ordinary source still counting
+and explicitly staging an artifact restoring its contribution.

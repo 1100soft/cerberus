@@ -222,3 +222,9 @@ remain enforced; a different session ID returned by the runtime stops execution.
 Known-active turns in the other client must finish before continuing here. Work
 alternately in the same session, rather than running overlapping turns from both
 clients. Account selection remains explicit and independent of shared history.
+
+
+Project change counts and change-count automation triggers exclude untracked
+`.agent-artifacts/` scratch files. Ordinary untracked source files still count.
+Explicitly staged or tracked artifact files count because they are part of the
+commit's changes. This filter does not delete files or modify Git ignore rules.

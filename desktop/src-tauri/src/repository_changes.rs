@@ -38,7 +38,8 @@ fn file_lines(path:&Path)->u64{
     lines.saturating_add(u64::from(any&&last!=b'\n'))
 }
 
-/// Added plus deleted lines relative to HEAD, including untracked files.
+/// Added plus deleted lines relative to HEAD, including untracked project files.
+/// Untracked agent scratch artifacts are excluded; explicitly staged/tracked ones count.
 /// Binary files count as one change. For unborn branches, staged and unstaged
 /// deltas are combined because there is no commit to compare against.
 pub fn changed_lines(repository:&Path)->Result<u64,String>{
@@ -48,7 +49,7 @@ pub fn changed_lines(repository:&Path)->Result<u64,String>{
         else {numstat(repository,&["diff","--numstat","--no-ext-diff","--cached","--"])?
             .saturating_add(numstat(repository,&["diff","--numstat","--no-ext-diff","--"])?) };
     let untracked=git(repository,&["ls-files","--others","--exclude-standard","-z"])?;
-    for name in untracked.split(|byte|*byte==0).filter(|name|!name.is_empty()){
+    for name in untracked.split(|byte|*byte==0).filter(|name|!name.is_empty()&&!name.starts_with(b".agent-artifacts/")){
         #[cfg(unix)] let path={use std::os::unix::ffi::OsStrExt;repository.join(std::ffi::OsStr::from_bytes(name))};
         #[cfg(not(unix))] let path=repository.join(String::from_utf8_lossy(name).as_ref());
         count=count.saturating_add(file_lines(&path));
@@ -111,6 +112,18 @@ pub fn summary(repository:&Path)->Result<ChangeSummary,String>{
         run(&linked,&["checkout","--detach","-q"]);run(&linked,&["commit","--allow-empty","-qm","detached commit"]);
         let detached=commit_state(&primary).unwrap();
         assert!(detached.refs.iter().any(|item|item.key.starts_with("worktree:")&&item.branch.is_empty()&&item.reflog.starts_with("commit")));
+    }
+    #[test]fn ignores_untracked_agent_artifacts_but_counts_explicitly_staged_files(){
+        let root=tempfile::tempdir().unwrap();
+        let run=|args:&[&str]|assert!(Command::new("git").args(args).current_dir(root.path()).status().unwrap().success());
+        run(&["init","-q"]);run(&["config","user.name","Fixture"]);run(&["config","user.email","fixture@example.test"]);run(&["commit","--allow-empty","-qm","initial"]);
+        std::fs::create_dir(root.path().join(".agent-artifacts")).unwrap();
+        std::fs::write(root.path().join(".agent-artifacts/trace.log"),"scratch\noutput\nlog\n").unwrap();
+        assert_eq!(changed_lines(root.path()).unwrap(),0);
+        std::fs::write(root.path().join("source.rs"),"new source\n").unwrap();
+        assert_eq!(summary(root.path()).unwrap().changed_lines,1);
+        run(&["add",".agent-artifacts/trace.log"]);
+        assert_eq!(changed_lines(root.path()).unwrap(),4);
     }
     #[test]fn counts_tracked_and_untracked_lines_then_resets_after_commit(){
         let root=tempfile::tempdir().unwrap();
