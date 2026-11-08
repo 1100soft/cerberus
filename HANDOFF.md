@@ -2372,3 +2372,28 @@ require the newest turn to be visible before starting another conversation.
 Validation: production build, conversation-display checks and WebKit assertions
 passed at 900×620 for 100/140/150% zoom, including same-session Send from a
 scrolled-up position. No model inference was used.
+
+
+## Final-response scrolling and chat UI audit (2026-11-08)
+
+Layout-generated scroll events could clear bottom-follow when a final response
+replaced a checkpoint. Track user scroll gestures separately and observe content
+as well as pane resizing. Explicit Send returns to the bottom; readers who scroll
+up retain their position through completion and later content resizing.
+
+Provider refreshes now confirm the saved final turn before replacing it, retaining
+loaded context when the provider returns a short page. Search no longer resets its
+current match on incoming output. Delayed pagination/navigation and Send alignment
+are guarded against conversation switches. Conversation-card scrolling changes
+only its own list, avoiding ancestor-page jumps. When a different conversation is
+running in the same checkout, the composer offers View running conversation rather
+than a Stop button that would control that other conversation.
+
+Validation: production build (including TypeScript, dropdown and style checks),
+conversation display/chat/search/recovery checks, and real WebKit UI assertions at
+900×620 and 1720×700, each at 100/140/150% zoom. Fixtures cover final-response and
+late-content resizing, paused completion, Send from older history, stable search,
+wrong-conversation controls and delayed older-page completion after switching.
+The final two WebKit runs passed without the previously observed heap teardown
+diagnostic; EGL acceleration warnings remain in the headless environment. No
+model inference was used. Existing unrelated pending work remains preserved.

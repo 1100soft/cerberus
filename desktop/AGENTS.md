@@ -160,3 +160,8 @@ If port 3000 is occupied, identify its owner before taking action.
 - Keep Codex runtime tool guidance separate from authored user messages. While a
   conversation runs, present checkpoint/status responses without command traces
   or edit details; preserve the full trace for collapsed inspection afterward.
+
+- Conversation scrolling must distinguish user gestures from layout-generated
+  scroll events. Observe content resizing as well as pane resizing; completion
+  must preserve bottom-follow or an older reading position. Scope selected-card
+  scrolling to its owning list rather than scrolling ancestor page containers.

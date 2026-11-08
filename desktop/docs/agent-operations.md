@@ -46,6 +46,12 @@ up to read without being pulled back; returning to the bottom resumes following.
 Opening another conversation goes to its latest response, not its latest prompt.
 Sending a prompt explicitly returns to the bottom and resumes following, even
 when you were reading older messages; an active in-conversation search is cleared.
+Completion and delayed content resizing preserve this behavior. Search keeps its
+current match during incoming updates, and older-message requests cannot move a
+different conversation after switching. A delayed provider-history refresh must
+confirm the completed turn before replacing its saved response. If another Codex
+conversation is running in the same checkout, **View running conversation** opens
+it; Stop is available only in the conversation it controls.
 
 ## Conversation storage
 
