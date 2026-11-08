@@ -23,6 +23,7 @@ mod cursor;
 mod cursor_editor;
 mod cursor_launch;
 mod cursor_notifications;
+mod agent_activity_watcher;
 mod copilot;
 mod draft_runs;
 mod copilot_history;
@@ -1242,6 +1243,7 @@ pub fn run() {
             let data = app.path().app_data_dir()?;
             let db = Database::open(data.join("gitcerberus.db")).map_err(std::io::Error::other)?;
             cursor_notifications::start(app.handle().clone());
+            agent_activity_watcher::start(app.handle().clone(),data.clone());
             app.manage(AppState {
                 conversations:Arc::new(conversation_store::ConversationStore::open(&data).map_err(std::io::Error::other)?),
                 db: Arc::new(db),

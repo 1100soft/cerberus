@@ -47,12 +47,13 @@ export function App() {
   useEffect(() => { document.body.classList.add("custom-tooltips"); return () => document.body.classList.remove("custom-tooltips"); }, []);
   useZoomTooltips();
   useEffect(() => watchCursorCompletion(), []);
-  useEffect(() => watchWorkingRepositories(), []);
   useEffect(() => startSavedPromptScheduler(), []);
   const [autoFastForward,setAutoFastForward]=useState(()=>localStorage.getItem('gitcerberus.autoFastForward')!=='false');
   useEffect(()=>{localStorage.setItem('gitcerberus.autoFastForward',String(autoFastForward));},[autoFastForward]);
   const [paneSplit, setPaneSplit] = useState(() => Number(localStorage.getItem("gitcerberus.paneSplit")) || 50);
   const [localRepositories, setRepositories] = useState<Repository[]>([]);
+  const activityProjects=useRef(localRepositories);activityProjects.current=localRepositories;
+  useEffect(()=>watchWorkingRepositories(()=>activityProjects.current),[]);
   const [query, setQuery] = useState("");
   const [listFilters, setListFilters] = useState(() => readRepositoryFilters(localStorage.getItem("gitcerberus.repositoryFilters")));
   useEffect(() => { localStorage.setItem("gitcerberus.repositoryFilters", JSON.stringify(listFilters)); }, [listFilters]);

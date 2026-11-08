@@ -195,9 +195,30 @@ conversation indexes. Keep Cursor checked in the Agent/Script pane to include
 these conversations; updating Cerberus's native reader requires an app restart.
 
 
-Project activity indicators are reconciled in the background every five seconds
-for cached projects with agents marked working, even when another project or page
-is open. Returning to the app also checks activity. Idle projects are not polled;
-failed reads retain the last known status until a successful check. Completion
-updates all cached provider-filter views so an older view cannot keep the project
-spinner active.
+Project activity indicators receive filesystem hints for Codex turn starts and
+completion, even when another project or page is open. Hints update known threads
+immediately and revalidate the affected project/provider after a short debounce.
+They can discover a new conversation without first opening its project's pane.
+Only enabled providers are queried. Cursor database changes also request activity
+refreshes. Five-second reconciliation of known-working projects remains a fallback;
+returning to the app checks known provider views. Failed reads do not imply that
+work finished. Notifications contain session identifiers/status and project paths,
+not prompts, tool output or credentials.
+
+### Alternating between VS Code and Cerberus
+
+Both clients use the native Codex conversation ID and shared history index.
+Cerberus keeps authentication in its assigned account's private home while pointing
+its Codex runtime at the editor runtime's resolved SQLite history directory
+(`sqlite_home`, including `CODEX_SQLITE_HOME`/configuration overrides). New Cerberus
+subscription conversations are discoverable through that index too. Resume uses
+the indexed rollout path and `excludeTurns`, rather than treating paginated history
+as unsupported or copying the active history into a separate conversation.
+
+Migrated paginated sessions may depend on older immutable rollout files. Cerberus
+validates that lineage and makes those bases available in its account home without
+copying authentication or the active rollout. Original session and repository checks
+remain enforced; a different session ID returned by the runtime stops execution.
+Known-active turns in the other client must finish before continuing here. Work
+alternately in the same session, rather than running overlapping turns from both
+clients. Account selection remains explicit and independent of shared history.

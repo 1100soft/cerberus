@@ -2431,3 +2431,48 @@ that fixture passed isolated and the complete serial suite passed. Email WebKit
 assertions passed; its existing allocator teardown diagnostic recurred afterward.
 No live model inference or push was performed for validation.
 Chat WebKit assertions also passed at 900×620 and 100/140/150% zoom.
+
+
+## VS Code continuation, activity hints and Floating Desktop count (2026-11-08)
+
+Removed the unconditional paginated-history rejection. Resume now obtains the
+indexed native rollout path (instead of choosing an older filename-matching
+legacy base), passes excludeTurns and uses the editor runtime's resolved shared
+sqlite_home with private assigned-account authentication. The active history is
+not copied. Native paginated lineage lookup separately requires immutable legacy
+bases beneath CODEX_HOME; validate/copy only those bases to the account home.
+Repository/session identity checks remain, and a known active external turn is
+refused. Prefer native paginated turn listing, retaining the local reader fallback
+for runtimes whose listing method is unsupported. Old capability wording no longer
+claims that a failed turn-list request proves resume is unsupported.
+
+Validated actual native resume with both installed runtimes (PATH 0.154.0 and VS
+Code's 0.164.0-alpha.11.1) on temporary copies of an existing paginated session,
+its immutable base and SQLite backups. Each resumed the original ID/path in an
+isolated account home with shared history index, then resumed the same ID back
+through an editor-style home. No turn/start, inference, original-session changes,
+credential extraction or account mutation occurred during those probes.
+
+New native filesystem watcher emits Codex start/completion hints from session
+files; Cursor state database changes also invalidate activity. Work is off the UI
+thread, bounded/coalesced, and excludes credential/config changes and Codex DB WAL
+writes (avoiding read-induced refresh loops). The app-level listener updates known
+threads immediately and revalidates only the affected project/provider, including
+previously unopened project histories. Enabled-provider checks and five-second
+known-working reconciliation remain. Listeners/timers unsubscribe on disposal.
+
+Floating Desktop tracked status is clean, but six untracked .agent-artifacts files
+remain. About 19,000 counted changes come mostly from host-troubleshooting.log
+(about 18,800 lines), plus FloatdeskRtpCheck.kt, troubleshooting.md and three images
+(binary files count as one). The log was still growing during inspection. Nothing
+was removed or ignored. Project count help now explicitly breaks down staged,
+modified and untracked files and explains that committed tracked work can coexist
+with untracked agent artifacts.
+
+Validation: production build, chat/display/recovery/search/activity checks and
+serial native suite passed (220 unit + 3 integration, 5 ignored). New checks cover
+immutable lineage isolation, paginated acceptance/repository scope, excludeTurns,
+activity hint filtering, previously idle/unopened project starts, immediate cached
+start/completion, provider opt-in, scoped refreshes and listener cleanup. No push
+or commit was requested for this follow-up.
+WebKit chat/project UI assertions passed at 900×620 and 100/140/150% zoom.

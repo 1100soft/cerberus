@@ -194,7 +194,16 @@ impl Agents {
                 account_home
             } else { source_home.clone() };
             std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+            let rollout=if profile.subscription {resume.map(|target|codex.resume_path(&path,&target.session_id).or_else(|error|if target.source=="app"{crate::agent_sessions::rollout_path(&source_home,&target.session_id,&path)}else{Err(error)})).transpose()?}else{None};
+            if let Some(file)=&rollout {
+                if crate::codex::rollout_working(file){return Err("This conversation is still working in another client. Wait for its turn to finish before continuing here".into());}
+                crate::agent_sessions::prepare_history_bases(&source_home,&home,file,&path)?;
+            }
             let mut command = command(&profile, &path, &home, mode, prompt, &key, resume.map(|target| target.session_id.as_str()))?;
+            if profile.subscription {
+                let history=codex.history_home()?;
+                command.args(["-c",&format!("sqlite_home={}",serde_json::to_string(&history).map_err(|e|e.to_string())?)]);
+            }
             if profile.provider == "codex" && !profile.subscription {
                 if !tool_instructions.is_empty(){command.args(["-c",&format!("developer_instructions={}",serde_json::to_string(&tool_instructions).map_err(|e|e.to_string())?)]);}
                 if let Some(model) = resume.and_then(|target| crate::agent_sessions::recorded_model(&home, &target.session_id)) { command.args(["--model", &model]); }
@@ -236,8 +245,7 @@ impl Agents {
             let before = crate::agent_edits::snapshot(&path);
             let summary_output = output.clone();
             let result = if profile.subscription {
-                let model=selected_model.map(String::from).or_else(||resume.and_then(|target|crate::agent_sessions::recorded_model(&source_home,&target.session_id)));
-                let rollout=resume.map(|target|crate::agent_sessions::rollout_path(&source_home,&target.session_id,&path)).transpose()?;
+                let model=selected_model.map(String::from).or_else(||rollout.as_deref().and_then(crate::agent_sessions::model_at));
                 crate::subscription_run::run(command,&profile,&path,mode,prompt,(!tool_instructions.is_empty()).then_some(tool_instructions.as_str()),resume.map(|target|target.session_id.as_str()),model.as_deref(),reasoning_effort,rollout.as_deref(),cancel,output)
             } else { execute(
                 command,

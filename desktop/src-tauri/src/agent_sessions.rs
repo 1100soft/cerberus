@@ -33,7 +33,6 @@ pub fn session_event(text: &str) -> Option<String> {
 pub fn validate_rollout(file: &Path, id: &str, repository: &Path) -> Result<(), String> {
     let line = BufReader::new(std::fs::File::open(file).map_err(|_| "The stored Codex session is unavailable")?).lines().next().ok_or("Empty Codex session")?.map_err(|e| e.to_string())?;
     let value: Value = serde_json::from_str(&line).map_err(|_| "Unreadable Codex session")?;
-    if value["payload"]["history_mode"] == "paginated" { return Err("This Codex conversation uses paginated history, which the installed app-server cannot resume yet. Start a new chat".into()); }
     let cwd = value["payload"]["cwd"].as_str().ok_or("The session has no repository location")?;
     if value["type"] != "session_meta" || value["payload"]["id"].as_str() != Some(id) || Path::new(cwd).canonicalize().ok() != Some(repository.canonicalize().map_err(|e| e.to_string())?) {
         return Err("This session does not belong to the selected repository".into());
@@ -62,6 +61,42 @@ pub fn copy_for_account(source: &Path, destination: &Path, id: &str, repository:
     std::fs::create_dir_all(target.parent().unwrap()).map_err(|e|e.to_string())?;
     let temporary=target.with_extension("pending");std::fs::copy(&file,&temporary).map_err(|e|e.to_string())?;
     std::fs::rename(temporary,target).map_err(|e|e.to_string())
+}
+/// Keep authentication private, but let both clients discover the same history index.
+pub fn shared_history_home() -> Result<PathBuf,String> {
+    if let Some(path)=std::env::var_os("CODEX_SQLITE_HOME"){return Ok(PathBuf::from(path));}
+    codex_home()
+}
+pub fn codex_home() -> Result<PathBuf,String> {
+    if let Some(path)=std::env::var_os("CODEX_HOME"){return Ok(PathBuf::from(path));}
+    std::env::var_os(if cfg!(windows){"USERPROFILE"}else{"HOME"}).map(|home|PathBuf::from(home).join(".codex")).ok_or("Cannot find the Codex history folder".into())
+}
+/// Codex resolves migrated history bases under CODEX_HOME, separately from sqlite_home.
+/// Copy only those immutable bases, never the active rollout or account credentials.
+pub fn prepare_history_bases(source:&Path,account:&Path,rollout:&Path,repository:&Path)->Result<(),String>{
+    if source==account{return Ok(());}
+    let mut current=rollout.to_path_buf();
+    let mut visited=std::collections::HashSet::new();
+    for _ in 0..32 {
+        let line=BufReader::new(std::fs::File::open(&current).map_err(|e|e.to_string())?).lines().next().ok_or("Empty Codex history")?.map_err(|e|e.to_string())?;
+        let meta:Value=serde_json::from_str(&line).map_err(|e|e.to_string())?;
+        let Some(id)=meta["payload"]["history_base"]["thread_id"].as_str() else{return Ok(());};
+        if !valid_id(id)||!visited.insert(id.to_owned()){return Err("Invalid Codex history lineage; the original conversation was preserved".into());}
+        let base=find_rollout(&source.join("sessions"),id,6).or_else(||find_rollout(&source.join("archived_sessions"),id,6)).ok_or("The original Codex history base is unavailable. Restore its session files before continuing".to_owned())?;
+        validate_rollout(&base,id,repository)?;
+        if base==current{return Err("Codex history base points to its active rollout".into());}
+        let target=account.join("sessions").join(base.file_name().ok_or("Invalid history base path")?);
+        std::fs::create_dir_all(target.parent().unwrap()).map_err(|e|e.to_string())?;
+        let temporary=target.with_extension(format!("{}.pending",uuid::Uuid::new_v4()));
+        std::fs::copy(&base,&temporary).map_err(|e|e.to_string())?;
+        std::fs::rename(temporary,target).map_err(|e|e.to_string())?;
+        current=base;
+    }
+    Err("Codex history lineage is too deep to validate".into())
+}
+pub fn model_at(file:&Path)->Option<String>{
+    let reader=BufReader::new(std::fs::File::open(file).ok()?);
+    model_from_lines(reader.lines().map_while(Result::ok))
 }
 pub fn recorded_model(home: &Path, id: &str) -> Option<String> {
     let file = find_rollout(&home.join("sessions"), id, 6).or_else(|| find_rollout(&home.join("archived_sessions"), id, 6))?;
@@ -120,6 +155,21 @@ pub fn resolve(root: &Path, profile: &Profile, repository: &Path, target: &Resum
 mod tests {
     use super::*;
     #[test]
+    fn shared_resume_keeps_the_active_rollout_and_credentials_at_their_origin(){
+        let dir=tempfile::tempdir().unwrap();let source=dir.path().join("editor");let account=dir.path().join("account");let repo=dir.path().join("repo");std::fs::create_dir_all(source.join("sessions")).unwrap();std::fs::create_dir(&repo).unwrap();
+        let base=source.join("sessions/rollout-base123.jsonl");
+        std::fs::write(&base,serde_json::json!({"type":"session_meta","payload":{"id":"base123","cwd":repo}}).to_string()).unwrap();
+        let active=source.join("sessions/rollout-base123_active123.jsonl");
+        let contents=serde_json::json!({"type":"session_meta","payload":{"id":"base123","cwd":repo,"history_mode":"paginated","history_base":{"thread_id":"base123","end_ordinal_exclusive":1}}}).to_string();
+        std::fs::write(&active,&contents).unwrap();std::fs::write(source.join("auth.json"),"never copy this").unwrap();
+        validate_rollout(&active,"base123",&repo).unwrap();
+        prepare_history_bases(&source,&account,&active,&repo).unwrap();
+        assert_eq!(std::fs::read(account.join("sessions/rollout-base123.jsonl")).unwrap(),std::fs::read(&base).unwrap());
+        assert!(!account.join("sessions/rollout-base123_active123.jsonl").exists());assert!(!account.join("auth.json").exists());
+        assert_eq!(std::fs::read_to_string(&active).unwrap(),contents);
+        let wrong=dir.path().join("wrong");std::fs::create_dir(&wrong).unwrap();assert!(prepare_history_bases(&source,&account,&active,&wrong).is_err());
+    }
+    #[test]
     fn model_preserves_last_completed_turn_not_failed_resume_default() {
         let lines = [r#"{"type":"turn_context","payload":{"model":"original-model"}}"#,r#"{"type":"event_msg","payload":{"type":"task_complete"}}"#,r#"{"type":"turn_context","payload":{"model":"wrong-default"}}"#];
         assert_eq!(model_from_lines(lines.into_iter().map(String::from)).as_deref(),Some("original-model"));
@@ -169,7 +219,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(),original);
         assert!(copy_for_account(&home,&dir.path().join("wrong"),"session123",&other).is_err());
         std::fs::write(&file,serde_json::json!({"type":"session_meta","payload":{"id":"session123","cwd":repo,"history_mode":"paginated"}}).to_string()).unwrap();
-        assert!(resolve(dir.path(), &profile, &repo, &target, &codex).unwrap_err().contains("paginated history"));
+        assert_eq!(resolve(dir.path(), &profile, &repo, &target, &codex).unwrap(),home);
         std::fs::remove_file(file).unwrap();
         assert!(resolve(dir.path(), &profile, &repo, &target, &codex).unwrap_err().contains("removed"));
     }
