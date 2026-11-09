@@ -37,3 +37,47 @@ Release continuation after development publication: if variables.release=true, a
 For a release-marked task, development publication alone is not ALREADY_SATISFIED. Publish or independently verify the exact approved prepared SHA at the original development upstream (including after Integrate already pushed it). Require the remote source tip to equal the exact reviewed SHA, not merely contain a patch or a newer unreviewed descendant. If it differs, preserve the goal and request fresh review; never release that other SHA. After successful exact publication verification, explicitly emit the conditional release-ready handoff, even if no push or commit was necessary. Verify that the handoff file was written.
 
 Write structured JSON containing the unchanged releasePlan, reviewedSha, reviewRun, documentationReviewed:true, documentationPaths, validation, sourcePublished:true, publishedSha (same exact reviewed SHA), publishRun (this Publish run ID), verified development remote/ref, and variables:{release:true,releaseReady:true}. Emit only after both original authorization and exact remote publication are verified. No release-ready on BLOCKED, REVISE or a new SHA awaiting Review. If the exact release was already published and verified, report ALREADY_RELEASED without re-emission. Do not create release tags or push the release target yourself. Carry variables.release=true and the complete plan into revise/review handoffs and reconciliation commits, preserving release trailers; changed SHAs require fresh documentation/code review.
+
+
+Release approval provenance — mandatory output check:
+Use one canonical top-level JSON contract on every approved release handoff: reviewRun, reviewedSha, releasePlan, documentationReviewed:true, documentationPaths and variables.release:true. releasePlan.previousTargetSha must be present as a string (an empty string is valid only for an independently verified absent target); keep the complete plan unchanged. Never emit reviewRun:null, omit it, put it only inside another object, substitute a session ID, or invent an identifier. A prose claim that review succeeded is insufficient.
+Before ANY integration/publication side effect, require the incoming approval's reviewRun to be a nonempty string and independently verify its Review/commit evidence. Missing provenance is BLOCKED before push, even when the intended commit is already integrated or published. Do not use an optional lookup that silently turns a missing field into null. Copy the verified approval object instead of reconstructing a partial one; preserve reviewRun, reviewedSha, documentationPaths and the full releasePlan exactly. If a verified older payload wraps releasePlan under release.releasePlan, copy that exact plan into the canonical top-level releasePlan; do not leave it nested only. Your own run ID belongs in integrateRun/publishRun, never in reviewRun.
+
+Stage the JSON in TEMP_JSON beside the configured output and run this check with the original incoming path and exact configured OUTPUT_HANDOFF. It validates and atomically publishes the staged file. If it fails, no invalid outgoing file may remain and no continuation may be emitted. Read back the final file before finishing. For a release-ready handoff, also require sourcePublished:true, publishedSha==reviewedSha, a nonempty publishRun and variables.releaseReady:true. Preserve the original incoming file for comparison.
+```bash
+python3 - forward TEMP_JSON INPUT_HANDOFF OUTPUT_HANDOFF <<'PY_RELEASE_APPROVAL'
+import json, os, re, sys
+from pathlib import Path, PurePosixPath
+mode, output, incoming, final_path = sys.argv[1:]
+p = json.loads(Path(output).read_text())
+assert isinstance(p, dict), "Approval must be a JSON object"
+assert isinstance(p.get("reviewRun"), str) and p["reviewRun"].strip(), "Missing reviewRun"
+assert isinstance(p.get("reviewedSha"), str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", p["reviewedSha"]), "Missing exact reviewedSha"
+assert p.get("documentationReviewed") is True, "Documentation review not approved"
+assert isinstance(p.get("documentationPaths"), list) and p["documentationPaths"], "Missing documentationPaths"
+assert all(isinstance(x, str) and x and not PurePosixPath(x).is_absolute() and ".." not in PurePosixPath(x).parts for x in p["documentationPaths"]), "Invalid documentationPaths"
+assert p.get("variables", {}).get("release") is True, "Missing release flag"
+plan = p.get("releasePlan")
+assert isinstance(plan, dict) and plan.get("schema") == 1, "Missing top-level schema-1 releasePlan"
+assert isinstance(plan.get("previousTargetSha"), str), "Missing captured target tip"
+for key in ("requestRun", "remoteName", "remoteUrl", "sourceBranch", "sourceSha", "targetBranch", "tag", "sourceTag", "progressLevel"):
+    assert isinstance(plan.get(key), str) and plan[key], "Missing plan field: " + key
+if mode == "review":
+    expected = Path(final_path).stem
+    assert p["reviewRun"] == expected, "reviewRun must equal this Review's output-file run ID"
+    assert not os.environ.get("CERBERUS_ACTIVITY_RUN_ID") or os.environ["CERBERUS_ACTIVITY_RUN_ID"] == expected, "Current-run context disagrees"
+else:
+    assert mode == "forward", "Invalid validation mode"
+    original = json.loads(Path(incoming).read_text())
+    assert isinstance(original.get("reviewRun"), str) and original["reviewRun"].strip(), "Input lacks review provenance; block before publication"
+    assert p["reviewRun"] == original["reviewRun"], "Review provenance changed"
+    assert p["reviewedSha"] == original["reviewedSha"], "Reviewed SHA changed"
+    original_plan = original.get("releasePlan") or original.get("release", {}).get("releasePlan")
+    assert p["releasePlan"] == original_plan, "Original release plan changed"
+    assert p["documentationPaths"] == original["documentationPaths"] and original.get("documentationReviewed") is True, "Documentation approval changed"
+if p.get("variables", {}).get("releaseReady") is True:
+    assert p.get("sourcePublished") is True and p.get("publishedSha") == p["reviewedSha"], "Release-ready must prove exact development publication"
+    assert isinstance(p.get("publishRun"), str) and p["publishRun"].strip(), "Missing publishRun"
+os.replace(output, final_path)
+PY_RELEASE_APPROVAL
+```

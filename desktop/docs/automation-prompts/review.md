@@ -42,3 +42,47 @@ Release intent discovery and propagation: inspect the reviewed commit's trailers
 Review the complete prepared snapshot, including all version manifests/lockfiles, release notes/changelog and relevant current-version documentation. Preserve historical references; never approve solely because the numeric version check passes. Check and record inspected documentation paths even if no doc edit was necessary. Target/source races need fresh verification/review, not a new version guess.
 
 An approved release preparation follows the normal publication route: emit integrate for a temporary preparation/correction branch, or publish for the verified original development source branch. Include variables:{release:true}, the unchanged schema-1 releasePlan, reviewedSha, reviewRun (this Review run ID), documentationReviewed:true, documentationPaths, validation and the verified original development source/upstream/target evidence. Temporary branches use the explicitly verified release contract; do not manufacture an ordinary upstream. If a substantive defect needs revise, preserve the same release flag/plan and authorization chain while marking documentation approval as pending, never approved for a changed SHA. Review never emits release-ready directly. Only Publish can emit it after confirming that the exact approved preparation SHA is published at the development upstream; ordinary non-release workflows keep their existing behavior.
+
+
+Release approval provenance — mandatory output check:
+Use one canonical top-level JSON contract on every approved release handoff: reviewRun, reviewedSha, releasePlan, documentationReviewed:true, documentationPaths and variables.release:true. releasePlan.previousTargetSha must be present as a string (an empty string is valid only for an independently verified absent target); keep the complete plan unchanged. Never emit reviewRun:null, omit it, put it only inside another object, substitute a session ID, or invent an identifier. A prose claim that review succeeded is insufficient.
+Review creates reviewRun: use the exact basename stem of THIS Review's configured outgoing handoff path (the run ID supplied by Cerberus); confirm it against CERBERUS_ACTIVITY_RUN_ID when that environment variable is available. Do not copy an upstream run ID or generate a UUID. Only after performing the actual review, set reviewRun explicitly to that value in the approved integrate/publish JSON. Write the JSON to TEMP_JSON in the same directory as the intended output, then run the check below; it validates the payload and atomically publishes it to OUTPUT_HANDOFF only after every check passes. Read back the final file and report the approving Review run ID. If identity or any required field cannot be verified, report BLOCKED and emit no approved handoff.
+
+Run this Python check on the staged JSON (replace TEMP_JSON and OUTPUT_HANDOFF with real paths, and use the exact configured final output path; the dash means Review is authoring a new approval):
+```bash
+python3 - review TEMP_JSON - OUTPUT_HANDOFF <<'PY_RELEASE_APPROVAL'
+import json, os, re, sys
+from pathlib import Path, PurePosixPath
+mode, output, incoming, final_path = sys.argv[1:]
+p = json.loads(Path(output).read_text())
+assert isinstance(p, dict), "Approval must be a JSON object"
+assert isinstance(p.get("reviewRun"), str) and p["reviewRun"].strip(), "Missing reviewRun"
+assert isinstance(p.get("reviewedSha"), str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", p["reviewedSha"]), "Missing exact reviewedSha"
+assert p.get("documentationReviewed") is True, "Documentation review not approved"
+assert isinstance(p.get("documentationPaths"), list) and p["documentationPaths"], "Missing documentationPaths"
+assert all(isinstance(x, str) and x and not PurePosixPath(x).is_absolute() and ".." not in PurePosixPath(x).parts for x in p["documentationPaths"]), "Invalid documentationPaths"
+assert p.get("variables", {}).get("release") is True, "Missing release flag"
+plan = p.get("releasePlan")
+assert isinstance(plan, dict) and plan.get("schema") == 1, "Missing top-level schema-1 releasePlan"
+assert isinstance(plan.get("previousTargetSha"), str), "Missing captured target tip"
+for key in ("requestRun", "remoteName", "remoteUrl", "sourceBranch", "sourceSha", "targetBranch", "tag", "sourceTag", "progressLevel"):
+    assert isinstance(plan.get(key), str) and plan[key], "Missing plan field: " + key
+if mode == "review":
+    expected = Path(final_path).stem
+    assert p["reviewRun"] == expected, "reviewRun must equal this Review's output-file run ID"
+    assert not os.environ.get("CERBERUS_ACTIVITY_RUN_ID") or os.environ["CERBERUS_ACTIVITY_RUN_ID"] == expected, "Current-run context disagrees"
+else:
+    assert mode == "forward", "Invalid validation mode"
+    original = json.loads(Path(incoming).read_text())
+    assert isinstance(original.get("reviewRun"), str) and original["reviewRun"].strip(), "Input lacks review provenance; block before publication"
+    assert p["reviewRun"] == original["reviewRun"], "Review provenance changed"
+    assert p["reviewedSha"] == original["reviewedSha"], "Reviewed SHA changed"
+    original_plan = original.get("releasePlan") or original.get("release", {}).get("releasePlan")
+    assert p["releasePlan"] == original_plan, "Original release plan changed"
+    assert p["documentationPaths"] == original["documentationPaths"] and original.get("documentationReviewed") is True, "Documentation approval changed"
+if p.get("variables", {}).get("releaseReady") is True:
+    assert p.get("sourcePublished") is True and p.get("publishedSha") == p["reviewedSha"], "Release-ready must prove exact development publication"
+    assert isinstance(p.get("publishRun"), str) and p["publishRun"].strip(), "Missing publishRun"
+os.replace(output, final_path)
+PY_RELEASE_APPROVAL
+```

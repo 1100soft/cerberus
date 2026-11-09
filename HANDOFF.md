@@ -2599,3 +2599,52 @@ model capabilities, commit-event/coalescing, diagnostic-launcher privacy/readine
 and release-tooling checks passed. Prior saved-prompts WebKit UI assertions passed
 on this implementation; new standalone Rust files pass rustfmt --check. The live
 diagnostic app and its owned Vite server remain untouched. No push is performed.
+
+
+## Release review provenance repair and prevention (2026-11-09)
+
+Mountlet's v0.7.6 Release publish failed at 07:15 Europe/Oslo because the approving
+Review handoff omitted reviewRun. Integrate and Publish propagated null. The final
+publisher correctly rejected it before publishing; main and tags were unchanged.
+User authorized prompt improvements and repair/retry of this exact release.
+
+Updated live configured Review/Integrate/Publish prompts through the active app's
+savePrompt API, preserving IDs, trigger sets, enabled settings and custom text.
+Backed up SQLite config and old/new prompts under config-backups/release-review-
+provenance-20261109-063835 in app data (earlier intermediate backups also retained).
+Repo prompt copies carry the same role-specific provenance rules and executable
+JSON check. Review must derive its own run ID from its configured outgoing filename
+and check CERBERUS_ACTIVITY_RUN_ID when available. Forward stages require nonempty
+incoming reviewRun before side effects; preserve it, exact SHA, documentation paths
+and the complete plan. Own integrate/publish IDs never replace Review provenance.
+The check stages JSON and atomically publishes only after validating identity,
+required fields, documentation, unchanged forwarding contract and release-ready
+publication proof. Initial absent targets remain supported via an empty captured
+previousTargetSha string. Wrapped legacy releasePlan is normalized without loss.
+
+Verified original manual plan 120c08b5-97fd-4b22-b6f6-53283d62c926, completed Review
+53319ebd-cf12-4a49-a180-287f937ebed3 (e3ff340fd2d50b327b045c9153a233af17fde29a),
+its emitted integrate payload, subsequent Integrate/Publish evidence, documentation
+paths, ancestry and unchanged remote source/target/tags. Repaired ONLY reviewRun
+in the retained release-ready input 51a71550-cb9e-4fbf-9e67-ef9f002b33f5. Protected
+backup includes original payload, logs, hashes and recovery-audit.json. Existing
+publisher's unchanged guard passed before retry; no approval/lease guard weakened.
+
+Retried the original blocked action through refreshBlockedAutomations and
+retryBlockedAutomation in the live app, retaining its original handoff ID/context.
+Retry d45d5ec9-e725-4ade-95db-30a12ec15bab completed. Main now has exactly one release
+commit 8801c8bdc456d0d02f7f94ea2e196c0b9d2a490f after adba38df36380b5a0099f321ccc9be8967910bc3.
+Its tree 7a3187a949ce8e210a8bb75ac37f7d46d881d14a equals reviewed e3ff340's tree.
+Verified remote v0.7.6 -> release commit, cerberus/source/v0.7.6 -> e3ff340, and wip
+remains e3ff340. Original failure log remains, retry context cleared; job is enabled,
+completed and errorUnread=false. GitHub release/package workflows started; their
+completion is independent of the successful Release publish script. Inspector was
+closed afterward; the existing app/diagnostic server remain running.
+
+Validation: actual prompt-embedded checker tests passed (5 cases with invalid/null
+identity, changed contract/docs/SHA/plan, wrapped legacy plan, initial target and
+publication-proof variants); existing release publisher disposable-remote tests
+passed (13), release-tooling tests passed (3). New checker added to CI. Live prompt
+persistence read back and compared exactly; retry and remote Git objects independently
+verified. No Cerberus source commit or push requested in this turn. Mountlet's
+explicitly authorized release publication was performed by its existing automation.
