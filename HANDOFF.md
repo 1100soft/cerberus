@@ -2671,3 +2671,16 @@ Review/Publish and clarified verified destination terminology. Release provenanc
 checks passed (5); publisher checks passed (13); git diff --check passed. These
 checks cover existing release guards, not a behavioral test of agent interpretation.
 Prior pending release-provenance changes remain uncommitted alongside this work.
+
+## Release preparation output streams (2026-11-10)
+
+The initial Release script succeeded but emit_handoff printed normal preparation
+instructions to stderr, making the log look erroneous. Normal handoff context now
+uses stdout; fail/on_error redirect their diagnostic context to stderr and retain
+nonzero status. Updated the live manual Release script via savePrompt, with exact
+read-back verification and protected config-backups/release-output-* backup.
+Updated repository release.sh and its embedded release-publish.sh snapshot; the
+live publisher's execution behavior was not changed. Added regression assertions
+that successful preparation context is on stdout and absent from stderr. All 13
+release publisher tests pass, bash syntax and git diff --check pass. Existing run
+logs remain unchanged; no release rerun was needed or performed.
