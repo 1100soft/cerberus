@@ -2648,3 +2648,26 @@ passed (13), release-tooling tests passed (3). New checker added to CI. Live pro
 persistence read back and compared exactly; retry and remote Git objects independently
 verified. No Cerberus source commit or push requested in this turn. Mountlet's
 explicitly authorized release publication was performed by its existing automation.
+
+## Missing tracking configuration in automation prompts (2026-11-10)
+
+Latest shared-CI Review 4c38e65a-a96a-49c5-94f6-e874547d6823 reviewed
+commit e3fc706471046c056ff186537e0f83ae8de8bba5 on wip but blocked solely on
+missing branch.wip.remote/merge. Existing prompt policy required this block.
+Updated live Review, Publish, CI fix, Revise and Integrate through savePrompt and
+updated their repository prompt copies. Both absent tracking keys now allow a
+verified same-name remote ref on the project's bound canonical repository.
+Require verified fetch/push destination, unique remote selection, authenticated
+exact-ref lookup, source/checkpoint identity, downstream independent revalidation
+and full resolution evidence. Partial/conflicting configuration, unknown/absent
+remote refs, ambiguous destinations and temporary correction branches do not use
+this fallback. Existing review, integration, ancestry/race and non-force guards
+remain. No Git tracking configuration changed and no agent rerun/push requested.
+
+Protected before/after backups are in app-data config-backups/upstream-resolution-*
+and upstream-resolution-refinement-*. All five live prompt strings were read back
+and matched exactly. Removed unconditional missing-upstream block wording in
+Review/Publish and clarified verified destination terminology. Release provenance
+checks passed (5); publisher checks passed (13); git diff --check passed. These
+checks cover existing release guards, not a behavioral test of agent interpretation.
+Prior pending release-provenance changes remain uncommitted alongside this work.
