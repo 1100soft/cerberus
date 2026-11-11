@@ -2684,3 +2684,18 @@ live publisher's execution behavior was not changed. Added regression assertions
 that successful preparation context is on stdout and absent from stderr. All 13
 release publisher tests pass, bash syntax and git diff --check pass. Existing run
 logs remain unchanged; no release rerun was needed or performed.
+
+## 1100 paginated conversation resume identity (2026-11-11)
+
+1100 agent thread 01a11ae6-2f6a-79d1-9465-cf345e4bf293 correctly belongs to
+/home/eh930/project/management/1100. prepare_history_bases incorrectly passed a
+history_base.thread_id (a paginated segment storage ID) to validate_rollout as the
+logical session ID. VS Code preserves the original conversation ID in metadata
+across these segments, causing a misleading repository-mismatch error. Validate
+base segments against the current segment's logical conversation ID instead;
+validate current metadata too, retaining canonical repository and identity guards.
+No history, index, credentials or conversation IDs were modified. Read-only check
+of the actual three-segment lineage confirms consistent repository and logical ID.
+Regression test covers storage-ID difference and rejects wrong conversation or
+repository. Six agent_sessions tests pass; git diff --check passes. Native change
+requires rebuild/restart; live diagnostic process was not stopped or replaced.

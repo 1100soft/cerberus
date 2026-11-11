@@ -83,7 +83,11 @@ pub fn prepare_history_bases(source:&Path,account:&Path,rollout:&Path,repository
         let Some(id)=meta["payload"]["history_base"]["thread_id"].as_str() else{return Ok(());};
         if !valid_id(id)||!visited.insert(id.to_owned()){return Err("Invalid Codex history lineage; the original conversation was preserved".into());}
         let base=find_rollout(&source.join("sessions"),id,6).or_else(||find_rollout(&source.join("archived_sessions"),id,6)).ok_or("The original Codex history base is unavailable. Restore its session files before continuing".to_owned())?;
-        validate_rollout(&base,id,repository)?;
+        // Segment filenames use storage IDs; metadata keeps the logical conversation ID.
+        let conversation_id = meta["payload"]["id"].as_str().filter(|id| valid_id(id))
+            .ok_or("Invalid Codex conversation identity")?;
+        validate_rollout(&current, conversation_id, repository)?;
+        validate_rollout(&base, conversation_id, repository)?;
         if base==current{return Err("Codex history base points to its active rollout".into());}
         let target=account.join("sessions").join(base.file_name().ok_or("Invalid history base path")?);
         std::fs::create_dir_all(target.parent().unwrap()).map_err(|e|e.to_string())?;
@@ -168,6 +172,28 @@ mod tests {
         assert!(!account.join("sessions/rollout-base123_active123.jsonl").exists());assert!(!account.join("auth.json").exists());
         assert_eq!(std::fs::read_to_string(&active).unwrap(),contents);
         let wrong=dir.path().join("wrong");std::fs::create_dir(&wrong).unwrap();assert!(prepare_history_bases(&source,&account,&active,&wrong).is_err());
+    }
+    #[test]
+    fn paginated_storage_id_is_not_the_conversation_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("editor"); let account = dir.path().join("account");
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(source.join("sessions")).unwrap(); std::fs::create_dir(&repo).unwrap();
+        let base = source.join("sessions/rollout-conversation_segment1.jsonl");
+        let active = source.join("sessions/rollout-conversation_segment2.jsonl");
+        let metadata = |id: &str, cwd: &Path| serde_json::json!({"type":"session_meta","payload":{"id":id,"cwd":cwd}});
+        std::fs::write(&base, metadata("conversation", &repo).to_string()).unwrap();
+        let mut current = metadata("conversation", &repo);
+        current["payload"]["history_base"] = serde_json::json!({"thread_id":"segment1"});
+        std::fs::write(&active, current.to_string()).unwrap();
+        prepare_history_bases(&source, &account, &active, &repo).unwrap();
+        assert!(account.join("sessions/rollout-conversation_segment1.jsonl").exists());
+        assert!(!account.join("sessions/rollout-conversation_segment2.jsonl").exists());
+        std::fs::write(&base, metadata("other-conversation", &repo).to_string()).unwrap();
+        assert!(prepare_history_bases(&source, &account, &active, &repo).is_err());
+        let other = dir.path().join("other"); std::fs::create_dir(&other).unwrap();
+        std::fs::write(&base, metadata("conversation", &other).to_string()).unwrap();
+        assert!(prepare_history_bases(&source, &account, &active, &repo).is_err());
     }
     #[test]
     fn model_preserves_last_completed_turn_not_failed_resume_default() {
