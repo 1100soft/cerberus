@@ -2699,3 +2699,50 @@ of the actual three-segment lineage confirms consistent repository and logical I
 Regression test covers storage-ID difference and rejects wrong conversation or
 repository. Six agent_sessions tests pass; git diff --check passes. Native change
 requires rebuild/restart; live diagnostic process was not stopped or replaced.
+
+## Standard window settings and editable automation workspace (2026-11-16)
+
+Live X11 properties show KDE already supplies Cerberus with a normal native window
+frame: _NET_WM_WINDOW_TYPE_NORMAL, _NET_FRAME_EXTENTS 0,0,28,0, no GTK client-side
+frame extents. The title bar belongs to the WM frame, which client-area-only
+capture tools omit. No custom HTML titlebar was present. Explicitly retain native
+decorations, resizing and taskbar presence in tauri.conf.json; no KDE rules changed.
+
+Added Automation settings -> Configure workflows: editable JSON proposal, worker
+validation, create/update/delete overview and atomic list Apply with optimistic
+concurrency guard; active-run replacements are blocked. Existing runtime state,
+CI/email monitoring timestamps and account routes are preserved; unchanged jobs
+retain pending condition/CI events. Unknown fields, duplicate IDs, invalid types,
+condition sets, handoff/branch syntax, manual inputs, runtimes, project/account
+references and stale revisions are rejected. Configuration errors do not disable
+rules. Apply starts no manual execution; enabled rules resume normal polling,
+including eligible pending contexts. Per-project account routing is not exported.
+
+Native async commands use spawn_blocking for an app-data automation-config/
+workspace: current.json, editable workflows.json, catalog.json, schema.json,
+README.md, handoffs.md and up to 20 previous snapshots under backups/. Writes use
+same-directory atomic temporary files. External draft edits are preserved on
+refresh. Files are explicit review snapshots, not an automatic execution path or
+continuous mirror; active settings remain in existing storage. Credentials and
+logs are excluded; user-authored prompts/scripts remain sensitive user data.
+The guide explains versions, stable IDs, full-list deletion, scopes, AND/OR,
+handoffs/flags, runtime variables and an example for low-capability agents.
+
+Optional in-app Draft with AI uses connected provider profiles, chosen context
+project and account-scoped Codex model choices, with quota notice and owned-draft
+stop handling. It runs analysis only and validates returned JSON without applying.
+Users can instead copy instructions/open the folder for local agents, or paste a
+proposal from any external service. No new generic provider endpoint is installed.
+Schema/guide are embedded in native binary and exported with the workspace.
+
+Validation: production build passed (dropdown/style checks, TypeScript, Vite;
+existing bundle/dynamic-import advisories remain). Pure configuration regression
+checks pass; added to CI. WebKit configuration UI passes explicit Apply, disabled
+creation, concurrent-edit rejection, real worker validation, dropdown/layout checks
+at 100/140/150% zoom; existing full saved-prompts WebKit regression also passes.
+Native library suite passed: 228 passed, 5 ignored (233 total); focused workspace
+suite 4/4 passed after final embedded-document change. Rustfmt on new Rust module
+and git diff --check pass. No paid inference, real workflow replacement, push or
+commit performed. Existing native diagnostic app/server are not restarted; native
+commands and explicit window flags require rebuild/restart. Earlier uncommitted
+release/prompt/session fixes remain present and are not discarded.

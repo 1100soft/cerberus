@@ -332,3 +332,15 @@ the intent; verified plans and release flags propagate through corrections. Both
 normal and recovery paths use this chain. Only Publish emits `release-ready`
 after confirming the exact reviewed development commit. See the templates for
 handoff names, required flags and approval fields.
+
+
+## Workflow files and AI configuration
+
+Automation settings includes **Configure workflows** for managing the whole list.
+Open the local workspace in an editor, ask a connected agent to draft changes
+(account quota applies), or paste a JSON proposal from another AI service. The
+workspace contains current/proposed configuration, project/account references,
+a JSON Schema and agent instructions. Validate, inspect changes and Apply; file
+edits alone never execute. Stale proposals and active-run replacements are blocked.
+Prompts and scripts may contain private text, so inspect before sharing externally.
+See [workflow configuration](automation-config.md) for fields, revisions and examples.

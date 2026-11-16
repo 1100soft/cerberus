@@ -1,3 +1,4 @@
+mod workflow_config;
 mod repository_activity;
 mod item_activity;
 mod issue_feedback;
@@ -242,6 +243,18 @@ async fn remove_agent_profile(id: String, state: State<'_, AppState>) -> Result<
 }
 #[tauri::command]
 async fn save_agent_conversation(chat:Value,state:State<'_,AppState>)->Result<(),String>{let store=state.conversations.clone();tauri::async_runtime::spawn_blocking(move||store.save(chat)).await.map_err(|e|e.to_string())?}
+#[tauri::command]
+async fn workflow_config_sync(automations:Value,catalog:Value,state:State<'_,AppState>)->Result<workflow_config::Workspace,String>{
+ let root=state.data_dir.clone(); tauri::async_runtime::spawn_blocking(move||workflow_config::sync(&root,automations,catalog)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn workflow_config_read(state:State<'_,AppState>)->Result<workflow_config::Workspace,String>{
+ let root=state.data_dir.clone(); tauri::async_runtime::spawn_blocking(move||workflow_config::read(&root)).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+async fn workflow_config_open(state:State<'_,AppState>)->Result<(),String>{
+ let path=state.data_dir.join("automation-config"); tauri::async_runtime::spawn_blocking(move||open_url::that(path.to_string_lossy().into_owned()).map_err(|e|e.to_string())).await.map_err(|e|e.to_string())?
+}
 #[tauri::command]
 async fn agent_conversations(state:State<'_,AppState>)->Result<Vec<Value>,String>{let store=state.conversations.clone();tauri::async_runtime::spawn_blocking(move||store.list()).await.map_err(|e|e.to_string())?}
 #[tauri::command]
@@ -1298,7 +1311,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(tauri::generate_handler![workflow_config_sync,workflow_config_read,workflow_config_open,
             provider_setup_status, set_provider_path,
             chatgpt_settings, assign_chatgpt_account, begin_chatgpt_login, poll_chatgpt_login, cancel_chatgpt_login, disconnect_chatgpt,
             external_identities, external_identity_snapshot, external_identity_settings, assign_external_identity, default_external_identity, login_external_identity, logout_external_identity,

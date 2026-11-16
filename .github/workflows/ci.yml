@@ -55,6 +55,7 @@ jobs:
         node scripts/check-repositories.mjs
         node scripts/check-release-version.mjs
         python3 scripts/check-release-provenance.py
+        node scripts/check-automation-config.mjs
         node scripts/check-chatgpt-capabilities.mjs
         node scripts/check-conversation-display.mjs
         node scripts/check-conversation-activity.mjs
