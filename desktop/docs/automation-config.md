@@ -19,7 +19,8 @@ in Cerberus separately; this feature does not install an AI service.
 3. Click Reload, then Validate. Review the full JSON and added/changed/deleted
    names, enabled states, scope, scripts and prompts. Apply replaces the list
    together. No manual run starts; enabled rules resume at the next scheduler check, including
-   matching pending events and retained handoffs.
+   matching pending events and retained handoffs. A workflow whose exported definition
+   is unchanged keeps its pending events. Removed workflows drop saved CI deduplication.
    Active automations must finish first. Invalid/unapplied files never execute.
 4. If revision changed, merge edits into latest current.json, preserving its
    revision. Never blindly replace the revision without reconciling changes.

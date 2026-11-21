@@ -15,6 +15,7 @@ import { useSyncExternalStore } from 'react';
 import { addAutomationNotice, currentAutomationNotices } from './automationNotifications';
 import type { Provider } from './conversationCache';
 import { getAgentChat, currentAgentChats, initializeAgentChats, restoreAgentConversation, updateAgentChat, latestAgentChat, subscribeAgentChats, runExternalAutomation, sendAgentMessage, waitForAgentChat, type AgentProfile } from './agentChats';
+import { workflowDiff } from './automationConfig';
 import { automationAccount } from './automationAccounts';
 import { appendAutomationOutput, beginAutomationOutput, endAutomationOutput } from './automationOutput';
 import { isGithubRemote } from './repositories';
@@ -211,10 +212,14 @@ export function savePrompt(job:SavedPrompt){for(const key of pendingConditionEve
 export function replaceAutomationConfiguration(next:SavedPrompt[],expected:string){
  if(currentAutomationRuns().length)throw Error('Wait for active automation runs to finish before applying configuration.');
  if(JSON.stringify(jobs)!==expected)throw Error('Automation configuration changed. Reload and validate again.');
- const unchanged=new Set(next.filter(job=>jobs.includes(job)).map(job=>job.id));
+ // Validation runs in a worker, so returned jobs are copies. Compare definitions.
+ const diff=workflowDiff(jobs,next);
+ const changed=new Set([...diff.changed,...diff.removed].map(job=>job.id));
  publish(next);
- for(const [key,event] of pendingConditionEvents)if(!unchanged.has(event.jobId))pendingConditionEvents.delete(key);
- for(const [key,event] of pendingCi)if(!unchanged.has(event.jobId))pendingCi.delete(key);
+ for(const [key,event] of pendingConditionEvents)if(changed.has(event.jobId))pendingConditionEvents.delete(key);
+ for(const [key,event] of pendingCi)if(changed.has(event.jobId))pendingCi.delete(key);
+ for(const job of diff.removed)for(const key of Object.keys(ciHandled))if(key.startsWith(`${job.id}:`))delete ciHandled[key];
+ if(diff.removed.length)try{localStorage.setItem(ciHandledKey,JSON.stringify(ciHandled));}catch{/* Removed workflows cannot run again. */}
 }
 export function removePrompt(id:string){for(const key of pendingConditionEvents.keys())if(key.startsWith(`${id}:`))pendingConditionEvents.delete(key);publish(jobs.filter(item=>item.id!==id));for(const key of pendingCi.keys())if(key.startsWith(`${id}:`))pendingCi.delete(key);for(const key of Object.keys(ciHandled))if(key.startsWith(`${id}:`))delete ciHandled[key];try{localStorage.setItem(ciHandledKey,JSON.stringify(ciHandled));}catch{/* The removed job cannot run again. */}}
 export function reorderSavedPrompts(ids:string[]){

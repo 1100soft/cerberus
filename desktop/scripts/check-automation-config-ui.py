@@ -42,10 +42,10 @@ script = r"""
  assert(saved.savedPrompts().find(j=>j.id==='fixture-rule').title==='Concurrent title','Stale Apply overwrote concurrent edits');
  const details=mount.querySelector('details');details.open=true;await pause(100);
  for(const zoom of [1,1.4,1.5]){
- document.body.style.zoom=String(zoom);await pause(80);
+ document.documentElement.style.setProperty('--ui-zoom',String(zoom));document.body.style.zoom=String(zoom);await pause(80);
  const content=mount.querySelector('.automation-dialog-content');content.scrollTop=content.scrollHeight;
  const footer=mount.querySelector('footer'),dialog=mount.querySelector('[role=dialog]');
- assert(dialog.clientHeight<=innerHeight/zoom+20,'Dialog exceeds viewport at '+zoom);
+ assert(dialog.clientHeight<=innerHeight/zoom+20,'Dialog exceeds viewport at '+zoom+' '+JSON.stringify({clientHeight:dialog.clientHeight,innerHeight,maxHeight:getComputedStyle(dialog).maxHeight,zoomVar:getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')}));
  const f=footer.getBoundingClientRect(),d=dialog.getBoundingClientRect();assert(f.bottom<=d.bottom+2,'Footer clipped at '+zoom+' '+JSON.stringify({footer:f.toJSON(),dialog:d.toJSON()}));
  const picker=mount.querySelector('[aria-haspopup="listbox"]');assert(picker,'Account selector missing');picker.scrollIntoView({block:'center'});await pause(60);picker.click();await pause(120);
  assert(document.querySelector('[role="listbox"]'),'App-rendered dropdown missing at '+zoom);

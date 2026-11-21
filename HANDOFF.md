@@ -2746,3 +2746,14 @@ and git diff --check pass. No paid inference, real workflow replacement, push or
 commit performed. Existing native diagnostic app/server are not restarted; native
 commands and explicit window flags require rebuild/restart. Earlier uncommitted
 release/prompt/session fixes remain present and are not discarded.
+
+## Checkpoint integration (2026-11-21)
+
+The workflow validator returns copies from its worker, so list replacement now
+treats a workflow as unchanged by comparing its exported definition. Unchanged
+workflows keep pending condition and CI events. Removed workflows also drop
+their saved CI deduplication keys, matching single-workflow deletion. The
+WebKit workflow-configuration fixture is included in `scripts/check-webkit-ci.sh`
+with the other desktop UI checks and sets `--ui-zoom` while zooming, so the
+shared dialog height limit applies at 140% and 150%. Automation settings documentation names
+Configure workflows alongside retention and the default script runtime.
