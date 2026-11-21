@@ -1375,3 +1375,17 @@ input[type="number"] { text-align: right; }
 
 .stacked-input-field { display:flex; flex-direction:column; align-items:stretch; gap:8px; min-width:0; }
 .stacked-input-field > input { min-width:0; width:100%; box-sizing:border-box; }
+
+.automation-config-dialog {width:min(960px,94vw);min-height:0;overflow:hidden;}
+.automation-config-tools {display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:.8rem;}
+.automation-config-path {display:block;overflow-wrap:anywhere;margin-bottom:1rem;}
+.automation-config-editor {display:flex;flex-direction:column;gap:.7rem;}
+.automation-config-editor textarea {min-height:240px;height:35vh;resize:vertical;font-family:monospace;white-space:pre;overflow:auto;}
+.automation-config-dialog footer {flex-wrap:wrap;}
+.automation-config-dialog footer p {flex:1 1 100%;margin:0;overflow-wrap:anywhere;}
+.automation-config-tools {display:flex;flex-wrap:wrap;gap:.8rem;align-items:center;margin:.8rem 0;min-width:0;}
+.automation-config-tools .app-select {min-width:0;flex:1 1 180px;}
+.automation-config-path {display:block;overflow-wrap:anywhere;}
+.automation-config-ai {margin:1rem 0;}
+.automation-config-ai summary {cursor:pointer;}
+.automation-config-ai textarea {height:6rem;min-height:6rem;white-space:pre-wrap;}

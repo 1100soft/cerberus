@@ -35,6 +35,10 @@ export type BranchRemovalResult={completed:boolean;steps:string[];error:string|n
 export type RepositoryCommitState={head:string;branch:string;reflog:string;refs?:{key:string;head:string;branch:string;reflog:string}[]};
 
 export const api = {
+  async workflowConfigSync(automations:Record<string,unknown>[],catalog:unknown):Promise<import('./automationConfig').WorkflowWorkspace>{return invoke('workflow_config_sync',{automations,catalog});},
+  async workflowConfigRead():Promise<import('./automationConfig').WorkflowWorkspace>{return invoke('workflow_config_read');},
+  async workflowConfigOpen():Promise<void>{return invoke('workflow_config_open');},
+
   async cleanupAutomationCheckout(repositoryId:string,runId:string):Promise<boolean>{if(!inTauri())return false;return invoke('cleanup_automation_checkout',{repositoryId,runId});},
   async agentConversations():Promise<AgentChat[]>{if(!inTauri())return [];return invoke('agent_conversations');},
   async saveAgentConversation(chat:AgentChat):Promise<void>{if(!inTauri())return;return invoke('save_agent_conversation',{chat});},

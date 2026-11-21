@@ -4,6 +4,7 @@
 - [Local operations and verification](agent-operations.md)
 - [Project creation and GitHub accounts](projects.md)
 - [Automation](saved-prompts.md)
+- [Editable workflow configuration and AI drafting](automation-config.md)
 - [Project email and automation](email.md)
 - [Current handoff](../../HANDOFF.md)
 - [Desktop UI conventions](../AGENTS.md)

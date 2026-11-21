@@ -79,7 +79,8 @@ Do not rewrite either branch, discard concurrent changes,
 or modify active worktrees.
 A version-validation failure requires a reviewed metadata correction on the verified development branch before release retry. Do not publish mismatched tags, select another version, move existing tags, or rewrite target history. Always prepare and review release version metadata AND release documentation before publication. A numerically valid version check alone is not documentation approval. Complete the exact requested release only if all validation and publication guards pass."
 
-  echo "$details" >&2
+  # Normal preparation is informational; failure callers redirect this function.
+  printf '%s\n' "$details"
 
   if [[ -n "$handoff" ]]; then
     mkdir -p -- "$(dirname -- "$handoff")"
@@ -116,7 +117,7 @@ PY
 }
 
 fail() {
-  emit_handoff "$1"
+  emit_handoff "$1" >&2
   exit 1
 }
 
@@ -125,7 +126,7 @@ on_error() {
   local command="$2"
 
   trap - ERR
-  emit_handoff "Command failed (exit $status): $command"
+  emit_handoff "Command failed (exit $status): $command" >&2
   exit "$status"
 }
 

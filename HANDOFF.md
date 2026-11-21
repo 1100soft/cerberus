@@ -2599,3 +2599,161 @@ model capabilities, commit-event/coalescing, diagnostic-launcher privacy/readine
 and release-tooling checks passed. Prior saved-prompts WebKit UI assertions passed
 on this implementation; new standalone Rust files pass rustfmt --check. The live
 diagnostic app and its owned Vite server remain untouched. No push is performed.
+
+
+## Release review provenance repair and prevention (2026-11-09)
+
+Mountlet's v0.7.6 Release publish failed at 07:15 Europe/Oslo because the approving
+Review handoff omitted reviewRun. Integrate and Publish propagated null. The final
+publisher correctly rejected it before publishing; main and tags were unchanged.
+User authorized prompt improvements and repair/retry of this exact release.
+
+Updated live configured Review/Integrate/Publish prompts through the active app's
+savePrompt API, preserving IDs, trigger sets, enabled settings and custom text.
+Backed up SQLite config and old/new prompts under config-backups/release-review-
+provenance-20261109-063835 in app data (earlier intermediate backups also retained).
+Repo prompt copies carry the same role-specific provenance rules and executable
+JSON check. Review must derive its own run ID from its configured outgoing filename
+and check CERBERUS_ACTIVITY_RUN_ID when available. Forward stages require nonempty
+incoming reviewRun before side effects; preserve it, exact SHA, documentation paths
+and the complete plan. Own integrate/publish IDs never replace Review provenance.
+The check stages JSON and atomically publishes only after validating identity,
+required fields, documentation, unchanged forwarding contract and release-ready
+publication proof. Initial absent targets remain supported via an empty captured
+previousTargetSha string. Wrapped legacy releasePlan is normalized without loss.
+
+Verified original manual plan 120c08b5-97fd-4b22-b6f6-53283d62c926, completed Review
+53319ebd-cf12-4a49-a180-287f937ebed3 (e3ff340fd2d50b327b045c9153a233af17fde29a),
+its emitted integrate payload, subsequent Integrate/Publish evidence, documentation
+paths, ancestry and unchanged remote source/target/tags. Repaired ONLY reviewRun
+in the retained release-ready input 51a71550-cb9e-4fbf-9e67-ef9f002b33f5. Protected
+backup includes original payload, logs, hashes and recovery-audit.json. Existing
+publisher's unchanged guard passed before retry; no approval/lease guard weakened.
+
+Retried the original blocked action through refreshBlockedAutomations and
+retryBlockedAutomation in the live app, retaining its original handoff ID/context.
+Retry d45d5ec9-e725-4ade-95db-30a12ec15bab completed. Main now has exactly one release
+commit 8801c8bdc456d0d02f7f94ea2e196c0b9d2a490f after adba38df36380b5a0099f321ccc9be8967910bc3.
+Its tree 7a3187a949ce8e210a8bb75ac37f7d46d881d14a equals reviewed e3ff340's tree.
+Verified remote v0.7.6 -> release commit, cerberus/source/v0.7.6 -> e3ff340, and wip
+remains e3ff340. Original failure log remains, retry context cleared; job is enabled,
+completed and errorUnread=false. GitHub release/package workflows started; their
+completion is independent of the successful Release publish script. Inspector was
+closed afterward; the existing app/diagnostic server remain running.
+
+Validation: actual prompt-embedded checker tests passed (5 cases with invalid/null
+identity, changed contract/docs/SHA/plan, wrapped legacy plan, initial target and
+publication-proof variants); existing release publisher disposable-remote tests
+passed (13), release-tooling tests passed (3). New checker added to CI. Live prompt
+persistence read back and compared exactly; retry and remote Git objects independently
+verified. No Cerberus source commit or push requested in this turn. Mountlet's
+explicitly authorized release publication was performed by its existing automation.
+
+## Missing tracking configuration in automation prompts (2026-11-10)
+
+Latest shared-CI Review 4c38e65a-a96a-49c5-94f6-e874547d6823 reviewed
+commit e3fc706471046c056ff186537e0f83ae8de8bba5 on wip but blocked solely on
+missing branch.wip.remote/merge. Existing prompt policy required this block.
+Updated live Review, Publish, CI fix, Revise and Integrate through savePrompt and
+updated their repository prompt copies. Both absent tracking keys now allow a
+verified same-name remote ref on the project's bound canonical repository.
+Require verified fetch/push destination, unique remote selection, authenticated
+exact-ref lookup, source/checkpoint identity, downstream independent revalidation
+and full resolution evidence. Partial/conflicting configuration, unknown/absent
+remote refs, ambiguous destinations and temporary correction branches do not use
+this fallback. Existing review, integration, ancestry/race and non-force guards
+remain. No Git tracking configuration changed and no agent rerun/push requested.
+
+Protected before/after backups are in app-data config-backups/upstream-resolution-*
+and upstream-resolution-refinement-*. All five live prompt strings were read back
+and matched exactly. Removed unconditional missing-upstream block wording in
+Review/Publish and clarified verified destination terminology. Release provenance
+checks passed (5); publisher checks passed (13); git diff --check passed. These
+checks cover existing release guards, not a behavioral test of agent interpretation.
+Prior pending release-provenance changes remain uncommitted alongside this work.
+
+## Release preparation output streams (2026-11-10)
+
+The initial Release script succeeded but emit_handoff printed normal preparation
+instructions to stderr, making the log look erroneous. Normal handoff context now
+uses stdout; fail/on_error redirect their diagnostic context to stderr and retain
+nonzero status. Updated the live manual Release script via savePrompt, with exact
+read-back verification and protected config-backups/release-output-* backup.
+Updated repository release.sh and its embedded release-publish.sh snapshot; the
+live publisher's execution behavior was not changed. Added regression assertions
+that successful preparation context is on stdout and absent from stderr. All 13
+release publisher tests pass, bash syntax and git diff --check pass. Existing run
+logs remain unchanged; no release rerun was needed or performed.
+
+## 1100 paginated conversation resume identity (2026-11-11)
+
+1100 agent thread 01a11ae6-2f6a-79d1-9465-cf345e4bf293 correctly belongs to
+/home/eh930/project/management/1100. prepare_history_bases incorrectly passed a
+history_base.thread_id (a paginated segment storage ID) to validate_rollout as the
+logical session ID. VS Code preserves the original conversation ID in metadata
+across these segments, causing a misleading repository-mismatch error. Validate
+base segments against the current segment's logical conversation ID instead;
+validate current metadata too, retaining canonical repository and identity guards.
+No history, index, credentials or conversation IDs were modified. Read-only check
+of the actual three-segment lineage confirms consistent repository and logical ID.
+Regression test covers storage-ID difference and rejects wrong conversation or
+repository. Six agent_sessions tests pass; git diff --check passes. Native change
+requires rebuild/restart; live diagnostic process was not stopped or replaced.
+
+## Standard window settings and editable automation workspace (2026-11-16)
+
+Live X11 properties show KDE already supplies Cerberus with a normal native window
+frame: _NET_WM_WINDOW_TYPE_NORMAL, _NET_FRAME_EXTENTS 0,0,28,0, no GTK client-side
+frame extents. The title bar belongs to the WM frame, which client-area-only
+capture tools omit. No custom HTML titlebar was present. Explicitly retain native
+decorations, resizing and taskbar presence in tauri.conf.json; no KDE rules changed.
+
+Added Automation settings -> Configure workflows: editable JSON proposal, worker
+validation, create/update/delete overview and atomic list Apply with optimistic
+concurrency guard; active-run replacements are blocked. Existing runtime state,
+CI/email monitoring timestamps and account routes are preserved; unchanged jobs
+retain pending condition/CI events. Unknown fields, duplicate IDs, invalid types,
+condition sets, handoff/branch syntax, manual inputs, runtimes, project/account
+references and stale revisions are rejected. Configuration errors do not disable
+rules. Apply starts no manual execution; enabled rules resume normal polling,
+including eligible pending contexts. Per-project account routing is not exported.
+
+Native async commands use spawn_blocking for an app-data automation-config/
+workspace: current.json, editable workflows.json, catalog.json, schema.json,
+README.md, handoffs.md and up to 20 previous snapshots under backups/. Writes use
+same-directory atomic temporary files. External draft edits are preserved on
+refresh. Files are explicit review snapshots, not an automatic execution path or
+continuous mirror; active settings remain in existing storage. Credentials and
+logs are excluded; user-authored prompts/scripts remain sensitive user data.
+The guide explains versions, stable IDs, full-list deletion, scopes, AND/OR,
+handoffs/flags, runtime variables and an example for low-capability agents.
+
+Optional in-app Draft with AI uses connected provider profiles, chosen context
+project and account-scoped Codex model choices, with quota notice and owned-draft
+stop handling. It runs analysis only and validates returned JSON without applying.
+Users can instead copy instructions/open the folder for local agents, or paste a
+proposal from any external service. No new generic provider endpoint is installed.
+Schema/guide are embedded in native binary and exported with the workspace.
+
+Validation: production build passed (dropdown/style checks, TypeScript, Vite;
+existing bundle/dynamic-import advisories remain). Pure configuration regression
+checks pass; added to CI. WebKit configuration UI passes explicit Apply, disabled
+creation, concurrent-edit rejection, real worker validation, dropdown/layout checks
+at 100/140/150% zoom; existing full saved-prompts WebKit regression also passes.
+Native library suite passed: 228 passed, 5 ignored (233 total); focused workspace
+suite 4/4 passed after final embedded-document change. Rustfmt on new Rust module
+and git diff --check pass. No paid inference, real workflow replacement, push or
+commit performed. Existing native diagnostic app/server are not restarted; native
+commands and explicit window flags require rebuild/restart. Earlier uncommitted
+release/prompt/session fixes remain present and are not discarded.
+
+## Checkpoint integration (2026-11-21)
+
+The workflow validator returns copies from its worker, so list replacement now
+treats a workflow as unchanged by comparing its exported definition. Unchanged
+workflows keep pending condition and CI events. Removed workflows also drop
+their saved CI deduplication keys, matching single-workflow deletion. The
+WebKit workflow-configuration fixture is included in `scripts/check-webkit-ci.sh`
+with the other desktop UI checks and sets `--ui-zoom` while zooming, so the
+shared dialog height limit applies at 140% and 150%. Automation settings documentation names
+Configure workflows alongside retention and the default script runtime.

@@ -81,6 +81,8 @@ class ReleasePublisher(unittest.TestCase):
         result = self.run_release(approved=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('AWAITING_RELEASE_PREPARATION', result.stdout)
+        self.assertIn('Release preparation/publication context.', result.stdout)
+        self.assertNotIn('Release preparation/publication context.', result.stderr)
         self.assertEqual(self.refs(), before)
         plan = json.loads(self.handoff.read_text())['releasePlan']
         self.assertEqual(plan['tag'], 'v1.2.4')

@@ -185,7 +185,7 @@ that a remote provider will keep a disconnected request alive.
 
 ## Automation settings and saved-run cleanup
 
-The top-right gear opens Automation settings; handoff retention is one setting.
+The top-right gear opens Automation settings. Handoff retention, the default script runtime, and Configure workflows are in that dialog.
 Active and blocked rows summarize project, branch/commit or handoff, status,
 and time, using one line when space allows. Dismiss hides a blocked row persistently
 while retaining its log and conversation retry. Delete on a blocked row or in the
@@ -332,3 +332,16 @@ the intent; verified plans and release flags propagate through corrections. Both
 normal and recovery paths use this chain. Only Publish emits `release-ready`
 after confirming the exact reviewed development commit. See the templates for
 handoff names, required flags and approval fields.
+
+
+## Workflow files and AI configuration
+
+Automation settings includes **Configure workflows** for managing the whole list.
+Open the local workspace in an editor, ask a connected agent to draft changes
+(account quota applies), or paste a JSON proposal from another AI service. The
+workspace contains current/proposed configuration, project/account references,
+a JSON Schema and agent instructions. Validate, inspect changes and Apply; file
+edits alone never execute. Stale proposals and active-run replacements are blocked.
+Workflows whose exported definition is unchanged keep their pending events.
+Prompts and scripts may contain private text, so inspect before sharing externally.
+See [workflow configuration](automation-config.md) for fields, revisions and examples.
