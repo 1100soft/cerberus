@@ -485,6 +485,11 @@ fn publish_handoff(repository_id:String,name:String,run_id:String,payload:Option
 fn has_pending_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<bool,String>{handoffs::has_pending_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
 #[tauri::command]
 fn claim_handoff(repository_id:String,name:String,variables:Option<Vec<String>>,state:State<AppState>)->Result<Option<handoffs::Claim>,String>{handoffs::claim_matching(&state.db.repository_path(&repository_id)?,&name,&variables.unwrap_or_default())}
+#[tauri::command]
+async fn fork_handoff_claim(repository_id:String,name:String,id:String,state:State<'_,AppState>)->Result<handoffs::Claim,String>{
+    let db=state.db.clone();
+    tauri::async_runtime::spawn_blocking(move||handoffs::fork_claim(&db.repository_path(&repository_id)?,&name,&id)).await.map_err(|error|error.to_string())?
+}
 fn retention_hours(state:&AppState)->u64{std::fs::read_to_string(state.data_dir.join("handoff-retention-hours")).ok().and_then(|text|text.trim().parse::<u64>().ok()).filter(|hours|(1..=8760).contains(hours)).unwrap_or(24)}
 #[tauri::command]
 fn handoff_settings(state:State<AppState>)->serde_json::Value{serde_json::json!({"retentionHours":retention_hours(&state)})}
@@ -1368,7 +1373,7 @@ pub fn run() {
             save_handoff_settings,
             list_matching_handoffs,
             claim_selected_handoff,
-            claim_handoff,
+            claim_handoff, fork_handoff_claim,
             retry_handoff,
             handoff_retained,
             finish_handoff,

@@ -345,3 +345,15 @@ edits alone never execute. Stale proposals and active-run replacements are block
 Workflows whose exported definition is unchanged keep their pending events.
 Prompts and scripts may contain private text, so inspect before sharing externally.
 See [workflow configuration](automation-config.md) for fields, revisions and examples.
+
+Email triggers can match an exact recipient address, case insensitively. Cerberus
+checks To, Cc, Delivered-To and X-Original-To headers when present. An empty
+filter accepts all recipients. These headers are routing hints, not proof of
+delivery or sender identity.
+
+When automatic rules can respond to the same event in a project, edit either
+rule and confirm **Trigger priority**. Priority 1 is highest. Tied matching
+rules can run together. The available ranks stay consecutive when you move a
+rule. Unresolved overlaps pause affected automatic rules. Manual runs remain
+available. Handoffs are compared by name and at dispatch each rule must satisfy
+its own condition set and required flags.

@@ -1,10 +1,11 @@
+import {triggerConflict,validEmailRecipient} from './emailPrecedence';
 import type {SavedPrompt,Trigger} from './savedPrompts';
 import type {AgentProfile} from './agentChats';
 import {inputDefinitionsError,type AutomationInput} from './automationInputs';
 import {runtimeError,type ScriptRuntime} from './scriptRuntime';
 export type WorkflowDocument={schemaVersion:1;revision:string;automations:Record<string,unknown>[]};
 export type WorkflowWorkspace={path:string;current:WorkflowDocument;draft:string;guide:string;schema:unknown};
-const fields=['id','title','kind','provider','prompt','enabled','repositoryIds','includeFutureRepositories','runtimeTarget','conditions','conditionSets','minutes','debounceSeconds','changeThreshold','commitBranch','commitAllExcept','handoffName','handoffVariables','emitsHandoffs','model','reasoningEffort','mode','scriptRuntime','manualInputs','requiresMailbox','feedbackPath','feedbackFolder','inboxBatch','handoffOnly','gitAction'] as const;
+const fields=['emailRecipient','emailPriority','id','title','kind','provider','prompt','enabled','repositoryIds','includeFutureRepositories','runtimeTarget','conditions','conditionSets','minutes','debounceSeconds','changeThreshold','commitBranch','commitAllExcept','handoffName','handoffVariables','emitsHandoffs','model','reasoningEffort','mode','scriptRuntime','manualInputs','requiresMailbox','feedbackPath','feedbackFolder','inboxBatch','handoffOnly','gitAction'] as const;
 function canonical(value:unknown):string{return JSON.stringify(value,(_key,item)=>object(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);}
 const triggers=new Set(['feedback','manual','interval','afterIdle','fileChange','changeCount','commit','ciPass','ciFail','handoff','idleTime','push','pullRequest']);
 const exclusive=new Set(['commit','ciPass','ciFail','feedback']);
@@ -21,7 +22,7 @@ export function parseWorkflowProposal(text:string,current:WorkflowDocument,jobs:
  if(Object.keys(doc).some(k=>!['schemaVersion','revision','automations','$schema'].includes(k)))throw Error('Unknown document field. Use schema.json.');
  if(doc.revision!==current.revision)throw Error('Configuration changed since this proposal was exported. Merge your edits into the latest current.json revision, then reload.');
  if(canonical(exportAutomationDefinitions(jobs))!==canonical(current.automations))throw Error('Configuration changed in the app. Reload before applying.');
- const ids=new Set<string>();return doc.automations.map((row,index)=>{
+ const ids=new Set<string>();const next=doc.automations.map((row,index)=>{
  const fail=(message:string):never=>{throw Error(`Automation ${index+1}: ${message}`);};
  if(!object(row))return fail('expected an object.');
  for(const key of Object.keys(row))if(![...fields,'accountId'].includes(key as typeof fields[number]))fail(`unknown field ${key}.`);
@@ -39,6 +40,8 @@ export function parseWorkflowProposal(text:string,current:WorkflowDocument,jobs:
  if(!Array.isArray(sets)||!sets.length||!sets.every(set=>Array.isArray(set)&&set.length&&set.every(t=>typeof t==='string'&&triggers.has(t))&&new Set(set).size===set.length&&!(set.includes('manual')&&set.length>1)&&set.filter(t=>exclusive.has(t)).length<=1))fail('invalid condition sets; use AND inside each set and OR between sets. Manual must stand alone.');
  for(const key of ['minutes','debounceSeconds','changeThreshold'])if(row[key]!==undefined&&(typeof row[key]!=='number'||!Number.isFinite(row[key])||(row[key] as number)<(key==='minutes'?1:0)))fail(`${key} must be a valid positive number (zero allowed for debounce/threshold).`);
  for(const key of ['commitBranch','handoffName','model','reasoningEffort','feedbackFolder'])if(row[key]!==undefined&&typeof row[key]!=='string')fail(`${key} must be text.`);
+ if(row.emailRecipient!==undefined&&(typeof row.emailRecipient!=='string'||!validEmailRecipient(row.emailRecipient)))fail('invalid emailRecipient.');
+ if(row.emailPriority!==undefined&&(!Number.isSafeInteger(row.emailPriority)||Number(row.emailPriority)<1))fail('emailPriority must be a positive integer.');
  if(row.mode!==undefined&&!['analyze','edit'].includes(String(row.mode)))fail('mode must be analyze or edit.');
  if(row.gitAction!==undefined&&!['fetch','pull','push','stage','unstage','commit'].includes(String(row.gitAction)))fail('unsupported gitAction.');
  if(row.kind==='git'&&!row.gitAction)fail('gitAction is required for Git actions.');
@@ -57,5 +60,7 @@ export function parseWorkflowProposal(text:string,current:WorkflowDocument,jobs:
  // Runtime state and per-project account assignments are never accepted from files.
  return {...runtime,...definition,id:row.id,title:row.title,prompt:row.prompt,enabled:row.enabled,kind:row.kind,provider:row.provider,conditions:(sets as Trigger[][])[0],conditionSets:sets,trigger:(sets as Trigger[][])[0][0],repositoryId:(row.repositoryIds as string[])[0]||'',repositoryIds:row.repositoryIds,threadId:'',target:'new',editor:existing?.editor||'vscode',minutes:row.minutes??60,nextAt:existing?.nextAt??Date.now(),profile,route:accountId===undefined||accountId===existing?.profile?.id?existing?.route:'profile',accountsByRepository:existing?.provider===row.provider&&(accountId===undefined||accountId===existing?.profile?.id)?existing?.accountsByRepository:undefined,lastAt:existing?.lastAt,lastResult:existing?.lastResult,errorUnread:existing?.errorUnread,state:existing?.state} as SavedPrompt;
  });
+ if(next.some(job=>triggerConflict(job,next)))throw Error('Confirm priorities for overlapping automations.');
+ return next;
 }
 export function workflowDiff(before:SavedPrompt[],after:SavedPrompt[]){const b=new Map(exportAutomationDefinitions(before).map(x=>[x.id,canonical(x)]));const a=new Map(exportAutomationDefinitions(after).map(x=>[x.id,canonical(x)]));return {added:after.filter(x=>!b.has(x.id)),changed:after.filter(x=>b.has(x.id)&&b.get(x.id)!==a.get(x.id)),removed:before.filter(x=>!a.has(x.id))};}

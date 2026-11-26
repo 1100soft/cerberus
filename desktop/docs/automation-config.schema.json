@@ -274,6 +274,13 @@
                 }
               }
             }
+          },
+          "emailRecipient": {
+            "type": "string"
+          },
+          "emailPriority": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "anyOf": [

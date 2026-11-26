@@ -104,3 +104,9 @@ project ID from catalog.json; retain the surrounding document's revision):
   "conditions": ["manual"]
 }
 ```
+
+Email triggers accept an optional `emailRecipient` address. The
+`emailPriority` configuration field stores the trigger rank for all automatic
+rules. Supply a positive integer for each overlapping rule. The lowest matching
+rank wins and equal ranks allow multiple rules to run. The editor compacts ranks
+to a consecutive sequence beginning at 1.
