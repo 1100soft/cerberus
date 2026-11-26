@@ -1,4 +1,4 @@
-import {emailConflict,matchesRecipient} from './emailPrecedence';
+import {triggerCompetitors,triggerConflict,matchesRecipient} from './emailPrecedence';
 import {coalescedRefresh} from './coalescedRefresh';
 import {resolveFeedbackFolder,mailboxScopeKey} from './feedbackFolders';
 import {feedback,mailKey,mailReference,type MailRef} from './feedback';
@@ -143,11 +143,12 @@ const commitChecks=new Map<string,Promise<void>>();
 const pendingCommits=new Map<string,{branch:string;sha:string}[]>();
 const pendingCi=new Map<string,{jobId:string;repositoryId:string;run:GithubCiRun}>();
 type ConditionEvent={feedback?:MailRef;at:number;branch?:string;sha?:string;ciRun?:GithubCiRun};
-const pendingConditionEvents=new Map<string,{jobId:string;repositoryId:string;setIndex:number;events:Partial<Record<Trigger,ConditionEvent>>}>();
+type PendingConditions={jobId:string;repositoryId:string;setIndex:number;events:Partial<Record<Trigger,ConditionEvent>>};
+const pendingConditionEvents=new Map<string,PendingConditions>();
 const githubEventKey='gitcerberus.automationGithubEvents.v1';
 const githubEventSeen:Record<string,string[]>=(()=>{try{return JSON.parse(localStorage.getItem(githubEventKey)||'{}');}catch{return {};}})();
 let checkingGithubEvents=false;
-function composite(job:SavedPrompt){const conditions=automationConditions(job);return conditions.includes('feedback')||!!job.conditionSets?.length||!!job.conditions?.length&&(conditions.length>1||conditions.some(condition=>condition==='fileChange'||condition==='changeCount'||condition==='idleTime'||condition==='push'||condition==='pullRequest'));}
+function composite(job:SavedPrompt){const conditions=automationConditions(job);return conditions.includes('feedback')||conditions.includes('handoff')||triggerCompetitors(job,jobs).length>0||!!job.conditionSets?.length||!!job.conditions?.length&&(conditions.length>1||conditions.some(condition=>condition==='fileChange'||condition==='changeCount'||condition==='idleTime'||condition==='push'||condition==='pullRequest'));}
 function scopedTo(job:SavedPrompt,repositoryId:string){return job.includeFutureRepositories?watchedRepositoryIds.has(repositoryId)||!inTauri():(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]).includes(repositoryId);}
 export function recordConditionEvent(repositoryId:string,condition:Trigger,at=Date.now(),details:Omit<ConditionEvent,'at'>={}){
   for(const job of jobs){
@@ -213,9 +214,9 @@ export function savePrompt(job:SavedPrompt, priorities:Record<string,number>={})
  const next=(jobs.some(item=>item.id===job.id)?jobs.map(item=>item.id===job.id?job:item):[...jobs,job])
    .map(item=>Object.hasOwn(priorities,item.id)?{...item,emailPriority:priorities[item.id]}:item);
  const saved=next.find(item=>item.id===job.id)!;
- if(saved.enabled&&emailConflict(saved,next))throw Error('Set distinct priorities for overlapping email automations.');
+ if(saved.enabled&&triggerConflict(saved,next))throw Error('Confirm priorities for overlapping automations.');
  publish(next);
- for(const [key,pending] of pendingConditionEvents)if(pending.jobId===job.id||pending.events.feedback&&Object.hasOwn(priorities,pending.jobId))pendingConditionEvents.delete(key);
+ for(const [key,pending] of pendingConditionEvents)if(pending.jobId===job.id||Object.hasOwn(priorities,pending.jobId))pendingConditionEvents.delete(key);
  if(job.enabled&&automationConditions(job).includes('feedback'))queueMicrotask(()=>void pollFeedback());
 }
 export function replaceAutomationConfiguration(next:SavedPrompt[],expected:string){
@@ -278,7 +279,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
   const originalMail=retry?.feedback||feedbackInput;
   const mail=originalMail?mailReference(originalMail):undefined;
   const job=retry?.job||jobs.find(item=>item.id===id);if(!job||job.handoffOnly){if(incoming)await releaseIncomingHandoff(incoming);return;}
-  if(!manual&&(!job.enabled||mail&&emailConflict(job,jobs))){if(incoming)await releaseIncomingHandoff(incoming);return;}
+  if(!manual&&(!job.enabled||triggerConflict(job,jobs))){if(incoming)await releaseIncomingHandoff(incoming);return;}
   if(!runtimeRepositoryId&&!manual){
     const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
     if(!targets.length)return;
@@ -475,7 +476,8 @@ async function tick(now=Date.now()){
       pendingCi.delete(key);
       void runSavedPrompt(job.id,false,pending.repositoryId,undefined,pending.run);
     }
-    for(const job of jobs.filter(item=>item.enabled&&composite(item))){
+    const ready: {job:SavedPrompt;pending:PendingConditions;conditions:Trigger[];handoffId?:string}[]=[];
+    for(const job of jobs.filter(item=>item.enabled&&composite(item)&&!triggerConflict(item,jobs))){
       const conditions=automationConditions(job);
       if(conditions.includes('handoff')&&validHandoffName(job.handoffName||'')){
         const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
@@ -494,7 +496,7 @@ async function tick(now=Date.now()){
         if(pending.jobId!==job.id)continue;
         if(!await scheduledMailboxEligible(job,pending.repositoryId))continue;
         const conditions=automationConditionSets(job)[pending.setIndex];
-        if(!conditions||conditions.includes('manual')||conditions.includes('feedback')&&emailConflict(job,jobs))continue;
+        if(!conditions||conditions.includes('manual')||conditions.includes('feedback')&&triggerConflict(job,jobs))continue;
         const latest=Math.max(...Object.values(pending.events).map(event=>event?.at||0));
         if(conditions.includes('idleTime')&&(!pending.events.idleTime||now-latest<Math.max(1,job.debounceSeconds||300)*1000))continue;
         if(conditions.some(condition=>condition!=='handoff'&&!pending.events[condition]))continue;
@@ -505,33 +507,58 @@ async function tick(now=Date.now()){
         const pushSha=pending.events.push?.sha,ciSha=(pending.events.ciPass||pending.events.ciFail)?.sha;
         if(pushSha&&ciSha&&pushSha!==ciSha)continue;
         if(job.kind!=='notification'&&job.kind!=='prompt'&&await repositoryAgentBusy(pending.repositoryId))continue;
-        let claim:HandoffClaim|undefined;
+        let handoffId:string|undefined;
         if(conditions.includes('handoff')){
-          try{const found=await api.claimHandoff(pending.repositoryId,job.handoffName||'',job.handoffVariables);if(!found)continue;claim={...found,name:job.handoffName||'',repositoryId:pending.repositoryId};}
-          catch(error){console.warn('Could not claim handoff:',error);continue;}
+          try{handoffId=(await api.listMatchingHandoffs(pending.repositoryId,job.handoffName||'',job.handoffVariables)).find(item=>!item.retained)?.id;}
+          catch(error){console.warn('Could not inspect handoff:',error);continue;}
+          if(!handoffId)continue;
         }
-        const event=Object.values(pending.events).find(item=>item?.ciRun)?.ciRun;
+        ready.push({job,pending,conditions,handoffId});
+        break;
+      }
+    }
+    const sharesEvent=(a:typeof ready[number],b:typeof ready[number])=>{
+      if(a.pending.repositoryId!==b.pending.repositoryId||!triggerCompetitors(a.job,[b.job]).length)return false;
+      if(a.handoffId&&b.handoffId&&a.handoffId===b.handoffId&&a.job.handoffName===b.job.handoffName)return true;
+      return a.conditions.some(condition=>{
+        if(condition==='handoff'||condition==='idleTime'&&!b.conditions.every(c=>c==='idleTime'))return false;
+        const x=a.pending.events[condition],y=b.pending.events[condition];
+        return !!x&&!!y&&(x.feedback&&y.feedback?mailKey(x.feedback)===mailKey(y.feedback):x.ciRun&&y.ciRun?x.ciRun.id===y.ciRun.id:x.sha&&y.sha?x.sha===y.sha&&x.branch===y.branch:x.at===y.at);
+      });
+    };
+    const claimed=new Map<string,HandoffClaim>();
+    const dispatch:(()=>void)[]=[];
+    for(const candidate of ready){
+      const {job,pending,conditions,handoffId}=candidate;
+      if(!jobs.some(current=>current.id===job.id&&current.enabled&&!triggerConflict(current,jobs)))continue;
+      const event=Object.values(pending.events).find(item=>item?.ciRun)?.ciRun;
+      if(ready.some(other=>sharesEvent(candidate,other)&&(other.job.emailPriority??1)<(job.emailPriority??1))){
+        const mail=pending.events.feedback?.feedback;
+        if(mail)try{await feedback.request(pending.repositoryId,{action:'ack',message:mail,subscription:job.id,since:job.feedbackSince});}
+        catch(error){console.warn('Could not acknowledge lower priority email:',error);continue;}
+        if(event)try{markCiHandled(job.id,pending.repositoryId,event);}catch(error){console.warn('Could not record lower priority CI run:',error);continue;}
+        for(const [key,item] of pendingConditionEvents)if(item===pending)pendingConditionEvents.delete(key);
+        continue;
+      }
+      let claim:HandoffClaim|undefined;
+      if(handoffId){
+        const name=job.handoffName||'';
+        const key=JSON.stringify([pending.repositoryId,name,handoffId]);
+        try{
+          const original=claimed.get(key);
+          const found=original?await api.forkHandoffClaim(pending.repositoryId,name,original.id):
+            await api.claimSelectedHandoff(pending.repositoryId,name,handoffId,job.handoffVariables);
+          claim={...found,name,repositoryId:pending.repositoryId,retained:!!original};
+          if(!original)claimed.set(key,claim);
+        }catch(error){console.warn('Could not claim handoff:',error);continue;}
+      }
         for(const [pendingKey,item] of pendingConditionEvents)if(item.jobId===job.id&&item.repositoryId===pending.repositoryId)pendingConditionEvents.delete(pendingKey);
         if(conditions.includes('changeCount')){try{const summary=await api.repositoryChangeSummary(pending.repositoryId);lastTriggeredCounts.set(`${job.id}:${pending.repositoryId}`,{head:summary.head,count:summary.changedLines});}catch{/* Retry from the last known count on the next change. */}}
         if(event)try{markCiHandled(job.id,pending.repositoryId,event);}catch(error){console.warn('Could not save handled CI run:',error);if(claim)await api.releaseHandoff(claim.repositoryId,claim.name,claim.id);continue;}
         const commitEvent=conditions.includes('commit')?pending.events.commit:undefined;
-        void runSavedPrompt(job.id,false,pending.repositoryId,claim,event,commitEvent?.branch||Object.values(pending.events).find(item=>item?.branch)?.branch,commitEvent?.sha||Object.values(pending.events).find(item=>item?.sha)?.sha,conditions,undefined,undefined,pending.events.feedback?.feedback);
-        break;
-      }
+        dispatch.push(()=>void runSavedPrompt(job.id,false,pending.repositoryId,claim,event,commitEvent?.branch||Object.values(pending.events).find(item=>item?.branch)?.branch,commitEvent?.sha||Object.values(pending.events).find(item=>item?.sha)?.sha,conditions,undefined,undefined,pending.events.feedback?.feedback));
     }
-    let futureHandoffTargets:string[]|undefined;
-    for(const job of jobs.filter(item=>item.enabled&&!composite(item)&&item.trigger==='handoff'&&validHandoffName(item.handoffName||''))){
-      if(job.includeFutureRepositories&&!futureHandoffTargets)futureHandoffTargets=inTauri()?[...watchedRepositoryIds]:(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id);
-      const targets=job.includeFutureRepositories?futureHandoffTargets!:(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
-      for(const repositoryId of targets){
-        if(!repositoryId||!await scheduledMailboxEligible(job,repositoryId))continue;
-        try{if(!await api.hasPendingHandoff(repositoryId,job.handoffName!,job.handoffVariables))continue;}catch(error){console.warn('Could not inspect handoff:',error);continue;}
-        if(job.kind!=='notification'&&job.kind!=='prompt'&&await repositoryAgentBusy(repositoryId))continue;
-        let claim:{id:string;path:string}|null;
-        try{claim=await api.claimHandoff(repositoryId,job.handoffName!,job.handoffVariables);}catch(error){console.warn('Could not claim handoff:',error);continue;}
-        if(claim){void runSavedPrompt(job.id,false,repositoryId,{...claim,name:job.handoffName!,repositoryId});}
-      }
-    }
+    for(const start of dispatch)start();
     for(const job of [...jobs]){
       if(!job.enabled||composite(job)||job.trigger==='manual')continue;
       if(job.trigger==='interval'){
@@ -766,7 +793,7 @@ export async function pollFeedback(){
   try{
     const repositories=await api.repositories();
     const trees=new Map<string,ReturnType<typeof feedback.setup>>();
-    for(const job of jobs.filter(job=>job.enabled&&!emailConflict(job,jobs)&&automationConditions(job).includes('feedback'))){
+    for(const job of jobs.filter(job=>job.enabled&&!triggerConflict(job,jobs)&&automationConditions(job).includes('feedback'))){
       for(const repo of repositories.filter(repo=>repo.localPath&&scopedTo(job,repo.id))){
         const key=`${job.id}:${repo.id}`,health=feedbackErrors.get(key);
         if(health&&Date.now()<health.next)continue;
@@ -794,14 +821,14 @@ export async function pollFeedback(){
           if(!latestConfig?.enabled||mailboxScopeKey(latestConfig)!==mailboxScopeKey(config))continue;
           const current=jobs.find(item=>item.id===job.id);
           if(!current?.enabled||current.feedbackSince!==job.feedbackSince||current.feedbackFolder!==job.feedbackFolder||JSON.stringify(current.feedbackPath)!==JSON.stringify(job.feedbackPath)||!scopedTo(current,repo.id))continue;
-          if(current.emailRecipient!==job.emailRecipient||current.emailPriority!==job.emailPriority||emailConflict(current,jobs))continue;
+          if(current.emailRecipient!==job.emailRecipient||current.emailPriority!==job.emailPriority||triggerConflict(current,jobs))continue;
           let mail:MailRef|undefined;
           for(const {recipients=[],...reference} of events){
             // An older native build omits recipient metadata. Wait for the updated backend.
             if(!events[0]?.recipients&&jobs.some(rule=>rule.enabled&&rule.emailRecipient&&scopedTo(rule,repo.id)))break;
-            const candidates=jobs.filter(rule=>rule.enabled&&!emailConflict(rule,jobs)&&scopedTo(rule,repo.id)&&automationConditions(rule).includes('feedback')&&matchesRecipient(rule,recipients));
+            const candidates=jobs.filter(rule=>rule.enabled&&!triggerConflict(rule,jobs)&&scopedTo(rule,repo.id)&&automationConditions(rule).includes('feedback')&&matchesRecipient(rule,recipients));
             const higher=candidates.some(rule=>{
-              if((rule.emailPriority??Infinity)>=(current.emailPriority??Infinity))return false;
+              if((rule.emailPriority??Infinity)>=(current.emailPriority??Infinity)||!automationConditionSets(rule).some(set=>set.length===1&&set[0]==='feedback'))return false;
               const otherFolder=rule.feedbackPath===undefined?rule.feedbackFolder||config.inbox:
                 resolveFeedbackFolder(config,folderNodes,rule);
               return otherFolder===folder;

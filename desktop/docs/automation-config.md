@@ -105,7 +105,8 @@ project ID from catalog.json; retain the surrounding document's revision):
 }
 ```
 
-Email triggers accept an optional `emailRecipient` address and a positive
-integer `emailPriority`. Use distinct priorities for rules that can receive
-the same message. The lowest matching enabled priority wins. Multiple
-recipient addresses on a message can make two different filters overlap.
+Email triggers accept an optional `emailRecipient` address. The
+`emailPriority` configuration field stores the trigger rank for all automatic
+rules. Supply a positive integer for each overlapping rule. The lowest matching
+rank wins and equal ranks allow multiple rules to run. The editor compacts ranks
+to a consecutive sequence beginning at 1.

@@ -143,6 +143,10 @@ export const api = {
     if(!inTauri()){const item=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>!item.claimed&&!variables.length);if(!item)return null;item.claimed=true;return {id:item.id,path:item.path};}
     return invoke('claim_handoff',{repositoryId,name,variables});
   },
+  async forkHandoffClaim(repositoryId:string,name:string,id:string):Promise<{id:string;path:string}>{
+    if(!inTauri()){const original=demoHandoffs.get(`${repositoryId}:${name}`)?.find(item=>item.id===id);if(!original)throw Error('Handoff claim is unavailable.');return {id:crypto.randomUUID(),path:original.path};}
+    return invoke('fork_handoff_claim',{repositoryId,name,id});
+  },
   async handoffSettings():Promise<{retentionHours:number}>{if(!inTauri())return {retentionHours:Number(localStorage.getItem('gitcerberus.handoffRetentionHours'))||24};return invoke('handoff_settings');},
   async saveHandoffSettings(retentionHours:number):Promise<void>{if(!Number.isInteger(retentionHours)||retentionHours<1||retentionHours>8760)throw new Error('Retention must be 1–8760 hours.');if(!inTauri()){localStorage.setItem('gitcerberus.handoffRetentionHours',String(retentionHours));return;}return invoke('save_handoff_settings',{retentionHours});},
   async listMatchingHandoffs(repositoryId:string,name:string,variables:string[]=[]):Promise<{id:string;preview:string;retained:boolean}[]>{

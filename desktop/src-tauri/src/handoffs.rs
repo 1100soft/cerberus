@@ -190,6 +190,17 @@ pub fn claim_selected(repository:&Path,name:&str,id:&str,variables:&[String])->R
     }
     Err("The selected handoff is no longer available or its flags do not match.".into())
 }
+/// Give a tied subscriber an independent claim of the already claimed payload.
+pub fn fork_claim(repository: &Path, name: &str, original: &str) -> Result<Claim, String> {
+    let source = file(repository, "claimed", name, original)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let destination = file(repository, "claimed", name, &id)?;
+    let mut temp = tempfile::NamedTempFile::new_in(destination.parent().ok_or("Invalid handoff directory")?).map_err(|error| error.to_string())?;
+    let mut input = fs::File::open(source).map_err(|error| error.to_string())?;
+    std::io::copy(&mut input, &mut temp).map_err(|error| error.to_string())?;
+    temp.persist_noclobber(&destination).map_err(|error| error.to_string())?;
+    Ok(Claim { id, path: destination.to_string_lossy().into_owned() })
+}
 pub fn finish(repository:&Path,name:&str,id:&str)->Result<(),String>{
     let source=file(repository,"claimed",name,id)?;
     if !source.exists(){return Ok(());}
@@ -217,6 +228,19 @@ pub fn release(repository:&Path,name:&str,id:&str)->Result<(),String>{
 }
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]
+    fn tied_subscribers_have_independent_claims() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(Command::new("git").args(["init", "-q"]).current_dir(root.path()).status().unwrap().success());
+        fs::write(output_path(root.path(),"review","original").unwrap(),"payload").unwrap();
+        publish(root.path(),"review","original").unwrap();
+        let first = claim(root.path(),"review").unwrap().unwrap();
+        let second = fork_claim(root.path(),"review",&first.id).unwrap();
+        finish(root.path(),"review",&first.id).unwrap();
+        assert_eq!(fs::read_to_string(&second.path).unwrap(),"payload");
+        assert!(claim(root.path(),"review").unwrap().is_none());
+        finish(root.path(),"review",&second.id).unwrap();
+    }
     #[test]fn validates_names_and_claims_each_emission_once(){
         let root=tempfile::tempdir().unwrap();assert!(Command::new("git").args(["init","-q"]).current_dir(root.path()).status().unwrap().success());
         for bad in ["","../review","review/x",".hidden","a b"]{assert!(!valid_name(bad));}

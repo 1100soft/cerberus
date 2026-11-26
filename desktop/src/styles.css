@@ -1389,3 +1389,17 @@ input[type="number"] { text-align: right; }
 .automation-config-ai {margin:1rem 0;}
 .automation-config-ai summary {cursor:pointer;}
 .automation-config-ai textarea {height:6rem;min-height:6rem;white-space:pre-wrap;}
+
+.automation-priorities { display: grid; gap: 12px; min-width: 0; padding: 12px; }
+.automation-priorities p { margin: 0; }
+.automation-email-recipient { display: grid; gap: 8px; width: 100%; }
+.automation-email-recipient input { width: 100%; min-width: 0; box-sizing: border-box; }
+
+.automation-priority-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(9ch + 44px);
+  align-items: center;
+  gap: 14px;
+}
+.automation-priority-row > span { overflow-wrap: anywhere; }
+.automation-priority-row .app-select > svg { flex-shrink: 0; }

@@ -1,4 +1,4 @@
-import {emailConflict,validEmailRecipient} from './emailPrecedence';
+import {triggerConflict,validEmailRecipient} from './emailPrecedence';
 import type {SavedPrompt,Trigger} from './savedPrompts';
 import type {AgentProfile} from './agentChats';
 import {inputDefinitionsError,type AutomationInput} from './automationInputs';
@@ -60,7 +60,7 @@ export function parseWorkflowProposal(text:string,current:WorkflowDocument,jobs:
  // Runtime state and per-project account assignments are never accepted from files.
  return {...runtime,...definition,id:row.id,title:row.title,prompt:row.prompt,enabled:row.enabled,kind:row.kind,provider:row.provider,conditions:(sets as Trigger[][])[0],conditionSets:sets,trigger:(sets as Trigger[][])[0][0],repositoryId:(row.repositoryIds as string[])[0]||'',repositoryIds:row.repositoryIds,threadId:'',target:'new',editor:existing?.editor||'vscode',minutes:row.minutes??60,nextAt:existing?.nextAt??Date.now(),profile,route:accountId===undefined||accountId===existing?.profile?.id?existing?.route:'profile',accountsByRepository:existing?.provider===row.provider&&(accountId===undefined||accountId===existing?.profile?.id)?existing?.accountsByRepository:undefined,lastAt:existing?.lastAt,lastResult:existing?.lastResult,errorUnread:existing?.errorUnread,state:existing?.state} as SavedPrompt;
  });
- if(next.some(job=>emailConflict(job,next)))throw Error('Set distinct priorities for overlapping email automations.');
+ if(next.some(job=>triggerConflict(job,next)))throw Error('Confirm priorities for overlapping automations.');
  return next;
 }
 export function workflowDiff(before:SavedPrompt[],after:SavedPrompt[]){const b=new Map(exportAutomationDefinitions(before).map(x=>[x.id,canonical(x)]));const a=new Map(exportAutomationDefinitions(after).map(x=>[x.id,canonical(x)]));return {added:after.filter(x=>!b.has(x.id)),changed:after.filter(x=>b.has(x.id)&&b.get(x.id)!==a.get(x.id)),removed:before.filter(x=>!a.has(x.id))};}

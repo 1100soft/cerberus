@@ -29,13 +29,17 @@ try{
  bad(a=>a.push(a[0]));bad(a=>a[0].kind='unknown');bad(a=>a[0].enabled='false');bad(a=>a[0].repositoryIds=['unknown']);bad(a=>a[0].conditions=['manual','commit']);bad(a=>a[0].conditionSets=[['commit','ciFail']]);bad(a=>a[0].conditions=[]);bad(a=>a[0].minutes=0);bad(a=>a[0].accountsByRepository={});bad(a=>a[0].accountId='unknown');bad(a=>a[0].scriptRuntime={preset:'custom'});bad(a=>a[0].manualInputs=[{name:'x',type:'choice',options:['a','a']}]);bad(a=>a[0].handoffName='../escape');bad(a=>a[0].emitsHandoffs=['../escape']);bad(a=>a[0].commitBranch='bad..branch');
  assert.throws(()=>parse(JSON.stringify({...current,revision:'old'}),current,[job],['p1'],[profile]),/revision|changed/);
  assert.throws(()=>parse(JSON.stringify(current),current,[{...job,title:'concurrent change'}],['p1'],[profile]),/changed/);
- const {emailConflict,matchesRecipient}=await import(pathToFileURL(join(dir,'emailPrecedence.mjs')));
+ const {triggerConflict,matchesRecipient,compactPriorities}=await import(pathToFileURL(join(dir,'emailPrecedence.mjs')));
  const expense={...job,id:'expense',conditions:['feedback'],emailRecipient:'expense@example.test'};
  const guard={...expense,id:'guard',emailRecipient:undefined};
- assert(emailConflict(expense,[expense,guard]));
- assert(!emailConflict({...expense,feedbackPath:['INBOX']},[{...guard,feedbackPath:['Other']}]));
- assert(!emailConflict({...expense,emailPriority:1},[{...guard,emailPriority:2}]));
+ assert(triggerConflict(expense,[expense,guard]));
+ assert(!triggerConflict({...expense,feedbackPath:['INBOX']},[{...guard,feedbackPath:['Other']}]));
+ assert(!triggerConflict({...expense,emailPriority:1},[{...guard,emailPriority:2}]));
  assert(matchesRecipient(expense,['EXPENSE@example.test']));
  assert(!matchesRecipient(expense,['example@example.test']));
+ assert(!triggerConflict({...expense,emailPriority:1},[{...guard,emailPriority:1}]));
+ assert.deepEqual(compactPriorities([1,1,3]),[1,1,2]);
+ assert(triggerConflict({...expense,conditions:['handoff'],handoffName:'ready'},[{...guard,conditions:['handoff','idleTime'],handoffName:'ready'}]));
+ assert(!triggerConflict({...expense,conditions:['handoff'],handoffName:'ready'},[{...guard,conditions:['handoff'],handoffName:'other'}]));
  console.log('Workflow configuration checks passed: create/update/delete, runtime/account preservation, malformed proposals, stale revisions and concurrent edits.');
 }finally{await rm(dir,{recursive:true,force:true});}

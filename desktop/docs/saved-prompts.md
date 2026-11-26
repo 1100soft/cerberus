@@ -351,9 +351,9 @@ checks To, Cc, Delivered-To and X-Original-To headers when present. An empty
 filter accepts all recipients. These headers are routing hints, not proof of
 delivery or sender identity.
 
-When email rules share a project and folder, edit either rule to set the
-priority order. Enter distinct positive numbers. The lowest number among
-matching enabled rules wins. Unresolved overlaps pause automatic email intake
-on the affected rules until you save an order. This does not change their
-enabled settings or affect explicit manual runs. Separate handoff triggers
-continue to use their own conditions.
+When automatic rules can respond to the same event in a project, edit either
+rule and confirm **Trigger priority**. Priority 1 is highest. Tied matching
+rules can run together. The available ranks stay consecutive when you move a
+rule. Unresolved overlaps pause affected automatic rules. Manual runs remain
+available. Handoffs are compared by name and at dispatch each rule must satisfy
+its own condition set and required flags.
