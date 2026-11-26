@@ -12,6 +12,7 @@ use lettre::{
 use mailparse::MailHeaderMap;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs,
     net::{TcpStream, ToSocketAddrs},
     path::Path,
@@ -534,6 +535,7 @@ pub fn save(root: &Path, id: &str, mut c: Config, secret: Option<String>) -> Res
         .write_all(&serde_json::to_vec_pretty(&c).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     output.persist(p).map_err(|e| e.to_string())?;
+    release_sessions(id);
     Ok(())
 }
 fn tls_failure(stage: &str, detail: &str) -> String {
@@ -757,17 +759,38 @@ fn parse(
         attachments,
     })
 }
+fn search_uids(s: &mut Session, query: &str) -> Result<Vec<u32>, String> {
+    Ok(s
+        .uid_search(query)
+        .map_err(|_| "Cannot list mailbox messages")?
+        .into_iter()
+        .collect())
+}
+/// First page searches the newest UID window, then the whole mailbox only when
+/// that window does not hold a full page. Older pages keep an explicit upper bound.
+fn recent_message_uids(s: &mut Session, uid_next: Option<u32>) -> Result<Vec<u32>, String> {
+    let Some(highest) = uid_next.and_then(|next| next.checked_sub(1)).filter(|uid| *uid >= 1) else {
+        return search_uids(s, "UNDELETED");
+    };
+    let start = highest.saturating_sub(399).max(1);
+    let ids = search_uids(s, &format!("UID {start}:{highest} UNDELETED"))?;
+    if ids.len() >= 50 || start == 1 {
+        return Ok(ids);
+    }
+    search_uids(s, "UNDELETED")
+}
 fn list(s: &mut Session, name: &str, before: Option<u32>) -> Result<Vec<Mail>, String> {
     let mailbox=select_mailbox(s,name,None)?;
     let validity=mailbox.uid_validity.ok_or("Server omitted UIDVALIDITY")?;
     if mailbox.exists==0||before.is_some_and(|uid|uid<=1){return Ok(vec![]);}
-    let query=before.map(|uid|format!("UID 1:{} UNDELETED",uid-1)).unwrap_or_else(||"UNDELETED".into());
-    let mut ids: Vec<_> = s
-        .uid_search(query)
-        .map_err(|_| "Cannot list mailbox messages")?
-        .into_iter()
-        .filter(|id| before.is_none_or(|before| *id < before))
-        .collect();
+    let mut ids: Vec<_> = if let Some(uid) = before {
+        search_uids(s, &format!("UID 1:{} UNDELETED", uid - 1))?
+    } else {
+        recent_message_uids(s, mailbox.uid_next)?
+    }
+    .into_iter()
+    .filter(|id| before.is_none_or(|before| *id < before))
+    .collect();
     ids.sort_unstable();
     ids.reverse();
     ids.truncate(50);
@@ -1841,6 +1864,68 @@ fn move_folder_emails(
 fn read_only_request(action:&str)->bool {
     matches!(action,"folderTree"|"folderNames"|"folders"|"folderStatus"|"list"|"read"|"status"|"test")
 }
+fn overview_request(action:&str)->bool {
+    matches!(action,"folderTree"|"folderNames"|"folders"|"folderStatus"|"status"|"test")
+}
+struct LiveSession {fingerprint:String,session:Session}
+struct MailboxSessions {slots:[Mutex<Option<LiveSession>>;2]}
+fn session_pools()->&'static Mutex<HashMap<String,Arc<MailboxSessions>>> {
+    static POOLS:OnceLock<Mutex<HashMap<String,Arc<MailboxSessions>>>>=OnceLock::new();
+    POOLS.get_or_init(||Mutex::new(HashMap::new()))
+}
+fn connection_fingerprint(c:&Config)->String {
+    format!("{}\n{}\n{}\n{}\n{}",c.imap_host,c.imap_port,c.imap_security,c.username,c.certificate_path)
+}
+fn sessions_for(id:&str)->Result<Arc<MailboxSessions>,String> {
+    let mut pools=session_pools().lock().map_err(|_|"Mailbox is busy")?;
+    Ok(pools.entry(id.to_owned()).or_insert_with(||Arc::new(MailboxSessions{slots:[Mutex::new(None),Mutex::new(None)]})).clone())
+}
+fn release_sessions(id:&str) {
+    let pool=session_pools().lock().ok().and_then(|mut pools|pools.remove(id));
+    if let Some(pool)=pool {
+        for slot in &pool.slots {
+            if let Ok(mut guard)=slot.lock() {
+                if let Some(mut live)=guard.take() {let _=live.session.logout();}
+            }
+        }
+    }
+}
+fn lock_session_slot(pool:&MailboxSessions,prefer:usize)->Result<std::sync::MutexGuard<'_,Option<LiveSession>>,String> {
+    let other=1-prefer;
+    if let Ok(guard)=pool.slots[prefer].try_lock() {return Ok(guard);}
+    if let Ok(guard)=pool.slots[other].try_lock() {return Ok(guard);}
+    pool.slots[prefer].lock().map_err(|_|"Mailbox is busy".into())
+}
+fn prepare_slot(slot:&mut Option<LiveSession>,fingerprint:&str,c:&Config,secret:&str)->Result<(),String> {
+    if slot.as_ref().is_some_and(|live|live.fingerprint!=fingerprint) {
+        if let Some(mut live)=slot.take() {let _=live.session.logout();}
+    }
+    if slot.is_none() {*slot=Some(LiveSession{fingerprint:fingerprint.into(),session:connect(c,secret)?});}
+    Ok(())
+}
+/// Interactive reads and folder scans use separate logged-in connections.
+/// A dropped connection is discarded. Read-only work retries once; mutations do not.
+fn run_on_session<T>(id:&str,c:&Config,secret:&str,overview:bool,mut op:impl FnMut(&mut Session)->Result<T,String>)->Result<T,(String,bool)> {
+    let pool=sessions_for(id).map_err(|error|(error,false))?;
+    let mut guard=lock_session_slot(&pool,usize::from(overview)).map_err(|error|(error,false))?;
+    if let Err(error)=prepare_slot(&mut guard,&connection_fingerprint(c),c,secret) {return Err((error,true));}
+    let session=&mut guard.as_mut().unwrap().session;
+    match op(session) {
+        Ok(value)=>Ok(value),
+        Err(error)=>{
+            let dead=session.noop().is_err();
+            if dead {let _=session.logout();*guard=None;}
+            Err((error,dead))
+        }
+    }
+}
+fn with_session<T>(id:&str,c:&Config,secret:&str,overview:bool,read_only:bool,mut op:impl FnMut(&mut Session)->Result<T,String>)->Result<T,String> {
+    match run_on_session(id,c,secret,overview,&mut op) {
+        Ok(value)=>Ok(value),
+        Err((_,true)) if read_only=>run_on_session(id,c,secret,overview,&mut op).map_err(|(error,_)|error),
+        Err((error,_))=>Err(error),
+    }
+}
 pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json::Value, String> {
     let read_only=read_only_request(&request.action);
     let lock = mailbox_lock(root, id)?;
@@ -1867,99 +1952,60 @@ pub fn execute(root: &Path, id: &str, mut request: Request) -> Result<serde_json
         .open(lock_path)
         .map_err(|_| "Cannot open mailbox operation lock")?;
     if !read_only {process_lock.lock().map_err(|_| "Cannot lock mailbox operations")?;}
-    let mut s = connect(&c, &secret)?;
-    if c.auto_special_folders == Some(true) && matches!(request.action.as_str(), "draft" | "send") {
-        let nodes = folder_tree(&mut s)?;
-        resolve_special_folders(&mut c, &nodes);
-        validate(&c)?;
-    }
-    let result = (|| {
-        let name = if request.folder.is_empty() {
-            "INBOX"
-        } else {
-            request.folder.as_str()
-        };
+    let account=c.clone();
+    let overview=overview_request(&request.action);
+    with_session(id,&account,&secret,overview,read_only,|s|{
+        if c.auto_special_folders==Some(true)&&matches!(request.action.as_str(),"draft"|"send") {
+            let nodes=folder_tree(s)?;
+            resolve_special_folders(&mut c,&nodes);
+            validate(&c)?;
+        }
+        let name=if request.folder.is_empty(){"INBOX"}else{request.folder.as_str()};
         match request.action.as_str() {
-            "test" | "status" => mailbox_status(&mut s, "INBOX"),
-            "folders" => Ok(serde_json::json!(available_folders(&mut s)?)),
-            "folderNames" => Ok(serde_json::json!(folder_tree(&mut s)?)),
-            "folderTree" => Ok(serde_json::json!(folder_overview(&mut s, &c)?)),
-            "folderStatus" => folder_content_status(&mut s,name),
-            "moveAll" => move_folder_emails(&mut s,&c,name,&request.destination,request.message.as_ref().ok_or("Inspect this folder before moving its emails")?),
-            "flag" => update_flag(
-                &mut s,
-                request.message.as_ref().ok_or("Choose an email")?,
-                &request.flag,
-            ),
+            "test" | "status" => mailbox_status(s, "INBOX"),
+            "folders" => Ok(serde_json::json!(available_folders(s)?)),
+            "folderNames" => Ok(serde_json::json!(folder_tree(s)?)),
+            "folderTree" => Ok(serde_json::json!(folder_overview(s, &c)?)),
+            "folderStatus" => folder_content_status(s,name),
+            "moveAll" => move_folder_emails(s,&c,name,&request.destination,request.message.as_ref().ok_or("Inspect this folder before moving its emails")?),
+            "flag" => update_flag(s,request.message.as_ref().ok_or("Choose an email")?,&request.flag),
             "create" => {
                 folder(&request.destination)?;
-                ensure(&mut s, &request.destination)?;
+                ensure(s, &request.destination)?;
                 Ok(serde_json::json!({"created":true}))
             }
-            "list" => Ok(serde_json::to_value(list(
-                &mut s,
-                name,
-                request.message.as_ref().map(|r| r.uid),
-            )?)
-            .unwrap()),
-            "read" => Ok(serde_json::to_value(read(
-                &mut s,
-                request.message.as_ref().ok_or("Choose an email")?,
-            )?)
-            .unwrap()),
+            "list" => Ok(serde_json::to_value(list(s,name,request.message.as_ref().map(|r| r.uid))?).unwrap()),
+            "read" => Ok(serde_json::to_value(read(s,request.message.as_ref().ok_or("Choose an email")?,)?).unwrap()),
             "move" => {
                 let r = request.message.as_ref().ok_or("Choose an email")?;
-                message_header(&mut s, r)?;
+                message_header(s, r)?;
                 folder(&request.destination)?;
                 if request.destination == c.metadata || r.folder == c.metadata {
                     return Err("Automation receipt folder is reserved".into());
                 }
-                ensure(&mut s, &request.destination)?;
-                select(&mut s, &r.folder, Some(r.validity))?;
+                ensure(s, &request.destination)?;
+                select(s, &r.folder, Some(r.validity))?;
                 s.uid_mv(r.uid.to_string(),wire_folder(&request.destination)).map_err(|_|"Moving failed. The server must support UID MOVE; no copy/delete fallback is used to avoid deleting other messages.")?;
                 Ok(serde_json::json!({"moved":true}))
             }
-            "draft" | "send" => reply(
-                &mut s,
-                &c,
-                &secret,
-                &request,
-                request.message.as_ref().ok_or("Choose an email")?,
-            ),
+            "draft" | "send" => reply(s,&c,&secret,&request,request.message.as_ref().ok_or("Choose an email")?),
             "note" => {
                 let r = request.message.as_ref().ok_or("Choose an email")?;
-                let source = message_header(&mut s, r)?;
-                let note = email(
-                    &c,
-                    &c.address,
-                    &format!("Internal note: {}", source.subject),
-                    &request.text,
-                    Some(r),
-                    None,
-                )?;
-                ensure(&mut s, &c.notes)?;
-                s.append_with_flags(
-                    wire_folder(&c.notes),
-                    note.formatted(),
-                    &[imap::types::Flag::Seen],
-                )
-                .map_err(|_| "Could not append internal note")?;
+                let source = message_header(s, r)?;
+                let note = email(&c,&c.address,&format!("Internal note: {}", source.subject),&request.text,Some(r),None)?;
+                ensure(s, &c.notes)?;
+                s.append_with_flags(wire_folder(&c.notes),note.formatted(),&[imap::types::Flag::Seen]).map_err(|_| "Could not append internal note")?;
                 Ok(serde_json::json!({"saved":"note","sent":false}))
             }
-            "poll" => poll(&mut s, &c, &request, name),
+            "poll" => poll(s, &c, &request, name),
             "ack" => {
                 let r = request.message.as_ref().ok_or("Choose an email")?;
-                acknowledge(&mut s, &c, &request, r)?;
+                acknowledge(s, &c, &request, r)?;
                 Ok(serde_json::json!({"acknowledged":true}))
             }
-            _ => Err(
-                "Unknown email operation. Use folders, folderTree, create, list, read, flag, move, draft, send or note."
-                    .into(),
-            ),
+            _ => Err("Unknown email operation. Use folders, folderTree, create, list, read, flag, move, draft, send or note.".into()),
         }
-    })();
-    let _ = s.logout();
-    result
+    })
 }
 /// Read tools consume JSON from stdin. Neither credentials nor email content are
 /// written by this bridge; agent providers may retain their own tool transcripts.
@@ -3279,6 +3325,25 @@ mod wire_tests {
         .unwrap_err();
         assert!(error.contains("outcome is uncertain"));
         s.logout().unwrap();
+        assert!(server.join().unwrap().is_empty());
+    }
+    #[test]
+    fn repeated_lists_reuse_one_logged_in_session() {
+        let fields="MESSAGE-ID SUBJECT FROM REPLY-TO DATE IN-REPLY-TO REFERENCES CONTENT-TYPE CONTENT-TRANSFER-ENCODING";
+        let response=fetched(true,HEADER).replace("BODY[HEADER]",&format!("BODY[HEADER.FIELDS ({fields})]"));
+        let page=vec![
+            ("SELECT",SELECT.into()),
+            ("UID SEARCH UID 1:2 UNDELETED","* SEARCH 2\r\n".into()),
+            ("BODY.PEEK[HEADER.FIELDS",response),
+        ];
+        let mut steps=page.clone();
+        steps.extend(page);
+        let (root,port,server)=fixture(steps);
+        let c=config_for(root.path(),port);
+        let id=format!("reuse-{port}");
+        with_session(&id,&c,"fixture-secret",false,true,|s|list(s,"INBOX",None).map(|_|())).unwrap();
+        with_session(&id,&c,"fixture-secret",false,true,|s|list(s,"INBOX",None).map(|_|())).unwrap();
+        release_sessions(&id);
         assert!(server.join().unwrap().is_empty());
     }
 }

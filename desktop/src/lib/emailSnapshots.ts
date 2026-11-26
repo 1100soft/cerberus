@@ -9,5 +9,4 @@ export function invalidateEmailSnapshots(project?:string){
  const matches=(key:string)=>!project||JSON.parse(key)[0]===project;
  emailLists.clear(matches);emailMessages.clear(matches);
 }
-window.addEventListener('feedback-config-changed',event=>{const id=(event as CustomEvent<string>).detail;emailFolders.clear(key=>!id||key===id);});
-for(const name of ['feedback-config-changed','feedback-mail-changed'])window.addEventListener(name,event=>invalidateEmailSnapshots((event as CustomEvent<string>).detail));
+window.addEventListener('feedback-config-changed',event=>{const id=(event as CustomEvent<string>).detail;emailFolders.clear(key=>!id||key===id);invalidateEmailSnapshots(id);});
