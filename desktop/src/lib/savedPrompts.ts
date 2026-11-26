@@ -1,3 +1,4 @@
+import {emailConflict,matchesRecipient} from './emailPrecedence';
 import {coalescedRefresh} from './coalescedRefresh';
 import {resolveFeedbackFolder,mailboxScopeKey} from './feedbackFolders';
 import {feedback,mailKey,mailReference,type MailRef} from './feedback';
@@ -26,7 +27,7 @@ import { currentExternalIdentities, refreshExternalIdentities } from './external
 export type Trigger = 'feedback' | 'manual' | 'interval' | 'afterIdle' | 'fileChange' | 'changeCount' | 'commit' | 'ciPass' | 'ciFail' | 'handoff' | 'idleTime' | 'push' | 'pullRequest';
 export type GitAction = 'fetch'|'pull'|'push'|'stage'|'unstage'|'commit';
 export type AutomationDraft = {repositoryId:string;provider?:Provider;threadId?:string;prompt:string;title?:string};
-export type SavedPrompt = {inboxBatch?:boolean;requiresMailbox?:boolean;feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
+export type SavedPrompt = {emailRecipient?:string;emailPriority?:number;inboxBatch?:boolean;requiresMailbox?:boolean;feedbackPath?:string[];feedbackFolder?:string;feedbackSince?:number;scriptRuntime?:ScriptRuntime;manualInputs?:AutomationInput[];id:string;repositoryId:string;repositoryIds?:string[];repositoryLabels?:Record<string,string>;includeFutureRepositories?:boolean;runtimeTarget?:boolean;accountsByRepository?:Record<string,{profile:AgentProfile;route:'profile'|'identity'}>;provider:Provider;threadId:string;title:string;prompt:string;trigger:Trigger;conditions?:Trigger[];conditionSets?:Trigger[][];model?:string;reasoningEffort?:string;minutes:number;debounceSeconds?:number;changeThreshold?:number;commitBranch?:string;commitAllExcept?:boolean;ciSince?:number;handoffName?:string;handoffVariables?:string[];emitsHandoffs?:string[];enabled:boolean;nextAt:number;editor:'cursor'|'vscode';kind?:'prompt'|'git'|'shell'|'notification';gitAction?:GitAction;target?:'existing'|'new';profile?:AgentProfile;route?:'profile'|'identity';mode?:'analyze'|'edit';handoffOnly?:boolean;lastAt?:number;lastResult?:string;errorUnread?:boolean;state?:'running'|'accepted'|'completed'|'error';sawWorking?:boolean};
 export type AutomationRetry={feedback?:MailRef;inputValues?:AutomationInputValues;job:SavedPrompt;manual?:boolean;incoming?:HandoffClaim;ciRun?:GithubCiRun;eventBranch?:string;eventSha?:string;matchedConditions?:Trigger[];chatId?:string};
 const blockedRuns=new Map<string,AutomationLog>();
 const retryingRuns=new Set<string>();
@@ -208,7 +209,15 @@ function publish(next:SavedPrompt[]){const serialized=JSON.stringify(next);local
 export function subscribeSavedPrompts(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function savedPrompts(){return jobs;}
 export function disableAutomation(id:string){change(id,{enabled:false});}
-export function savePrompt(job:SavedPrompt){for(const key of pendingConditionEvents.keys())if(key.startsWith(`${job.id}:`))pendingConditionEvents.delete(key);publish(jobs.some(item=>item.id===job.id)?jobs.map(item=>item.id===job.id?job:item):[...jobs,job]);if(job.enabled&&automationConditions(job).includes('feedback'))queueMicrotask(()=>void pollFeedback());}
+export function savePrompt(job:SavedPrompt, priorities:Record<string,number>={}){
+ const next=(jobs.some(item=>item.id===job.id)?jobs.map(item=>item.id===job.id?job:item):[...jobs,job])
+   .map(item=>Object.hasOwn(priorities,item.id)?{...item,emailPriority:priorities[item.id]}:item);
+ const saved=next.find(item=>item.id===job.id)!;
+ if(saved.enabled&&emailConflict(saved,next))throw Error('Set distinct priorities for overlapping email automations.');
+ publish(next);
+ for(const [key,pending] of pendingConditionEvents)if(pending.jobId===job.id||pending.events.feedback&&Object.hasOwn(priorities,pending.jobId))pendingConditionEvents.delete(key);
+ if(job.enabled&&automationConditions(job).includes('feedback'))queueMicrotask(()=>void pollFeedback());
+}
 export function replaceAutomationConfiguration(next:SavedPrompt[],expected:string){
  if(currentAutomationRuns().length)throw Error('Wait for active automation runs to finish before applying configuration.');
  if(JSON.stringify(jobs)!==expected)throw Error('Automation configuration changed. Reload and validate again.');
@@ -269,7 +278,7 @@ export async function runSavedPrompt(id:string,manual=false,runtimeRepositoryId?
   const originalMail=retry?.feedback||feedbackInput;
   const mail=originalMail?mailReference(originalMail):undefined;
   const job=retry?.job||jobs.find(item=>item.id===id);if(!job||job.handoffOnly){if(incoming)await releaseIncomingHandoff(incoming);return;}
-  if(!manual&&!job.enabled){if(incoming)await releaseIncomingHandoff(incoming);return;}
+  if(!manual&&(!job.enabled||mail&&emailConflict(job,jobs))){if(incoming)await releaseIncomingHandoff(incoming);return;}
   if(!runtimeRepositoryId&&!manual){
     const targets=job.includeFutureRepositories?(await api.repositories()).filter(repo=>repo.localPresent!==false&&repo.localPath).map(repo=>repo.id):(job.repositoryIds?.length?job.repositoryIds:[job.repositoryId]);
     if(!targets.length)return;
@@ -485,7 +494,7 @@ async function tick(now=Date.now()){
         if(pending.jobId!==job.id)continue;
         if(!await scheduledMailboxEligible(job,pending.repositoryId))continue;
         const conditions=automationConditionSets(job)[pending.setIndex];
-        if(!conditions||conditions.includes('manual'))continue;
+        if(!conditions||conditions.includes('manual')||conditions.includes('feedback')&&emailConflict(job,jobs))continue;
         const latest=Math.max(...Object.values(pending.events).map(event=>event?.at||0));
         if(conditions.includes('idleTime')&&(!pending.events.idleTime||now-latest<Math.max(1,job.debounceSeconds||300)*1000))continue;
         if(conditions.some(condition=>condition!=='handoff'&&!pending.events[condition]))continue;
@@ -757,7 +766,7 @@ export async function pollFeedback(){
   try{
     const repositories=await api.repositories();
     const trees=new Map<string,ReturnType<typeof feedback.setup>>();
-    for(const job of jobs.filter(job=>job.enabled&&automationConditions(job).includes('feedback'))){
+    for(const job of jobs.filter(job=>job.enabled&&!emailConflict(job,jobs)&&automationConditions(job).includes('feedback'))){
       for(const repo of repositories.filter(repo=>repo.localPath&&scopedTo(job,repo.id))){
         const key=`${job.id}:${repo.id}`,health=feedbackErrors.get(key);
         if(health&&Date.now()<health.next)continue;
@@ -769,21 +778,38 @@ export async function pollFeedback(){
           // Legacy/imported jobs start observing now; never replay the mailbox accidentally.
           if(!job.feedbackSince){change(job.id,{feedbackSince:Date.now()});continue;}
           let folder=job.feedbackFolder||config.inbox;
-          if(job.feedbackPath!==undefined){
+          let folderNodes:Awaited<ReturnType<typeof feedback.setup>>=[];
+          if(job.feedbackPath!==undefined||jobs.some(rule=>rule.enabled&&rule.feedbackPath!==undefined&&scopedTo(rule,repo.id)&&automationConditions(rule).includes('feedback'))){
             const treeKey=JSON.stringify([repo.id,mailboxScopeKey(config)]);
             if(!trees.has(treeKey))trees.set(treeKey,feedback.setup(repo.id,config));
-            const resolved=resolveFeedbackFolder(config,await trees.get(treeKey)!,job);
+            folderNodes=await trees.get(treeKey)!;
+            const resolved=job.feedbackPath===undefined?folder:resolveFeedbackFolder(config,folderNodes,job);
             if(!resolved){feedbackErrors.delete(key);continue;} // Partial folder coverage is intentional.
             folder=resolved;
           }
           watchedFolder=folder;
-          const events=await feedback.request<MailRef[]>(repo.id,{action:'poll',folder,subscription:job.id,since:job.feedbackSince});
+          const events=await feedback.request<(MailRef & {recipients?:string[]})[]>(repo.id,{action:'poll',folder,subscription:job.id,since:job.feedbackSince});
           feedbackErrors.delete(key);
           const latestConfig=await feedback.config(repo.id);
           if(!latestConfig?.enabled||mailboxScopeKey(latestConfig)!==mailboxScopeKey(config))continue;
           const current=jobs.find(item=>item.id===job.id);
           if(!current?.enabled||current.feedbackSince!==job.feedbackSince||current.feedbackFolder!==job.feedbackFolder||JSON.stringify(current.feedbackPath)!==JSON.stringify(job.feedbackPath)||!scopedTo(current,repo.id))continue;
-          const mail=events[0];if(!mail)continue;
+          if(current.emailRecipient!==job.emailRecipient||current.emailPriority!==job.emailPriority||emailConflict(current,jobs))continue;
+          let mail:MailRef|undefined;
+          for(const {recipients=[],...reference} of events){
+            // An older native build omits recipient metadata. Wait for the updated backend.
+            if(!events[0]?.recipients&&jobs.some(rule=>rule.enabled&&rule.emailRecipient&&scopedTo(rule,repo.id)))break;
+            const candidates=jobs.filter(rule=>rule.enabled&&!emailConflict(rule,jobs)&&scopedTo(rule,repo.id)&&automationConditions(rule).includes('feedback')&&matchesRecipient(rule,recipients));
+            const higher=candidates.some(rule=>{
+              if((rule.emailPriority??Infinity)>=(current.emailPriority??Infinity))return false;
+              const otherFolder=rule.feedbackPath===undefined?rule.feedbackFolder||config.inbox:
+                resolveFeedbackFolder(config,folderNodes,rule);
+              return otherFolder===folder;
+            });
+            if(matchesRecipient(current,recipients)&&!higher){mail=reference;break;}
+            await feedback.request(repo.id,{action:'ack',message:reference,subscription:job.id,since:job.feedbackSince});
+          }
+          if(!mail||!jobs.includes(current))continue;
           automationConditionSets(job).forEach((conditions,setIndex)=>{
             if(!conditions.includes('feedback'))return;
             const pendingKey=`${job.id}:${repo.id}:${setIndex}`,pending=pendingConditionEvents.get(pendingKey)||{jobId:job.id,repositoryId:repo.id,setIndex,events:{}};

@@ -1183,11 +1183,23 @@ fn poll(
             .map_err(|_| "Cannot read email arrival headers")?;
         for row in rows.iter() {
             if let Some(uid) = row.uid {
-                let message_id = row
-                    .header()
-                    .and_then(|raw| mailparse::parse_headers(raw).ok())
-                    .and_then(|(headers, _)| headers.get_first_value("Message-ID"))
-                    .unwrap_or_default();
+                let parsed = row.header().and_then(|raw| mailparse::parse_headers(raw).ok());
+                let message_id = parsed.as_ref().and_then(|(headers, _)| headers.get_first_value("Message-ID")).unwrap_or_default();
+                let mut recipients = Vec::new();
+                if let Some((headers, _)) = parsed {
+                    for field in ["To", "Cc", "Delivered-To", "X-Original-To"] {
+                        for value in headers.get_all_values(field) {
+                            if let Ok(addresses) = mailparse::addrparse(&value) {
+                                for address in addresses.iter() {
+                                    match address {
+                                        mailparse::MailAddr::Single(address) => recipients.push(address.addr.clone()),
+                                        mailparse::MailAddr::Group(group) => recipients.extend(group.addrs.iter().map(|address| address.addr.clone())),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 let reference = MailRef {
                     folder: name.into(),
                     validity,
@@ -1195,7 +1207,7 @@ fn poll(
                     message_id,
                 };
                 if !handled.contains(&URL_SAFE_NO_PAD.encode(identity(&reference))) {
-                    events.push(reference);
+                    events.push((reference, recipients));
                 }
             }
         }
@@ -1203,9 +1215,13 @@ fn poll(
             break;
         }
     }
-    events.sort_by_key(|event| event.uid);
+    events.sort_by_key(|event| event.0.uid);
     events.truncate(50);
-    Ok(serde_json::json!(events))
+    Ok(serde_json::json!(events.into_iter().map(|(reference, recipients)| {
+        let mut value = serde_json::json!(reference);
+        value["recipients"] = serde_json::json!(recipients);
+        value
+    }).collect::<Vec<_>>()))
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

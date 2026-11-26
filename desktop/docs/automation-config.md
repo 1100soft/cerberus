@@ -104,3 +104,8 @@ project ID from catalog.json; retain the surrounding document's revision):
   "conditions": ["manual"]
 }
 ```
+
+Email triggers accept an optional `emailRecipient` address and a positive
+integer `emailPriority`. Use distinct priorities for rules that can receive
+the same message. The lowest matching enabled priority wins. Multiple
+recipient addresses on a message can make two different filters overlap.

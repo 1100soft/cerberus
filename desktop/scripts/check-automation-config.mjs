@@ -6,9 +6,9 @@ import {pathToFileURL} from 'node:url';
 import assert from 'node:assert/strict';
 const dir=await mkdtemp(join(tmpdir(),'cerberus-workflow-'));
 try{
- for(const name of ['automationInputs','scriptRuntime','automationConfig']){
+ for(const name of ['automationInputs','scriptRuntime','emailPrecedence','automationConfig']){
  let source=await readFile(new URL(`../src/lib/${name}.ts`,import.meta.url),'utf8');
- source=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace(/from '\.\/(automationInputs|scriptRuntime)'/g,"from './$1.mjs'");
+ source=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText.replace(/from '\.\/(automationInputs|scriptRuntime|emailPrecedence)'/g,"from './$1.mjs'");
  await writeFile(join(dir,`${name}.mjs`),source);
  }
  const {exportAutomationDefinitions:exported,parseWorkflowProposal:parse,workflowDiff}=await import(pathToFileURL(join(dir,'automationConfig.mjs')));
@@ -29,5 +29,13 @@ try{
  bad(a=>a.push(a[0]));bad(a=>a[0].kind='unknown');bad(a=>a[0].enabled='false');bad(a=>a[0].repositoryIds=['unknown']);bad(a=>a[0].conditions=['manual','commit']);bad(a=>a[0].conditionSets=[['commit','ciFail']]);bad(a=>a[0].conditions=[]);bad(a=>a[0].minutes=0);bad(a=>a[0].accountsByRepository={});bad(a=>a[0].accountId='unknown');bad(a=>a[0].scriptRuntime={preset:'custom'});bad(a=>a[0].manualInputs=[{name:'x',type:'choice',options:['a','a']}]);bad(a=>a[0].handoffName='../escape');bad(a=>a[0].emitsHandoffs=['../escape']);bad(a=>a[0].commitBranch='bad..branch');
  assert.throws(()=>parse(JSON.stringify({...current,revision:'old'}),current,[job],['p1'],[profile]),/revision|changed/);
  assert.throws(()=>parse(JSON.stringify(current),current,[{...job,title:'concurrent change'}],['p1'],[profile]),/changed/);
+ const {emailConflict,matchesRecipient}=await import(pathToFileURL(join(dir,'emailPrecedence.mjs')));
+ const expense={...job,id:'expense',conditions:['feedback'],emailRecipient:'expense@example.test'};
+ const guard={...expense,id:'guard',emailRecipient:undefined};
+ assert(emailConflict(expense,[expense,guard]));
+ assert(!emailConflict({...expense,feedbackPath:['INBOX']},[{...guard,feedbackPath:['Other']}]));
+ assert(!emailConflict({...expense,emailPriority:1},[{...guard,emailPriority:2}]));
+ assert(matchesRecipient(expense,['EXPENSE@example.test']));
+ assert(!matchesRecipient(expense,['example@example.test']));
  console.log('Workflow configuration checks passed: create/update/delete, runtime/account preservation, malformed proposals, stale revisions and concurrent edits.');
 }finally{await rm(dir,{recursive:true,force:true});}
